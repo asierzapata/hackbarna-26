@@ -1,4 +1,5 @@
-import { T, type TLBaseShape } from "tldraw";
+import { T } from "@tldraw/validate";
+import type { TLBaseShape } from "tldraw";
 
 import type { CellValue, DatedEvent } from "../schema";
 

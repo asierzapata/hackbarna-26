@@ -21,6 +21,7 @@ import { getInstallationProfile } from "@/lib/installation-profile";
 import { type AiModelSelection } from "@/components/ui/ai-model-select";
 import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
 import { createCanvasTools } from "@/nodes/tools";
+import { useQaSource } from "@/lib/qa-source";
 
 const DEFAULT_USER = "You";
 const AGENT = "assistant";
@@ -130,6 +131,10 @@ export function ChatPanel({
   const [streamingIds, setStreamingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
+  useQaSource("chat", () => ({
+    roomId, online, entries, pendingIds: [...pendingIds], streamingIds: [...streamingIds],
+    transcript: transcript.current,
+  }));
   const models = agent.status.models?.available ?? [];
   const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
   const [roomSnapshot, setRoomSnapshot] = React.useState(() => transport.snapshot());

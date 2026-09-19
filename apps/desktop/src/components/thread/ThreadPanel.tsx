@@ -33,6 +33,7 @@ import { ThreadComposer, type ThreadComposerProps } from "./ThreadComposer";
 import { ThreadEntryRow, type ThreadRenderers } from "./ThreadEntryRow";
 import { TranscriptRun } from "./TranscriptRun";
 import { ThreadProvider, type ThreadActions } from "./thread-context";
+import { useQaSource } from "@/lib/qa-source";
 
 const filters: { value: ThreadFilter; label: string }[] = [
   { value: "everything", label: "Everything" },
@@ -93,6 +94,7 @@ export function ThreadPanel({
   const [replyTo, setReplyTo] = React.useState<
     { id: string; label: string } | undefined
   >();
+  useQaSource("threadView", () => ({ filter, channel, participants, currentUserId }));
 
   const participantMap = React.useMemo(
     () => toParticipantMap(participants),

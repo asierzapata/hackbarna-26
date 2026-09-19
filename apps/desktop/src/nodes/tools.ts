@@ -1,7 +1,6 @@
 import {
   createShapeId,
   toRichText,
-  type Editor,
   type TLArrowBinding,
   type TLArrowShape,
   type TLFrameShape,
@@ -9,13 +8,15 @@ import {
   type TLShape,
   type TLShapeId,
   type TLShapePartial,
-} from "tldraw";
+} from "@tldraw/tlschema";
+import type { Editor } from "tldraw";
 
 import { draftToShapePartial, placementByType, shapeToSummary } from "./draft";
 import {
   addNodeInput,
   arrangeInput,
   connectNodesInput,
+  focusNodesInput,
   getCanvasInput,
   groupNodesInput,
   removeNodesInput,
@@ -40,6 +41,10 @@ function intersects(a: Bounds, b: Bounds) {
   return (
     a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
   );
+}
+
+function isCollidableShape(shape: TLShape) {
+  return shape.type !== "arrow";
 }
 
 function easeInOutQuart(t: number) {
@@ -126,10 +131,12 @@ function summarizeShape(editor: Editor, shape: TLShape, full = false) {
     };
   }
   const text = editor.getShapeUtil(shape).getText(shape);
-  return {
+  const summary = {
     ...common,
+    ...(shape.type === "geo" ? { geo: (shape as TLGeoShape).props.geo } : {}),
     ...(text ? { text } : {}),
   };
+  return full ? { ...summary, props: shape.props, meta: shape.meta } : summary;
 }
 
 function getConnections(editor: Editor) {
@@ -280,11 +287,14 @@ export function createCanvasTools(editor: Editor) {
       if (parsed.at) {
         position = parsed.at;
       } else if (parsed.near) {
-        const nearBounds = editor.getShapePageBounds(
-          parsed.near.shapeId as TLShapeId,
-        );
+        const nearShapeId = parsed.near.shapeId as TLShapeId;
+        const nearShape = editor.getShape(nearShapeId);
+        if (!nearShape || !editor.getCurrentPageShapeIds().has(nearShapeId)) {
+          throw new Error(`Shape not found on current page: ${parsed.near.shapeId}`);
+        }
+        const nearBounds = editor.getShapePageBounds(nearShape);
         if (!nearBounds) {
-          throw new Error(`Shape not found: ${parsed.near.shapeId}`);
+          throw new Error(`Shape not found on current page: ${parsed.near.shapeId}`);
         }
         if (placementByType[parsed.draft.type] === "overlap") {
           position = {
@@ -299,8 +309,7 @@ export function createCanvasTools(editor: Editor) {
             h: props.h,
           };
           const overlaps = editor.getCurrentPageShapes().some((shape) => {
-            if (!isKanShape(shape) || shape.id === parsed.near?.shapeId)
-              return false;
+            if (!isCollidableShape(shape) || shape.id === parsed.near?.shapeId) return false;
             const bounds = editor.getShapePageBounds(shape);
             return bounds ? intersects(right, bounds) : false;
           });
@@ -310,7 +319,7 @@ export function createCanvasTools(editor: Editor) {
         }
       } else {
         const viewport = editor.getViewportPageBounds();
-        const count = editor.getCurrentPageShapes().filter(isKanShape).length;
+        const count = editor.getCurrentPageShapes().filter(isCollidableShape).length;
         const nudge = (count % 8) * 24;
         position = {
           x: viewport.x + viewport.w / 2 - props.w / 2 + nudge,
@@ -355,16 +364,17 @@ export function createCanvasTools(editor: Editor) {
           throw new Error(`Shape ${parsed.shapeId} is not an editable normal box`);
         }
         const patch = parsed.patch;
+        const props: Partial<TLGeoShape["props"]> = {
+          ...(patch.w !== undefined ? { w: patch.w } : {}),
+          ...(patch.h !== undefined ? { h: patch.h } : {}),
+          ...(patch.text !== undefined ? { richText: toRichText(patch.text) } : {}),
+        };
         const shapeUpdate: TLShapePartial<TLGeoShape> = {
           id: shape.id,
           type: "geo",
           ...(patch.x !== undefined ? { x: patch.x } : {}),
           ...(patch.y !== undefined ? { y: patch.y } : {}),
-          props: {
-            ...(patch.w !== undefined ? { w: patch.w } : {}),
-            ...(patch.h !== undefined ? { h: patch.h } : {}),
-            ...(patch.text !== undefined ? { richText: toRichText(patch.text) } : {}),
-          },
+          props,
         };
         editor.run(() => editor.updateShape(shapeUpdate));
         return { shapeId: shape.id };
@@ -722,6 +732,38 @@ export function createCanvasTools(editor: Editor) {
 
       editor.run(() => editor.updateShapes(updates));
       return { shapeIds: parsed.shapeIds };
+    },
+
+    focusNodes(input: unknown) {
+      const parsed = focusNodesInput.parse(input);
+      const currentPageShapeIds = editor.getCurrentPageShapeIds();
+      const shapes = parsed.shapeIds.map((id) => {
+        const shapeId = id as TLShapeId;
+        if (!currentPageShapeIds.has(shapeId)) {
+          throw new Error(`Shape not found on current page: ${id}`);
+        }
+        const shape = editor.getShape(shapeId);
+        if (!shape) throw new Error(`Shape not found on current page: ${id}`);
+        const bounds = editor.getShapePageBounds(shape);
+        if (!bounds) throw new Error(`Unable to read bounds: ${id}`);
+        return bounds;
+      });
+      const bounds = shapes.reduce(
+        (combined, current) => ({
+          x: Math.min(combined.x, current.x),
+          y: Math.min(combined.y, current.y),
+          w: Math.max(combined.x + combined.w, current.x + current.w) - Math.min(combined.x, current.x),
+          h: Math.max(combined.y + combined.h, current.y + current.h) - Math.min(combined.y, current.y),
+        }),
+        { x: shapes[0].x, y: shapes[0].y, w: shapes[0].w, h: shapes[0].h },
+      );
+      editor.zoomToBounds(bounds, {
+        animation: {
+          duration: editor.options.animationMediumMs * 5,
+          easing: easeInOutQuart,
+        },
+      });
+      return { shapeIds: parsed.shapeIds, bounds };
     },
 
     getCanvas(input: unknown = {}) {

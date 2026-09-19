@@ -22,6 +22,7 @@ export function AgentEntryCard({
   const agent = useAuthor(entry.authorId);
   const summary = entry.text.replace(/\s+/g, " ").trim();
   const { onJumpToEntry, onJumpToNode, onReply } = useThread();
+  const hasSummary = summary.length > 0;
 
   return (
     <Message align="start">
@@ -35,14 +36,27 @@ export function AgentEntryCard({
               <span aria-hidden className="size-2 shrink-0 rounded-full bg-agent" />
               <span className="font-medium">{agent.name}</span>
             </MessageHeader>
-            <p
-              className={cn(
-                "text-xs leading-relaxed wrap-break-word",
-                streaming && "shimmer"
-              )}
-            >
-              {summary}
-            </p>
+            {hasSummary ? (
+              <p
+                className={cn(
+                  "text-xs leading-relaxed wrap-break-word",
+                  streaming && "shimmer"
+                )}
+              >
+                {summary}
+              </p>
+            ) : (
+              <span
+                role="status"
+                aria-live="polite"
+                className={cn(
+                  "text-xs leading-relaxed text-muted-foreground",
+                  streaming && "shimmer"
+                )}
+              >
+                {streaming ? "Working" : "No response received"}
+              </span>
+            )}
             {entry.sources?.length ? <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">{entry.sources.map((source) => source.kind === "entry" ? <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToEntry?.(source.id)}>Source {source.id.slice(0, 8)}</Button> : <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToNode?.({ nodeId: source.id, label: source.id })}>Canvas {source.id.slice(0, 16)}</Button>)}</div> : null}
 
             <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>

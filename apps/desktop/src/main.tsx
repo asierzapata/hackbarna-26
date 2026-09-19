@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
+import { recordQaError } from "./lib/qa-errors";
+
+window.addEventListener("error", (event) => recordQaError(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => recordQaError(event.reason));
 
 const router = createRouter({ routeTree });
 

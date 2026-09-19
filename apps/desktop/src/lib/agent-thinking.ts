@@ -25,6 +25,7 @@ export function canvasThinkingTargets(
       candidates = [args.from, args.to];
       break;
     case "arrange":
+    case "focusNodes":
     case "getCanvas":
       candidates = Array.isArray(args.shapeIds) ? args.shapeIds : [];
       break;

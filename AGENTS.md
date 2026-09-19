@@ -303,3 +303,52 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   Do not drive concurrently. The script cleans up its fixture and restores fetch
   and media-query handling. Tauri's internal invoke is read-only; Vite context
   imports must retain their HMR query strings to avoid duplicate providers.
+
+## Canvas/chat regression checks
+
+- `WorkspacePanels` must give its inner canvas wrapper explicit full height;
+  panel dimensions alone do not prevent a zero-height canvas and clipped toolbar.
+  Keep both panels mounted when collapsing chat to preserve editor and draft state.
+- `addNode` supports native `geo` drafts (`geo: "rectangle"` or `"ellipse"`);
+  equal ellipse dimensions make a circle. `focusNodes` fits current-page targets
+  without changing shape records or selection and is exposed by the Rust MCP bridge.
+- `npm run test:desktop` supplies the desktop tsconfig for component-render tests.
+  Pure node helpers import runtime validation/schema utilities from `@tldraw/validate`
+  and `@tldraw/tlschema`, avoiding browser-runtime timers in Node tests.
+- With `npm run tauri:drive` running, `node scripts/canvas-chat.e2e.mjs` checks
+  canvas/toolbar visibility, resizing, chat state preservation, native shapes,
+  camera focus, and controlled streaming feedback in an isolated canvas. A connected
+  agent is required; add `--live` to also exercise the reported prompts with the
+  real provider. The script restores the original page and cleans its test canvas.
+
+## Local QA reports
+
+- The bottom-left Report bug dialog freezes diagnostic context when opened.
+  `useQaSource` registers canvas, chat, composer, thread view, and agent state;
+  closed panels retain a last snapshot marked `mounted: false`. Sources are
+  scoped to the route, not collected from credentials, storage, or environment.
+- Native `qa_save_report` writes immutable UUID JSON reports and `bugs.csv` to
+  this worktree's gitignored `qa_bugs/` in development. Packaged apps use the
+  app-local-data `qa_bugs/` directory instead. `KAN_QA_DIR` can override either
+  with an absolute path. The success dialog shows the full report path.
+- Reports include private canvas/chat text; known credentials and URL queries
+  are redacted and embedded assets omitted, but this is not a guarantee that
+  arbitrary user text is secret-free. Do not upload or commit reports.
+- `/qa-fix` uses `.devin/agents/qa-fable.md` (Fable 5.1 Medium), one foreground
+  subagent at a time. `python3 scripts/qa_queue.py list|claim|update` manages
+  `open`, `solving`, and `finished` rows, owners, and verification notes.
+  Pass `--dir /absolute/qa_bugs` before the command to use another queue.
+  Both Rust and Python share `.queue.lock` and atomic CSV replacement; never
+  hand-edit the CSV or remove a lock without checking for an active writer.
+- Checks: `npm run test:desktop`, `npm run typecheck -w @kan/desktop`,
+  `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml qa::tests`, and
+  `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p qa_queue_test.py -v`.
+- Native regression: `node scripts/qa-report.e2e.mjs` against a running driver.
+  Start on catalog/onboarding with a fresh QA queue; it refuses an existing CSV
+  and cleans only its fixture reports/canvas. An optional `KAN_QA_DIR` must match
+  the app launch environment. Keep the window visible: hidden WKWebViews freeze
+  CSS exit animations and can return stale screenshots.
+- For simultaneous worktrees, use launch-time Tauri `--config` overrides for
+  `identifier`, `build.devUrl`, and `build.beforeDevCommand` (Vite `--port`). Set
+  `TAURI_WEBDRIVER_PORT` for the app and `TAURI_WEBDRIVER_URL` for the driver.
+  Do not stop or drive somebody else's app on the default ports.

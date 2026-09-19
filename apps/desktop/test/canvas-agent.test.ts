@@ -8,14 +8,17 @@ import {
 } from "../src/lib/canvas-agent";
 import { hackathonConversation } from "../src/lib/conversation-script";
 
-test("MCP exposes the seven validated canvas tools with calendar, map, and grouping schemas", () => {
-  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addNode", "arrange", "connectNodes", "getCanvas", "groupNodes", "removeNodes", "updateNode"]);
+test("MCP exposes the eight validated canvas tools with native geo, focus, and grouping schemas", () => {
+  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "groupNodes", "removeNodes", "updateNode"]);
   const add = canvasToolDefinitions.find(({ name }) => name === "addNode")!;
   assert.match(JSON.stringify(add.inputSchema), /calendar/);
   assert.match(JSON.stringify(add.inputSchema), /map/);
+  assert.match(JSON.stringify(add.inputSchema), /geo/);
   const group = canvasToolDefinitions.find(({ name }) => name === "groupNodes")!;
   assert.match(JSON.stringify(group.inputSchema), /shapeIds/);
   assert.equal(add.inputSchema.type, "object");
+  const focus = canvasToolDefinitions.find(({ name }) => name === "focusNodes")!;
+  assert.match(JSON.stringify(focus.inputSchema), /shapeIds/);
 });
 
 test("dispatch rejects unknown tools and invalid input before any mutation", () => {
@@ -56,6 +59,23 @@ test("dispatch rejects unknown tools and invalid input before any mutation", () 
   assert.equal(calls.length, 1);
 });
 
+test("dispatch validates focusNodes before calling the canvas tool", () => {
+  const calls: unknown[] = [];
+  const tools = {
+    focusNodes: (input: unknown) => {
+      calls.push(input);
+      return { shapeIds: ["shape:focused"], bounds: { x: 0, y: 0, w: 10, h: 10 } };
+    },
+  } as Parameters<typeof executeCanvasTool>[0];
+  assert.throws(() => executeCanvasTool(tools, "focusNodes", { shapeIds: [] }));
+  assert.equal(calls.length, 0);
+  assert.deepEqual(executeCanvasTool(tools, "focusNodes", { shapeIds: ["shape:focused"] }), {
+    shapeIds: ["shape:focused"],
+    bounds: { x: 0, y: 0, w: 10, h: 10 },
+  });
+  assert.equal(calls.length, 1);
+});
+
 test("conversation triggers request calendar, map and sponsors without duplicate decision turns", () => {
   const actionable = hackathonConversation.lines.filter(shouldActOnLine);
   assert.deepEqual(
@@ -72,5 +92,7 @@ test("conversation triggers request calendar, map and sponsors without duplicate
   assert.match(prompt, /norrsken/i);
   assert.doesNotMatch(prompt, /preply/i);
   assert.match(prompt, /getCanvas/);
+  assert.match(prompt, /focusNodes/);
+  assert.match(prompt, /native tldraw geo shapes/);
   assert.match(prompt, /groupNodes/);
 });

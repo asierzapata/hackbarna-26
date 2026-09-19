@@ -15,6 +15,7 @@ import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
 import { AssistantResultSchema, buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { useQaSource } from "@/lib/qa-source";
 
 /** Providers, keyed the way the Rust side deserializes them. */
 export type Provider = "devin" | "openai";
@@ -115,6 +116,10 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const [preferences, setPreferences] = React.useState<AgentPreferences | null>(null);
   const generation = React.useRef(0);
   const [thinkingShapeIds, setThinkingShapeIds] = React.useState<string[]>([]);
+  useQaSource("agent", () => ({
+    state: status.state, provider: status.provider, model: status.models?.current,
+    message: status.message, busy, thinkingShapeIds,
+  }));
 
   // One listener for the whole app; the in-flight prompt claims it.
   const handlers = React.useRef<PromptHandlers | null>(null);

@@ -152,6 +152,34 @@ export const calendarDraft = z.object({
     .describe("Initial month; defaults to earliest event or current month"),
   sourceNote: z.string().optional().describe("Source for the calendar"),
 });
+export const geoShapeKind = z.enum([
+  "cloud",
+  "rectangle",
+  "ellipse",
+  "triangle",
+  "diamond",
+  "pentagon",
+  "hexagon",
+  "octagon",
+  "star",
+  "rhombus",
+  "rhombus-2",
+  "trapezoid",
+  "arrow-right",
+  "arrow-left",
+  "arrow-up",
+  "arrow-down",
+  "x-box",
+  "check-box",
+  "heart",
+]).describe("Native tldraw geo kind. Use rectangle for a box or ellipse for a circle.");
+export const geoDraft = z.object({
+  type: z.literal("geo"),
+  geo: geoShapeKind,
+  text: z.string().optional().describe("Text inside the native shape"),
+  w: z.number().positive().optional().describe("Width in page pixels; ellipse accepts independent width and height for ovals"),
+  h: z.number().positive().optional().describe("Height in page pixels; use the same value as w for a circle, or omit both for the default square"),
+}).describe("Exact syntax: { type: 'geo', geo: 'rectangle', text: 'Label', w: 240, h: 120 }; a circle uses { type: 'geo', geo: 'ellipse', w: 160, h: 160 }, while unequal w and h make an oval.");
 
 export const nodeDraft = z.discriminatedUnion("type", [
   markdownDraft,
@@ -162,6 +190,7 @@ export const nodeDraft = z.discriminatedUnion("type", [
   logoDraft,
   timelineDraft,
   calendarDraft,
+  geoDraft,
 ]);
 export type NodeDraft = z.infer<typeof nodeDraft>;
 export type NodeType = NodeDraft["type"];
@@ -261,6 +290,9 @@ export const arrangeInput = z.object({
   layout: z.enum(["grid", "row", "column"]),
   gap: z.number().optional(),
 });
+export const focusNodesInput = z.object({
+  shapeIds: z.array(z.string()).min(1).describe("Existing shape IDs to fit in the camera; every ID must be on the current page"),
+});
 export const groupNodesInput = z.object({
   shapeIds: z.array(z.string()).min(2).describe("Existing canvas node IDs to place in one group"),
 });
@@ -276,6 +308,7 @@ export type UpdateNodeInput = z.infer<typeof updateNodeInput>;
 export type RemoveNodesInput = z.infer<typeof removeNodesInput>;
 export type ConnectNodesInput = z.infer<typeof connectNodesInput>;
 export type ArrangeInput = z.infer<typeof arrangeInput>;
+export type FocusNodesInput = z.infer<typeof focusNodesInput>;
 export type GroupNodesInput = z.infer<typeof groupNodesInput>;
 export type GetCanvasInput = z.infer<typeof getCanvasInput>;
 
@@ -285,6 +318,7 @@ export const toolSchemas = {
   removeNodes: removeNodesInput,
   connectNodes: connectNodesInput,
   arrange: arrangeInput,
+  focusNodes: focusNodesInput,
   groupNodes: groupNodesInput,
   getCanvas: getCanvasInput,
 };

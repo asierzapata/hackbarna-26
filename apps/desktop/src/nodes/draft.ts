@@ -1,4 +1,4 @@
-import type { TLShapeId, TLShapePartial } from "tldraw";
+import { toRichText, type TLGeoShape, type TLShapeId, type TLShapePartial } from "@tldraw/tlschema";
 
 import { initialMonth } from "./dates";
 import type { NodeDraft, NodeType, Provenance } from "./schema";
@@ -12,6 +12,7 @@ export const placementByType = {
   map: "beside",
   logo: "overlap",
   timeline: "beside",
+  geo: "beside",
   calendar: "beside",
 } as const satisfies Record<NodeType, "beside" | "overlap">;
 
@@ -33,6 +34,8 @@ export function defaultSizeFor(type: NodeType) {
       return { w: 440, h: 440 };
     case "calendar":
       return { w: 520, h: 560 };
+    case "geo":
+      return { w: 200, h: 200 };
   }
 }
 
@@ -41,7 +44,7 @@ export function draftToShapePartial(
   id: TLShapeId,
   position: { x: number; y: number },
   provenance?: Provenance,
-): TLShapePartial<KanShape> {
+): TLShapePartial<KanShape | TLGeoShape> {
   const size = defaultSizeFor(draft.type);
   const common = {
     id,
@@ -152,6 +155,20 @@ export function draftToShapePartial(
           note: draft.note ?? "",
         },
       };
+    case "geo": {
+      const w = draft.w ?? size.w;
+      const h = draft.h ?? size.h;
+      return {
+        ...common,
+        type: "geo",
+        props: {
+          geo: draft.geo,
+          w,
+          h,
+          richText: toRichText(draft.text ?? ""),
+        },
+      };
+    }
   }
 }
 
