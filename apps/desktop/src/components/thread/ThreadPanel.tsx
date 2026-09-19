@@ -148,13 +148,6 @@ export function ThreadPanel({
             </span>
           </div>
 
-          <div className="flex flex-col gap-0.5">
-            <h2 className="font-heading text-base font-bold">Thread</h2>
-            <p className="text-muted-foreground">
-              source of truth of the discussion
-            </p>
-          </div>
-
           <Tabs
             value={filter}
             onValueChange={(value) => setFilter(value as ThreadFilter)}

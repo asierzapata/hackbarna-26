@@ -4,10 +4,18 @@ import {
   defaultBindingUtils,
   defaultShapeUtils,
   DefaultStylePanel,
+  ToolbarItem,
+  TldrawUiMenuContextProvider,
+  TldrawUiPopover,
+  TldrawUiPopoverContent,
+  TldrawUiPopoverTrigger,
+  TldrawUiToolbar,
+  TldrawUiToolbarButton,
+  useEditor,
+  useValue,
   type Editor,
   type TLAssetStore,
   type TLComponents,
-  type TLUiStylePanelProps,
 } from "tldraw";
 import { useSync } from "@tldraw/sync";
 import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
@@ -30,21 +38,49 @@ const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
 const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils];
 
-function CollapsibleStylePanel(props: TLUiStylePanelProps) {
-  const [collapsed, setCollapsed] = React.useState(false);
+const primaryTools = ["select", "hand", "draw", "eraser", "arrow", "text", "note"];
+const extraTools = [
+  "rectangle", "ellipse", "triangle", "diamond", "hexagon", "oval", "rhombus", "star",
+  "cloud", "heart", "x-box", "check-box", "arrow-left", "arrow-up", "arrow-down",
+  "arrow-right", "line", "highlight", "laser", "frame",
+];
+
+function CanvasToolbar() {
+  const editor = useEditor();
+  const readonly = useValue("readonly", () => editor.getInstanceState().isReadonly, [editor]);
+  if (readonly) return null;
 
   return (
-    <div className="kan-style-panel">
-      <button
-        type="button"
-        className="kan-style-panel__toggle"
-        aria-label={collapsed ? "Expand color selector" : "Collapse color selector"}
-        aria-expanded={!collapsed}
-        onClick={() => setCollapsed((value) => !value)}
-      >
-        <span className="kan-style-panel__swatch" aria-hidden />
-      </button>
-      {collapsed ? null : <DefaultStylePanel {...props} />}
+    <div className="tlui-main-toolbar tlui-main-toolbar--horizontal">
+      <TldrawUiToolbar label="Canvas tools" className="tlui-main-toolbar__tools kan-toolbar" tooltipSide="top">
+        <TldrawUiMenuContextProvider type="toolbar" sourceId="toolbar">
+          {primaryTools.map((tool) => <ToolbarItem key={tool} tool={tool} />)}
+        </TldrawUiMenuContextProvider>
+        <TldrawUiPopover id="kan-toolbar-color">
+          <TldrawUiPopoverTrigger>
+            <TldrawUiToolbarButton type="tool" title="Color and style">
+              <span className="kan-style-panel__swatch" aria-hidden />
+            </TldrawUiToolbarButton>
+          </TldrawUiPopoverTrigger>
+          <TldrawUiPopoverContent side="top" collisionPadding={8}>
+            <DefaultStylePanel isMobile />
+          </TldrawUiPopoverContent>
+        </TldrawUiPopover>
+        <TldrawUiPopover id="kan-toolbar-more">
+          <TldrawUiPopoverTrigger>
+            <TldrawUiToolbarButton type="tool" title="More tools">
+              <span aria-hidden>•••</span>
+            </TldrawUiToolbarButton>
+          </TldrawUiPopoverTrigger>
+          <TldrawUiPopoverContent side="top" align="end" collisionPadding={8}>
+            <TldrawUiToolbar label="More canvas tools" orientation="grid" className="kan-toolbar__overflow">
+              <TldrawUiMenuContextProvider type="toolbar" sourceId="toolbar">
+                {extraTools.map((tool) => <ToolbarItem key={tool} tool={tool} />)}
+              </TldrawUiMenuContextProvider>
+            </TldrawUiToolbar>
+          </TldrawUiPopoverContent>
+        </TldrawUiPopover>
+      </TldrawUiToolbar>
     </div>
   );
 }
@@ -52,7 +88,12 @@ function CollapsibleStylePanel(props: TLUiStylePanelProps) {
 const canvasComponents = {
   PageMenu: null,
   NavigationPanel: null,
-  StylePanel: CollapsibleStylePanel,
+  MenuPanel: null,
+  MainMenu: null,
+  QuickActions: null,
+  ActionsMenu: null,
+  StylePanel: null,
+  Toolbar: CanvasToolbar,
 } satisfies TLComponents;
 
 type KanDevWindow = Window & {

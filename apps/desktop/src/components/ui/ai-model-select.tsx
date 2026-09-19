@@ -379,31 +379,50 @@ export const ModelSelectorContent = React.forwardRef<HTMLDivElement, ModelSelect
     const { open, triggerRef, contentRef, contentId, models, selectedModel, selectModel, patchSelection, editingId, setEditingId, reduceMotion, ariaLabel, setSide, selection } =
       useSelectorContext("ModelSelectorContent")
     const [mounted, setMounted] = React.useState(false)
-    const [position, setPosition] = React.useState({ top: 0, left: 0 })
+    const [position, setPosition] = React.useState({ top: 0, left: 0, maxHeight: 0 })
 
     React.useEffect(() => setMounted(true), [])
-    React.useEffect(() => setSide(sideProp), [setSide, sideProp])
     React.useLayoutEffect(() => {
-      if (!open) return
+      if (!open || !mounted) return
       const update = () => {
         const rect = triggerRef.current?.getBoundingClientRect()
-        if (!rect) return
-        setPosition({ top: sideProp === "bottom" ? rect.bottom + 8 : rect.top - 8, left: rect.left })
+        const content = contentRef.current
+        if (!rect || !content) return
+        const margin = 8
+        const above = Math.max(0, rect.top - margin * 2)
+        const below = Math.max(0, window.innerHeight - rect.bottom - margin * 2)
+        const preferredSpace = sideProp === "top" ? above : below
+        const actualSide = content.scrollHeight <= preferredSpace
+          ? sideProp
+          : above >= below ? "top" : "bottom"
+        const maxHeight = actualSide === "top" ? above : below
+        const height = Math.min(content.offsetHeight, maxHeight)
+        setSide(actualSide)
+        setPosition({
+          top: actualSide === "top" ? Math.max(margin, rect.top - margin - height) : rect.bottom + margin,
+          left: Math.max(margin, Math.min(rect.left, window.innerWidth - content.offsetWidth - margin)),
+          maxHeight,
+        })
       }
+      const observer = new ResizeObserver(update)
+      if (contentRef.current) observer.observe(contentRef.current)
+      if (triggerRef.current) observer.observe(triggerRef.current)
       update()
       window.addEventListener("resize", update)
       window.addEventListener("scroll", update, true)
       return () => {
+        observer.disconnect()
         window.removeEventListener("resize", update)
         window.removeEventListener("scroll", update, true)
       }
-    }, [open, sideProp, triggerRef])
+    }, [open, mounted, sideProp, triggerRef, contentRef, setSide])
 
     if (!mounted) return null
     return createPortal(
       <AnimatePresence>
         {open ? (
           <motion.div
+            {...props}
             {...(reduceMotion ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } } : { initial: { opacity: 0, y: 6, scale: 0.97 }, animate: { opacity: 1, y: 0, scale: 1 }, exit: { opacity: 0, y: 4, scale: 0.98 } })}
             ref={(node) => {
               contentRef.current = node
@@ -413,11 +432,10 @@ export const ModelSelectorContent = React.forwardRef<HTMLDivElement, ModelSelect
             id={contentId}
             role="listbox"
             aria-label={ariaLabel}
-            style={{ position: "fixed", top: position.top, left: position.left, transform: sideProp === "top" ? "translateY(-100%)" : undefined, zIndex: 50, ...style }}
-            className={cn("flex min-w-64 items-start gap-3 rounded-2xl border-2 border-border bg-popover p-1.5 text-popover-foreground shadow-lg", className)}
-            {...props}
+            style={{ ...style, position: "fixed", top: position.top, left: position.left, maxHeight: position.maxHeight || undefined, maxWidth: "calc(100vw - 16px)", zIndex: 50 }}
+            className={cn("flex flex-wrap items-start gap-3 overflow-y-auto rounded-2xl border-2 border-border bg-popover p-1.5 text-popover-foreground shadow-lg", className)}
           >
-            <div className="flex min-w-64 flex-col gap-0.5">
+            <div className="flex w-64 min-w-0 max-w-full flex-col gap-0.5">
               {(children ?? models.map((model) => (
                 <div key={model.id} className={cn("group flex items-center rounded-xl", model.id === selection.id && "bg-muted")}>
                   <button
