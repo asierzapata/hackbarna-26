@@ -1,8 +1,26 @@
 # Kan — agent guide
 
 Tauri 2 desktop app. React 19 + TypeScript, Vite, TanStack Router (file-based
-routes in `src/routes`), tldraw for the infinite canvas, shadcn (`base-lyra`,
-remixicon) for UI primitives.
+routes in `apps/desktop/src/routes`), tldraw for the infinite canvas, shadcn
+(`base-lyra`, remixicon) for UI primitives.
+
+## Layout
+
+npm workspaces. Every command below runs from the repo root; the root scripts
+delegate into the workspace that owns the work.
+
+```
+apps/desktop/        the Tauri app — src/, src-tauri/, index.html, vite.config.ts
+apps/room-server/    the backend
+apps/agent-runner/
+packages/protocol/   zod wire schemas, shared
+packages/nodes/      tldraw custom shape utils + server-side schema
+scripts/drive.mjs    WebDriver client, stays at the root
+```
+
+The desktop app owns its own `tsconfig.json`, `components.json` and frontend
+dependencies. `@/*` resolves relative to `apps/desktop/tsconfig.json`, so it
+kept working across the move.
 
 ## Commands
 
@@ -12,8 +30,10 @@ remixicon) for UI primitives.
 | Dev app (Tauri window) | `npm run tauri dev` |
 | Dev app + automation | `npm run tauri:drive` — adds WebDriver on :4445 |
 | Drive the running app | `node scripts/drive.mjs <cmd>` — see the `e2e` skill |
-| Typecheck | `npx tsc --noEmit` |
+| Typecheck (all) | `npm run typecheck` |
+| Typecheck (frontend only) | `npm run typecheck -w @kan/desktop` |
 | Production build | `npm run build` |
+| Room server | `npm run server` |
 
 `tauri.conf.json` points `devUrl` at `http://localhost:1420`, so the port is
 fixed — if it's taken, the dev server fails rather than picking another.
