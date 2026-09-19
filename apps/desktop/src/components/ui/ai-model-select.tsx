@@ -6,6 +6,7 @@ import { AnimatePresence, motion, useReducedMotion, type HTMLMotionProps } from 
 import { CheckIcon, ChevronDownIcon, PencilIcon } from "lucide-react"
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { selectableAgentModels } from "@/lib/agent-models"
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -219,7 +220,7 @@ function ModelLabel({ model, selection }: { model?: AiModel; selection: AiModelS
 
 export function ModelSelector({
   children,
-  models = DEFAULT_AI_MODELS,
+  models: availableModels = DEFAULT_AI_MODELS,
   value,
   defaultValue,
   onValueChange,
@@ -234,6 +235,7 @@ export function ModelSelector({
   const contentId = React.useId()
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
   const contentRef = React.useRef<HTMLDivElement | null>(null)
+  const models = selectableAgentModels(availableModels, value?.id ?? defaultValue?.id)
   const initial = defaultValue ?? (models[0] ? defaultSelectionFor(models[0]) : { id: "" })
   const [rawSelection, setSelection] = useControllableState({
     value,
@@ -247,8 +249,8 @@ export function ModelSelector({
   })
   const [side, setSide] = React.useState<"top" | "bottom">("top")
   const [editingId, setEditingId] = React.useState<string | null>(null)
-  const selection = resolveSelection(models, rawSelection)
-  const selectedModel = models.find((model) => model.id === selection.id) ?? models[0]
+  const selection = resolveSelection(availableModels, rawSelection)
+  const selectedModel = models.find((model) => model.id === selection.id) ?? availableModels.find((model) => model.id === selection.id)
   const configCache = React.useRef<Record<string, AiModelSelection>>({})
 
   React.useEffect(() => {
