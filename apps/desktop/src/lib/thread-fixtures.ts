@@ -141,9 +141,9 @@ export const demoEntries: ThreadEntry[] = [
  * keeps working until the room server exists, and when it does the change is
  * one line in the route rather than a rewrite of the panel.
  */
-export function createMockTransport(): RoomTransport {
+export function createMockTransport(includeDemo = false): RoomTransport {
   const listeners = new Set<(entry: ThreadEntry) => void>();
-  let nextSeq = demoEntries.length + 1;
+  let nextSeq = includeDemo ? demoEntries.length + 1 : 1;
 
   function emit(entry: ThreadEntry) {
     for (const listener of listeners) listener(entry);
@@ -154,7 +154,7 @@ export function createMockTransport(): RoomTransport {
       listeners.add(onEntry);
       // The real transport replays `since=<lastSeq>` on connect, so a fresh
       // subscriber seeing the backlog is the behaviour to mimic, not a quirk.
-      for (const entry of demoEntries) onEntry(entry);
+      if (includeDemo) for (const entry of demoEntries) onEntry(entry);
       return () => listeners.delete(onEntry);
     },
 

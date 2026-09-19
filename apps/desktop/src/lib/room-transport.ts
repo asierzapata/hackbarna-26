@@ -13,6 +13,15 @@
  * meet.
  */
 import type { Entry, NodeDraft } from "@kan/protocol";
+import { EventsServerMessage } from "@kan/protocol";
+import {
+  createSocketTicket,
+  getServerEvents,
+  getRoomWebSocketUrl,
+  postServerMessage,
+  resolveServerSuggestion,
+  uploadServerAsset,
+} from "./api-client";
 
 import type { AgentStep, CanvasAnchor, ThreadEntry } from "./thread";
 
@@ -118,4 +127,106 @@ export function toViewEntries(entries: Entry[]): ThreadEntry[] {
     const view = toViewEntry(entry);
     return view ? [view] : [];
   });
+}
+
+export function createWsTransport(roomId: string): RoomTransport {
+  const listeners = new Set<(entry: ThreadEntry) => void>();
+  let socket: WebSocket | null = null;
+  let cursor = 0;
+  let stopped = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let replaying = false;
+
+  const emit = (entry: Entry) => {
+    const view = toViewEntry(entry);
+    if (view) for (const listener of listeners) listener(view);
+  };
+
+  const connect = async () => {
+    if (stopped || socket) return;
+    try {
+      const { ticket } = await createSocketTicket(roomId, "events");
+      if (stopped) return;
+      const ws = new WebSocket(getRoomWebSocketUrl(roomId, "events", ticket, cursor));
+      socket = ws;
+      ws.onmessage = (event) => {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(String(event.data));
+        } catch {
+          return;
+        }
+        const parsed = EventsServerMessage.safeParse(raw);
+        if (!parsed.success) return;
+        if (parsed.data.type === "event") {
+          cursor = Math.max(cursor, parsed.data.event.cursor);
+          emit(parsed.data.event.entry);
+        } else if (parsed.data.type === "ready") {
+          cursor = Math.max(cursor, parsed.data.cursor);
+        }
+      };
+      ws.onclose = () => {
+        if (socket === ws) socket = null;
+        if (!stopped) retryTimer = setTimeout(() => void connect(), 1000);
+      };
+      ws.onerror = () => ws.close();
+    } catch {
+      if (!stopped) retryTimer = setTimeout(() => void connect(), 1000);
+    }
+  };
+
+  const replay = async () => {
+    if (stopped || replaying) return;
+    replaying = true;
+    try {
+      let page;
+      do {
+        page = await getServerEvents(roomId, cursor);
+        for (const event of page.events) {
+          cursor = Math.max(cursor, event.cursor);
+          emit(event.entry);
+        }
+      } while (!stopped && page.hasMore);
+    } catch {
+      // The websocket may still be healthy; the next poll retries replay.
+    } finally {
+      replaying = false;
+    }
+  };
+
+  return {
+    subscribe(onEntry) {
+      stopped = false;
+      listeners.add(onEntry);
+      void replay();
+      void connect();
+      if (!pollTimer) pollTimer = setInterval(() => void replay(), 2000);
+      return () => {
+        listeners.delete(onEntry);
+        if (listeners.size === 0) {
+          stopped = true;
+          if (retryTimer) clearTimeout(retryTimer);
+          if (pollTimer) clearInterval(pollTimer);
+          pollTimer = null;
+          socket?.close();
+          socket = null;
+        }
+      };
+    },
+    async send({ id, text, anchors, files }) {
+      const attachments: string[] = [];
+      for (const file of files) {
+        const uploaded = await uploadServerAsset(file, file.type || "application/octet-stream");
+        attachments.push(uploaded.id);
+      }
+      await postServerMessage(roomId, { id, text, anchors, attachments });
+    },
+    async resolveSuggestion(entryId, accepted) {
+      await resolveServerSuggestion(roomId, entryId, accepted);
+    },
+    async claimTrigger() {
+      return false;
+    },
+  };
 }

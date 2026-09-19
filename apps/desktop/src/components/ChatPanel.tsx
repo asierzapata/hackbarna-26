@@ -10,11 +10,13 @@ import type {
   ThreadEntry,
 } from "@/lib/thread";
 import { PENDING_SEQ } from "@/lib/thread";
-import type { RoomTransport } from "@/lib/room-transport";
+import { createWsTransport, type RoomTransport } from "@/lib/room-transport";
 import { createMockTransport, demoParticipants } from "@/lib/thread-fixtures";
 import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
-const CURRENT_USER = "asier";
+import { getInstallationProfile } from "@/lib/installation-profile";
+
+const DEFAULT_USER = "You";
 const AGENT = "assistant";
 
 /** ACP tool statuses, in the thread's vocabulary. */
@@ -55,18 +57,19 @@ function withoutId(ids: ReadonlySet<string>, id: string) {
  */
 export function ChatPanel({
   roomId,
+  online = false,
   onClose,
 }: {
   roomId?: string;
+  online?: boolean;
   onClose?: () => void;
 }) {
   const agent = useAgent();
   const { jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
 
   const transport = React.useMemo<RoomTransport>(
-    // `createWsTransport(roomId)` goes here once the room server is up.
-    () => createMockTransport(),
-    []
+    () => (online && roomId ? createWsTransport(roomId) : createMockTransport()),
+    [online, roomId]
   );
 
   const [entries, setEntries] = React.useState<ThreadEntry[]>([]);
@@ -166,6 +169,18 @@ export function ChatPanel({
     }
   }
 
+  const [userName, setUserName] = React.useState(DEFAULT_USER);
+  const [userId, setUserId] = React.useState(DEFAULT_USER);
+
+  React.useEffect(() => {
+    void getInstallationProfile().then((p) => {
+      if (p?.name) {
+        setUserName(p.name);
+        setUserId(p.installationId);
+      }
+    });
+  }, []);
+
   function handleSend({ text, files }: { text: string; files: File[] }) {
     const id = crypto.randomUUID();
     const anchors = selectedAnchors;
@@ -177,7 +192,7 @@ export function ChatPanel({
       seq: PENDING_SEQ,
       kind: "message",
       at: new Date().toISOString(),
-      authorId: CURRENT_USER,
+      authorId: userId,
       text,
       anchors,
     });
@@ -199,6 +214,13 @@ export function ChatPanel({
     void transport.resolveSuggestion(suggestion.id, accepted);
   }
 
+  const participants = React.useMemo(() => {
+    return [
+      { id: userId, name: userName, kind: "human" as const },
+      ...demoParticipants.filter((p) => p.id !== "asier"),
+    ];
+  }, [userId, userName]);
+
   const view = React.useMemo(
     () => ({ pendingIds, streamingIds }),
     [pendingIds, streamingIds]
@@ -208,8 +230,8 @@ export function ChatPanel({
     <ThreadPanel
       channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={entries}
-      participants={demoParticipants}
-      currentUserId={CURRENT_USER}
+      participants={participants}
+      currentUserId={userId}
       anchors={selectedAnchors}
       canvasNodeCount={shapeCount}
       view={view}

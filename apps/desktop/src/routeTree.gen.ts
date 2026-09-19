@@ -10,11 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
+import { Route as CanvasCanvasIdRouteImport } from './routes/canvas.$canvasId'
 import { Route as RoomRoomIdRouteImport } from './routes/room.$roomId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CanvasCanvasIdRoute = CanvasCanvasIdRouteImport.update({
+  id: '/canvas/$canvasId',
+  path: '/canvas/$canvasId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RoomRoomIdRoute = RoomRoomIdRouteImport.update({
@@ -25,27 +37,35 @@ const RoomRoomIdRoute = RoomRoomIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
+  '/canvas/$canvasId': typeof CanvasCanvasIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
+  '/canvas/$canvasId': typeof CanvasCanvasIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/onboarding': typeof OnboardingRoute
+  '/canvas/$canvasId': typeof CanvasCanvasIdRoute
   '/room/$roomId': typeof RoomRoomIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/room/$roomId'
+  fullPaths: '/' | '/onboarding' | '/canvas/$canvasId' | '/room/$roomId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/room/$roomId'
-  id: '__root__' | '/' | '/room/$roomId'
+  to: '/' | '/onboarding' | '/canvas/$canvasId' | '/room/$roomId'
+  id: '__root__' | '/' | '/onboarding' | '/canvas/$canvasId' | '/room/$roomId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  OnboardingRoute: typeof OnboardingRoute
+  CanvasCanvasIdRoute: typeof CanvasCanvasIdRoute
   RoomRoomIdRoute: typeof RoomRoomIdRoute
 }
 
@@ -56,6 +76,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/canvas/$canvasId': {
+      id: '/canvas/$canvasId'
+      path: '/canvas/$canvasId'
+      fullPath: '/canvas/$canvasId'
+      preLoaderRoute: typeof CanvasCanvasIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/room/$roomId': {
@@ -70,6 +104,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  OnboardingRoute: OnboardingRoute,
+  CanvasCanvasIdRoute: CanvasCanvasIdRoute,
   RoomRoomIdRoute: RoomRoomIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -755,7 +755,10 @@ export class Engine {
     const socketRoom = new TLSocketRoom<UnknownRecord, { userId: string }>({
       schema: this.schema,
       storage,
-      log: { error: () => console.error("room-server sync_error"), warn: () => console.warn("room-server sync_rejected") },
+      log: {
+        error: (...args) => console.error("room-server sync_error", ...args),
+        warn: (...args) => console.warn("room-server sync_rejected", ...args),
+      },
       authorizeRecord: {
         asset: ({ session, next, prev }: Parameters<TLRecordAuthorizer<UnknownRecord, { userId: string }>>[0]) => {
           if (!next) return prev;
@@ -778,7 +781,9 @@ export class Engine {
     const storageTransaction = storage.transaction.bind(storage);
     storage.transaction = (fn, options) => this.atomic(() => storageTransaction((txn) => {
       const result = fn(txn);
-      const records = [...txn.entries()].map(([, record]) => record);
+      const records = [...txn.entries()]
+        .map(([, record]) => record)
+        .filter((record) => DOC_TYPE_NAMES.has((record as unknown as { typeName?: string }).typeName ?? ""));
       if (records.length || this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) this.validateGraph(records);
       return result;
     }, options));

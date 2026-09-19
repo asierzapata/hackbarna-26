@@ -22,7 +22,9 @@
     "tauri:drive": "npm run tauri:drive -w @kan/desktop",
     "typecheck": "turbo run typecheck && npm run typecheck:backend",
     "server": "tsx apps/room-server/src/main.ts",
+    "test": "npm run test:backend && npm run test:desktop",
     "test:backend": "tsx --test apps/room-server/test/*.test.ts apps/agent-runner/test/*.test.ts",
+    "test:desktop": "tsx --test apps/desktop/test/*.test.ts",
     "runner": "tsx apps/agent-runner/src/main.ts",
     "typecheck:backend": "tsc -p tsconfig.backend.json",
     "prepare": "git config core.hooksPath .githooks"
