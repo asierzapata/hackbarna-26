@@ -108,6 +108,33 @@ already cost time. The short version:
   nowhere else.
 - Report what was actually observed. If a step was skipped, say so plainly.
 
+## Agent runner (Devin)
+
+The ACP client lives in Rust (`apps/desktop/src-tauri/src/devin.rs`), inside the
+desktop app rather than in the `apps/agent-runner/` workspace: it spawns
+`devin acp`, speaks JSON-RPC over stdio, and forwards `session/update`
+notifications to the webview as `devin:update` events. The webview side is
+`apps/desktop/src/components/devin-context.tsx` (provider + `useDevin`), the
+header control is `DevinButton`, and `ChatPanel` turns a prompt turn into a
+streaming `AgentEntry`.
+
+- The CLI runs under the user's own Devin subscription; the app never holds a
+  model token. `devin auth login` credentials are picked up automatically, and
+  `authenticate` with the `devin-browser` method covers a logged-out machine.
+- A bundled macOS app inherits a stripped PATH, so the `devin` binary is probed
+  at `~/.local/bin`, Homebrew, and `/usr/local/bin`. `DEVIN_BIN` overrides.
+- The child's stderr goes to `Stdio::null()` on purpose — the CLI logs heavily
+  and an undrained pipe would eventually wedge the agent. Its own log file is at
+  `~/.local/share/devin/cli/logs/`.
+- Sessions get a scratch cwd under the app data dir, not the repo.
+- `session/new` answers with `auth_required` (-32000) rather than failing when
+  the CLI has no credentials; that is what the button reads to decide its label.
+- Disconnect kills the child and forgets the session; credentials are untouched.
+  There is no real logout: `devin acp` does not advertise
+  `agentCapabilities.auth.logout`, so the ACP `logout` method is off the table
+  and clearing credentials would mean `devin auth logout` — which would log the
+  user out of their terminal too.
+
 ## Gotchas
 
 - `@tldraw/assets` is excluded from `optimizeDeps` in `vite.config.ts`. Its
