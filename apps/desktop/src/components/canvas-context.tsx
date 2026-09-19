@@ -8,7 +8,7 @@
  * still moves the camera.
  */
 import * as React from "react";
-import type { Editor, TLShapeId } from "tldraw";
+import { useValue, type Editor, type TLShapeId } from "tldraw";
 
 import type { CanvasAnchor } from "@/lib/thread";
 
@@ -17,6 +17,21 @@ interface CanvasContextValue {
   setEditor: (editor: Editor | null) => void;
   /** Selects the anchored shape and centres the camera on it. */
   jumpToNode: (anchor: CanvasAnchor) => void;
+  /** The current selection, as thread anchors. Tracks the editor reactively. */
+  selectedAnchors: CanvasAnchor[];
+  /** Node count for the thread footer, also reactive. */
+  shapeCount: number;
+  /** Human label for a shape id, or undefined if the board has no such node. */
+  labelForNode: (nodeId: string) => string | undefined;
+}
+
+/** Prefers the node's own title over its raw shape id. */
+function shapeLabel(editor: Editor, id: TLShapeId): string {
+  const shape = editor.getShape(id);
+  if (shape?.type !== "kan-node") return id;
+  const draft = (shape.props as { draft?: { type: string; title?: string; label?: string } })
+    .draft;
+  return draft?.title ?? draft?.label ?? id;
 }
 
 const CanvasContext = React.createContext<CanvasContextValue | null>(null);
@@ -42,9 +57,46 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
     [editor]
   );
 
+  // tldraw state is reactive, not React state: reading it during render gives
+  // a value that never updates. `useValue` subscribes, so the composer's
+  // selection hint and the footer's node count follow the canvas live.
+  const selectedAnchors = useValue<CanvasAnchor[]>(
+    "selected anchors",
+    () =>
+      (editor?.getSelectedShapeIds() ?? []).map((id) => ({
+        nodeId: id,
+        label: editor?.getShape(id)?.type === "kan-node" ? shapeLabel(editor, id) : id,
+      })),
+    [editor]
+  );
+
+  const shapeCount = useValue(
+    "shape count",
+    () => editor?.getCurrentPageShapeIds().size ?? 0,
+    [editor]
+  );
+
+  const labelForNode = React.useCallback(
+    (nodeId: string) => {
+      if (!editor) return undefined;
+      const id = (
+        nodeId.startsWith("shape:") ? nodeId : `shape:${nodeId}`
+      ) as TLShapeId;
+      return editor.getShape(id) ? shapeLabel(editor, id) : undefined;
+    },
+    [editor]
+  );
+
   const value = React.useMemo(
-    () => ({ editor, setEditor, jumpToNode }),
-    [editor, jumpToNode]
+    () => ({
+      editor,
+      setEditor,
+      jumpToNode,
+      selectedAnchors,
+      shapeCount,
+      labelForNode,
+    }),
+    [editor, jumpToNode, selectedAnchors, shapeCount, labelForNode]
   );
 
   return <CanvasContext.Provider value={value}>{children}</CanvasContext.Provider>;

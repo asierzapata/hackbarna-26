@@ -3,6 +3,8 @@ import { RiCropLine } from "@remixicon/react";
 import { Badge } from "@/components/ui/badge";
 import type { CanvasAnchor } from "@/lib/thread";
 
+import { useThread } from "./thread-context";
+
 /**
  * A canvas node an entry is pinned to. Clickable when the host wires
  * `onJump`, otherwise a plain label.
@@ -14,10 +16,13 @@ export function AnchorChip({
   anchor: CanvasAnchor;
   onJump?: (anchor: CanvasAnchor) => void;
 }) {
+  const { resolveAnchorLabel } = useThread();
+  const label = resolveAnchorLabel?.(anchor.nodeId) ?? anchor.label;
+
   const content = (
     <>
       <RiCropLine />
-      {anchor.label}
+      {label}
     </>
   );
 
@@ -34,7 +39,7 @@ export function AnchorChip({
       variant="outline"
       className="gap-1 text-muted-foreground"
       render={
-        <button type="button" onClick={() => onJump(anchor)} title={`Jump to ${anchor.label}`} />
+        <button type="button" onClick={() => onJump(anchor)} title={`Jump to ${label}`} />
       }
     >
       {content}

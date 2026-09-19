@@ -49,7 +49,13 @@ export interface ThreadAttachment {
 
 interface ThreadEntryBase {
   id: string;
-  /** ISO 8601. Ordering key for the merged stream. */
+  /**
+   * Monotonic per-room sequence, assigned by the server. This is the ordering
+   * key: `at` is a display detail, and trusting it would reorder the stream
+   * whenever a slow client's message lands after a later one.
+   */
+  seq: number;
+  /** ISO 8601. Shown to the reader, never used to sort. */
   at: string;
   /** Participant id. For agent entries, the agent's own id. */
   authorId: string;
@@ -61,8 +67,6 @@ export interface TranscriptEntry extends ThreadEntryBase {
   text: string;
   /** Set when an agent flagged this line as worth acting on. */
   trigger?: { label: string; confidence: number };
-  /** Still being revised by the STT engine. */
-  interim?: boolean;
 }
 
 /** A message typed by a human participant. */
@@ -73,8 +77,6 @@ export interface MessageEntry extends ThreadEntryBase {
   mentions?: string[];
   attachments?: ThreadAttachment[];
   anchors?: CanvasAnchor[];
-  /** Optimistically rendered, not yet acknowledged by the room. */
-  pending?: boolean;
 }
 
 /**
@@ -98,10 +100,6 @@ export interface AgentEntry extends ThreadEntryBase {
   model?: string;
   durationMs?: number;
   steps?: AgentStep[];
-  /** Steps rendered before the "N more steps" toggle. Defaults to 2. */
-  visibleSteps?: number;
-  /** Tokens still arriving; the body shimmers and the scroller follows it. */
-  streaming?: boolean;
 }
 
 /** An agent proposing a canvas change, awaiting accept / dismiss. */
@@ -150,21 +148,66 @@ export function matchesFilter(entry: ThreadEntry, filter: ThreadFilter) {
 /* ------------------------------------------------------------------ grouping */
 
 /**
+ * Render state the client owns and the server never sees.
+ *
+ * These four used to live on the entries themselves, which made `ThreadEntry`
+ * disagree with the wire type for no good reason: the room has no opinion on
+ * whether *this* client has acknowledged a message or how many agent steps
+ * *this* reader has unfolded. Keeping them here means a wire entry can be
+ * rendered as-is.
+ */
+export interface ThreadViewState {
+  /** Sent from this client, not yet acknowledged by the room. */
+  pendingIds?: ReadonlySet<string>;
+  /** Agent turns whose tokens are still arriving. */
+  streamingIds?: ReadonlySet<string>;
+  /** Transcript lines the STT engine may still revise. */
+  interimIds?: ReadonlySet<string>;
+  /** Steps rendered before the "N more steps" fold. */
+  visibleSteps?: number;
+}
+
+const noIds: ReadonlySet<string> = new Set();
+
+/**
  * A row in the rendered stream. Consecutive transcript lines collapse into a
  * single `transcript-run` so a long stretch of call audio stays one foldable
  * block instead of flooding the thread.
  */
 export type ThreadRow =
-  | { type: "entry"; id: string; entry: ThreadEntry }
-  | { type: "transcript-run"; id: string; entries: TranscriptEntry[] };
+  | {
+      type: "entry";
+      id: string;
+      entry: ThreadEntry;
+      pending: boolean;
+      streaming: boolean;
+      visibleSteps: number;
+    }
+  | {
+      type: "transcript-run";
+      id: string;
+      entries: TranscriptEntry[];
+      interimIds: ReadonlySet<string>;
+    };
 
 export function buildThreadRows(
   entries: ThreadEntry[],
-  filter: ThreadFilter = "everything"
+  filter: ThreadFilter = "everything",
+  view: ThreadViewState = {}
 ): ThreadRow[] {
+  const pendingIds = view.pendingIds ?? noIds;
+  const streamingIds = view.streamingIds ?? noIds;
+  const interimIds = view.interimIds ?? noIds;
+  const visibleSteps = view.visibleSteps ?? 2;
+
   const rows: ThreadRow[] = [];
 
-  for (const entry of entries) {
+  // Sort before grouping: a transcript run is "consecutive lines", which is
+  // only meaningful once the stream is actually in order. Optimistic entries
+  // carry no server seq, so they sort last, which is where they belong.
+  const ordered = [...entries].sort((a, b) => a.seq - b.seq);
+
+  for (const entry of ordered) {
     if (!matchesFilter(entry, filter)) continue;
 
     if (entry.kind === "transcript") {
@@ -173,15 +216,33 @@ export function buildThreadRows(
         last.entries.push(entry);
         continue;
       }
-      rows.push({ type: "transcript-run", id: `run-${entry.id}`, entries: [entry] });
+      rows.push({
+        type: "transcript-run",
+        id: `run-${entry.id}`,
+        entries: [entry],
+        interimIds,
+      });
       continue;
     }
 
-    rows.push({ type: "entry", id: entry.id, entry });
+    rows.push({
+      type: "entry",
+      id: entry.id,
+      entry,
+      pending: pendingIds.has(entry.id),
+      streaming: streamingIds.has(entry.id),
+      visibleSteps,
+    });
   }
 
   return rows;
 }
+
+/**
+ * Seq for an entry this client just created and the room has not numbered yet.
+ * Sorting last is the honest position: it is the newest thing we know about.
+ */
+export const PENDING_SEQ = Number.MAX_SAFE_INTEGER;
 
 /* ------------------------------------------------------------- participants */
 

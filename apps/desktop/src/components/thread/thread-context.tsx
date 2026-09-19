@@ -8,6 +8,12 @@ export interface ThreadActions {
   onJumpToNode?: (anchor: CanvasAnchor) => void;
   /** Scroll the thread to an entry (a suggestion's source line, say). */
   onJumpToEntry?: (entryId: string) => void;
+  /**
+   * Resolves a shape id to a human label. Anchors travel the wire as bare
+   * shape ids, so the name has to come from the canvas at render time rather
+   * than being frozen into the entry when it was written.
+   */
+  resolveAnchorLabel?: (nodeId: string) => string | undefined;
   onAcceptSuggestion?: (suggestion: SuggestionEntry) => void;
   onDismissSuggestion?: (suggestion: SuggestionEntry) => void;
 }

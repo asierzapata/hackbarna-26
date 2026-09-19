@@ -81,7 +81,15 @@ function AgentStepRow({ step }: { step: AgentStep }) {
  * One agent turn. Every participant runs their own local agent, so the header
  * names the agent and — when it differs from the author — who it belongs to.
  */
-export function AgentEntryCard({ entry }: { entry: AgentEntry }) {
+export function AgentEntryCard({
+  entry,
+  streaming = false,
+  visibleSteps = 2,
+}: {
+  entry: AgentEntry;
+  streaming?: boolean;
+  visibleSteps?: number;
+}) {
   const agent = useAuthor(entry.authorId);
   const { participants } = useThread();
   const operator = entry.authorId
@@ -91,7 +99,7 @@ export function AgentEntryCard({ entry }: { entry: AgentEntry }) {
     : undefined;
 
   const steps = entry.steps ?? [];
-  const visibleCount = entry.visibleSteps ?? 2;
+  const visibleCount = visibleSteps;
   const shown = steps.slice(0, visibleCount);
   const hidden = steps.slice(visibleCount);
 
@@ -131,7 +139,7 @@ export function AgentEntryCard({ entry }: { entry: AgentEntry }) {
             <p
               className={cn(
                 "text-xs leading-relaxed wrap-break-word",
-                entry.streaming && "shimmer"
+                streaming && "shimmer"
               )}
             >
               {entry.text}

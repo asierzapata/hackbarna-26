@@ -14,7 +14,13 @@ import { formatTime } from "@/lib/thread";
 import { useAuthor, useThread } from "./thread-context";
 
 /** One speech-to-text line, attributed to whoever was speaking. */
-function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
+function TranscriptLine({
+  entry,
+  interim = false,
+}: {
+  entry: TranscriptEntry;
+  interim?: boolean;
+}) {
   const speaker = useAuthor(entry.authorId);
   const flagged = Boolean(entry.trigger);
 
@@ -40,7 +46,7 @@ function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
       <span
         className={cn(
           "min-w-0 flex-1 wrap-break-word",
-          entry.interim && "shimmer text-muted-foreground"
+          interim && "shimmer text-muted-foreground"
         )}
       >
         {entry.text}
@@ -62,9 +68,12 @@ function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
  */
 export function TranscriptRun({
   entries,
+  interimIds,
   collapseAfter = 40,
 }: {
   entries: TranscriptEntry[];
+  /** Lines the STT engine may still revise, so they render unsettled. */
+  interimIds?: ReadonlySet<string>;
   collapseAfter?: number;
 }) {
   const { onJumpToEntry } = useThread();
@@ -98,7 +107,7 @@ export function TranscriptRun({
             id={`thread-entry-${entry.id}`}
             onDoubleClick={() => onJumpToEntry?.(entry.id)}
           >
-            <TranscriptLine entry={entry} />
+            <TranscriptLine entry={entry} interim={interimIds?.has(entry.id)} />
           </div>
         ))}
       </CollapsibleContent>
