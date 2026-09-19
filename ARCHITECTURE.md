@@ -449,19 +449,29 @@ Three small gaps, each of which costs more the later it is closed:
 Blocking, do these before the room server exists:
 
 - [x] Workspace layout, with `scripts/drive.mjs` and `tauri.conf.json` paths fixed in the same commit (migration 1)
-- [ ] `packages/protocol` with the wire schemas, and the view-only flags moved out of `ThreadEntry` (migration 2)
-- [ ] `RoomTransport` interface with the fixtures as its first implementation (migration 3)
-- [ ] `/room/$roomId` route and a landing route that creates one (migration 4)
-- [ ] `packages/nodes` with one custom shape, registered on the client (migration 5)
+- [x] `packages/protocol` with the wire schemas, and the view-only flags moved out of `ThreadEntry` (migration 2)
+- [x] `RoomTransport` interface with the fixtures as its first implementation (migration 3)
+- [x] `/room/$roomId` route and a landing route that creates one (migration 4)
+- [x] `packages/nodes` with one custom shape, registered on the client (migration 5)
 - [x] Verify WebRTC permissions in the real Tauri window before committing to Vonage (migration 6)
 
 Not blocking, do them when they get in the way:
 
 - [x] Window size and removing `greet` (the CSP is still open, and needs the Vonage domains)
-- [ ] Config module and `typecheck` script
+- [x] `typecheck` script (the config module is still open)
 - [ ] Single import path for `cn`
 
-Each blocking item is an hour or less and none of them changes what the app does, which is the point: after this list the app looks identical and the server has somewhere to plug in.
+Every blocking item is done. The app looks almost identical, which was the
+point, and the two seams the server needs are open: swap `createMockTransport()`
+for `createWsTransport(roomId)` in `ChatPanel`, and swap `persistenceKey` for
+`store={useSync(...)}` in `Canvas`.
+
+Two deviations worth knowing about. The shape *util* lives in
+`apps/desktop/src/lib/canvas-shapes.tsx` rather than `packages/nodes`, because
+the backend owns that package; it imports `kanShapeProps` rather than restating
+it, so the schema both sides validate against is still defined once. And a
+custom shape in tldraw 5 needs a `TLGlobalShapePropsMap` augmentation, because
+`TLShape` resolves through a global registry rather than a generic.
 
 ## Decisions and rejected alternatives
 

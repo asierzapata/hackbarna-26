@@ -12,12 +12,19 @@ import { UserMessageEntry } from "./UserMessageEntry";
  * adding a type to `ThreadEntry` plus one entry here — or passing `renderers`
  * to `ThreadPanel` to register a kind the library doesn't know about.
  */
-export type EntryRenderer = React.ComponentType<{ entry: never }>;
+export interface EntryRendererProps {
+  entry: never;
+  /** Sent from this client, not yet acknowledged by the room. */
+  pending?: boolean;
+  /** Agent turn whose tokens are still arriving. */
+  streaming?: boolean;
+  /** Steps rendered before the "N more steps" fold. */
+  visibleSteps?: number;
+}
 
-export type ThreadRenderers = Record<
-  string,
-  React.ComponentType<{ entry: never }>
->;
+export type EntryRenderer = React.ComponentType<EntryRendererProps>;
+
+export type ThreadRenderers = Record<string, EntryRenderer>;
 
 export const defaultRenderers = {
   message: UserMessageEntry,
@@ -30,9 +37,15 @@ export const defaultRenderers = {
 
 export function ThreadEntryRow({
   entry,
+  pending,
+  streaming,
+  visibleSteps,
   renderers,
 }: {
   entry: ThreadEntry;
+  pending?: boolean;
+  streaming?: boolean;
+  visibleSteps?: number;
   renderers?: ThreadRenderers;
 }) {
   const Renderer = renderers?.[entry.kind] ?? defaultRenderers[entry.kind];
@@ -44,5 +57,14 @@ export function ThreadEntryRow({
     return null;
   }
 
-  return <Renderer entry={entry as never} />;
+  // Render state travels beside the entry, not inside it, so a renderer can
+  // ignore it entirely and still receive a wire-shaped entry.
+  return (
+    <Renderer
+      entry={entry as never}
+      pending={pending}
+      streaming={streaming}
+      visibleSteps={visibleSteps}
+    />
+  );
 }

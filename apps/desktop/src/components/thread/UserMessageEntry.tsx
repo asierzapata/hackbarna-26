@@ -50,7 +50,13 @@ function ThreadAttachmentItem({ attachment }: { attachment: ThreadAttachment }) 
  * opposing chat bubble — the thread is a shared log, not a two-party DM, so
  * "mine vs theirs" would be misleading with several people in the room.
  */
-export function UserMessageEntry({ entry }: { entry: MessageEntry }) {
+export function UserMessageEntry({
+  entry,
+  pending = false,
+}: {
+  entry: MessageEntry;
+  pending?: boolean;
+}) {
   const author = useAuthor(entry.authorId);
   const { currentUserId, onJumpToNode } = useThread();
   const isSelf = entry.authorId === currentUserId;
@@ -63,14 +69,14 @@ export function UserMessageEntry({ entry }: { entry: MessageEntry }) {
           className={cn(
             "w-full border border-solid border-border bg-muted p-2.5",
             isSelf && "border-foreground/20",
-            entry.pending && "opacity-60"
+            pending && "opacity-60"
           )}
         >
           <BubbleContent className="flex w-full flex-col gap-1.5">
             <MessageHeader className="gap-2 px-0">
               <span className="font-medium text-foreground">{author.name}</span>
               <span className="tabular-nums">{formatTime(entry.at, true)}</span>
-              {entry.pending ? (
+              {pending ? (
                 <span className="shimmer ms-auto">sending</span>
               ) : null}
             </MessageHeader>

@@ -3,6 +3,8 @@
  * the transport lands — `ThreadPanel` only needs entries + participants.
  */
 import type { CanvasAnchor, Participant, ThreadEntry } from "./thread";
+import { PENDING_SEQ } from "./thread";
+import type { RoomTransport, SendInput } from "./room-transport";
 
 const day = "2026-09-19";
 const at = (time: string) => `${day}T${time}+02:00`;
@@ -22,6 +24,7 @@ export const demoAnchors: CanvasAnchor[] = [
 export const demoEntries: ThreadEntry[] = [
   {
     id: "t1",
+    seq: 1,
     kind: "transcript",
     at: at("10:41:02"),
     authorId: "jon",
@@ -29,6 +32,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "t2",
+    seq: 2,
     kind: "transcript",
     at: at("10:41:30"),
     authorId: "marta",
@@ -36,6 +40,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "t3",
+    seq: 3,
     kind: "transcript",
     at: at("10:42:11"),
     authorId: "jon",
@@ -44,6 +49,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "t4",
+    seq: 4,
     kind: "transcript",
     at: at("10:43:04"),
     authorId: "marta",
@@ -51,6 +57,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "m1",
+    seq: 5,
     kind: "message",
     at: at("10:43:12"),
     authorId: "asier",
@@ -60,6 +67,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "a1",
+    seq: 6,
     kind: "agent",
     at: at("10:43:18"),
     authorId: "assistant",
@@ -103,6 +111,7 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "g1",
+    seq: 7,
     kind: "suggestion",
     at: at("10:43:40"),
     authorId: "marta-agent",
@@ -114,9 +123,77 @@ export const demoEntries: ThreadEntry[] = [
   },
   {
     id: "y1",
+    seq: 8,
     kind: "system",
     at: at("10:44:01"),
     authorId: "asier",
     text: "asier moved 'Cold start' under OPEN QUESTIONS",
   },
 ];
+
+/**
+ * The fixtures behind the `RoomTransport` interface.
+ *
+ * Swapping this for `createWsTransport(roomId)` is the whole point: the demo
+ * keeps working until the room server exists, and when it does the change is
+ * one line in the route rather than a rewrite of the panel.
+ */
+export function createMockTransport(): RoomTransport {
+  const listeners = new Set<(entry: ThreadEntry) => void>();
+  let nextSeq = demoEntries.length + 1;
+
+  function emit(entry: ThreadEntry) {
+    for (const listener of listeners) listener(entry);
+  }
+
+  return {
+    subscribe(onEntry) {
+      listeners.add(onEntry);
+      // The real transport replays `since=<lastSeq>` on connect, so a fresh
+      // subscriber seeing the backlog is the behaviour to mimic, not a quirk.
+      for (const entry of demoEntries) onEntry(entry);
+      return () => listeners.delete(onEntry);
+    },
+
+    async send({ id, text, anchors, files }: SendInput) {
+      emit({
+        id,
+        seq: nextSeq++,
+        kind: "message",
+        at: new Date().toISOString(),
+        authorId: "asier",
+        text,
+        anchors: anchors.map((id) => ({ nodeId: id, label: id.replace(/^shape:/, "") })),
+        attachments: files.map((file, i) => ({
+          id: `local-file-${Date.now()}-${i}`,
+          name: file.name,
+          kind: file.type.startsWith("image/") ? "image" : ("file" as const),
+          url: URL.createObjectURL(file),
+          meta: `${Math.round(file.size / 1024)} KB`,
+          state: "done" as const,
+        })),
+      });
+    },
+
+    async resolveSuggestion(entryId, accepted) {
+      emit({
+        id: `resolved-${entryId}`,
+        seq: nextSeq++,
+        kind: "system",
+        at: new Date().toISOString(),
+        authorId: "asier",
+        text: accepted
+          ? "asier accepted a suggestion"
+          : "asier dismissed a suggestion",
+      });
+    },
+
+    async claimTrigger() {
+      // No classifier without a server, so nothing ever assigns us a trigger.
+      return false;
+    },
+  };
+}
+
+/** Re-exported so callers can mint an optimistic entry without reaching in. */
+export { PENDING_SEQ };

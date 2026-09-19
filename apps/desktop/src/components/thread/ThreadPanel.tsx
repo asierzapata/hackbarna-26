@@ -25,6 +25,7 @@ import type {
   Participant,
   ThreadEntry,
   ThreadFilter,
+  ThreadViewState,
 } from "@/lib/thread";
 import { buildThreadRows, toParticipantMap } from "@/lib/thread";
 
@@ -52,6 +53,8 @@ export interface ThreadPanelProps extends ThreadActions {
   canvasNodeCount?: number;
   /** Register renderers for entry kinds beyond the built-in ones. */
   renderers?: ThreadRenderers;
+  /** Client-only render state: what is unacknowledged, streaming, interim. */
+  view?: ThreadViewState;
   onClose?: () => void;
   onCopyLink?: () => void;
   composer?: Pick<
@@ -69,6 +72,7 @@ export function ThreadPanel({
   anchors = [],
   canvasNodeCount,
   renderers,
+  view,
   onClose,
   onCopyLink,
   composer,
@@ -82,8 +86,8 @@ export function ThreadPanel({
     [participants]
   );
   const rows = React.useMemo(
-    () => buildThreadRows(entries, filter),
-    [entries, filter]
+    () => buildThreadRows(entries, filter, view),
+    [entries, filter, view]
   );
 
   const contextValue = React.useMemo(
@@ -180,11 +184,17 @@ export function ThreadPanel({
                       }
                     >
                       {row.type === "transcript-run" ? (
-                        <TranscriptRun entries={row.entries} />
+                        <TranscriptRun
+                          entries={row.entries}
+                          interimIds={row.interimIds}
+                        />
                       ) : (
                         <div id={`thread-entry-${row.entry.id}`}>
                           <ThreadEntryRow
                             entry={row.entry}
+                            pending={row.pending}
+                            streaming={row.streaming}
+                            visibleSteps={row.visibleSteps}
                             renderers={renderers}
                           />
                         </div>
