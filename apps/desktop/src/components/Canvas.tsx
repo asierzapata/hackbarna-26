@@ -3,8 +3,11 @@ import {
   Tldraw,
   defaultBindingUtils,
   defaultShapeUtils,
+  DefaultStylePanel,
   type Editor,
   type TLAssetStore,
+  type TLComponents,
+  type TLUiStylePanelProps,
 } from "tldraw";
 import { useSync } from "@tldraw/sync";
 import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
@@ -26,6 +29,31 @@ import { useCanvas } from "./canvas-context";
 const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
 const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils];
+
+function CollapsibleStylePanel(props: TLUiStylePanelProps) {
+  const [collapsed, setCollapsed] = React.useState(false);
+
+  return (
+    <div className="kan-style-panel">
+      <button
+        type="button"
+        className="kan-style-panel__toggle"
+        aria-label={collapsed ? "Expand color selector" : "Collapse color selector"}
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        <span className="kan-style-panel__swatch" aria-hidden />
+      </button>
+      {collapsed ? null : <DefaultStylePanel {...props} />}
+    </div>
+  );
+}
+
+const canvasComponents = {
+  PageMenu: null,
+  NavigationPanel: null,
+  StylePanel: CollapsibleStylePanel,
+} satisfies TLComponents;
 
 type KanDevWindow = Window & {
   __kan?: { editor: Editor; tools: CanvasTools };
@@ -76,7 +104,7 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           persistenceKey={`kan-room-${roomId}`}
           assetUrls={assetUrls}
           shapeUtils={canvasShapeUtils}
-          components={{ PageMenu: null, NavigationPanel: null }}
+          components={canvasComponents}
           onMount={onMount}
         />
       </div>
@@ -128,7 +156,7 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
           store={store}
           assetUrls={assetUrls}
           shapeUtils={shapeUtils}
-          components={{ PageMenu: null, NavigationPanel: null }}
+          components={canvasComponents}
           onMount={onMount}
         />
       </div>

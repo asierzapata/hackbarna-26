@@ -130,6 +130,47 @@ body,
   inset: 0;
 }
 
+.kan-style-panel {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: var(--tl-layer-panels);
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.kan-style-panel > * {
+  pointer-events: all;
+}
+
+.kan-style-panel__toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--tl-color-divider);
+  border-radius: var(--tl-radius-3);
+  background: var(--tl-color-panel);
+  box-shadow: var(--tl-shadow-2);
+  color: var(--tl-color-text);
+  cursor: pointer;
+}
+
+.kan-style-panel__toggle:hover {
+  background: var(--tl-color-muted-1);
+}
+
+.kan-style-panel__swatch {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--tl-color-text);
+  border-radius: 999px;
+  background: var(--tl-color-selected);
+}
+
 /* Call bar */
 .call-bar {
   display: flex;
