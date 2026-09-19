@@ -313,7 +313,7 @@ The shell already runs, so this is the contract, not a build guide.
 - [ ] Post `system` entries for debounced human canvas edits.
 - [ ] Render suggestion cards with accept and dismiss, where accept calls `canvas/mutate` with the draft and marks the suggestion accepted.
 
-The WebRTC check in the Tauri webview (WKWebView on macOS needs the microphone and camera usage strings and a permission handler on the Rust side) is the first thing to verify. If it fails, Electron removes that risk and the sidecar becomes a plain child process in the main process.
+The WebRTC check in the Tauri webview was the first thing to verify, and it passes. See [migration 6](#6-fix-the-tauri-shell-before-the-call-work-starts): we keep Tauri, and the Electron fallback is off the table.
 
 ## Evolving the current code
 
@@ -409,13 +409,32 @@ The `onMount` editor also needs to go somewhere the thread can reach, because `T
 
 ### 6. Fix the Tauri shell before the call work starts
 
-`src-tauri` is still the scaffold, and three of its defaults will block the Vonage work rather than merely look unfinished:
+Done, except the CSP. `src-tauri` was the scaffold, and three of its defaults would have blocked the Vonage work rather than merely looked unfinished:
 
-- **Window is 800x600.** A canvas plus a thread panel does not fit. Set something like 1440x900 with a `minWidth`, or the first screenshot of the real app is unusable.
-- **`security.csp` is `null`.** That is fine now and cannot ship: WKWebView with WebRTC needs a CSP that allows the Vonage media and signalling domains plus our room server's `ws://`. Write it when we add the SDK, not after the demo fails.
-- **No camera or microphone usage strings.** macOS refuses `getUserMedia` without `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in the bundle's `Info.plist`, and WKWebView needs a permission handler on the Rust side. This is the single highest-risk unknown in the plan, so verify it in the real window with the `e2e` driver before building anything on top of it.
+- **Window was 800x600.** A canvas plus a thread panel does not fit. Now 1440x900 with a 1100x700 minimum, which is what the first usable screenshot of the real app needed.
+- **No camera or microphone usage strings.** macOS refuses `getUserMedia` without `NSCameraUsageDescription` and `NSMicrophoneUsageDescription`. They now live in `apps/desktop/src-tauri/Info.plist`.
+- **`security.csp` is still `null`.** That is fine now and cannot ship: WKWebView with WebRTC needs a CSP that allows the Vonage media and signalling domains plus our room server's `ws://`. Write it when we add the SDK, not after the demo fails.
 
-While in there, delete the `greet` command in `src-tauri/src/lib.rs`. It is scaffold, and it is the first thing anyone reading the Rust side will assume is real. Leave the `webdriver` feature gate exactly as it is.
+We also deleted the `greet` command in `src-tauri/src/lib.rs`. It was scaffold, and it was the first thing anyone reading the Rust side would assume is real. The `webdriver` feature gate is untouched.
+
+**Two things this document got wrong, both in our favour.** We expected to write a WKWebView permission handler on the Rust side, and we expected to wire the plist into `tauri.conf.json`. Neither is needed:
+
+| We assumed | What is actually true |
+| --- | --- |
+| WKWebView needs a `requestMediaCapturePermissionForOrigin` handler we write | wry already implements it and grants unconditionally (`wry-0.55.1/src/wkwebview/class/wry_web_view_ui_delegate.rs:126`). Tauri 2.11.5 pulls that in, so there is nothing to add |
+| `Info.plist` has to be registered under `bundle.macOS.infoPlist` | Tauri picks up any `Info.plist` sitting next to `tauri.conf.json`. In dev it embeds it into the binary's `__TEXT,__info_plist` section, and the bundler merges it into the `.app`. No config key at all |
+
+Verified in the real window on 2026-09-19 with the `e2e` driver, against `tauri 2.11.5` / `wry 0.55.1` on macOS (Darwin 27):
+
+| Probe | Result |
+| --- | --- |
+| `getUserMedia({ audio: true })` | granted, live track ("AirPods") |
+| `getUserMedia({ audio: true, video: { width: 640 } })` | granted, live audio + video ("MacBook Pro Camera") |
+| `RTCPeerConnection.createOffer()` with both tracks | SDP carries `m=audio` and `m=video` |
+| ICE gathering against `stun:stun.l.google.com:19302` | `host` and `srflx` candidates, so the webview reaches STUN and NAT traversal works |
+| `isSecureContext` at `http://localhost:1420` | `true` |
+
+One caveat worth carrying forward: that last row was measured on the dev server. A packaged build serves from the `tauri://localhost` custom scheme, and we have not confirmed `getUserMedia` there. Check it the first time we bundle, not on demo day.
 
 ### 7. Add the boring infrastructure we are about to need
 
@@ -434,11 +453,11 @@ Blocking, do these before the room server exists:
 - [ ] `RoomTransport` interface with the fixtures as its first implementation (migration 3)
 - [ ] `/room/$roomId` route and a landing route that creates one (migration 4)
 - [ ] `packages/nodes` with one custom shape, registered on the client (migration 5)
-- [ ] Verify WebRTC permissions in the real Tauri window before committing to Vonage (migration 6)
+- [x] Verify WebRTC permissions in the real Tauri window before committing to Vonage (migration 6)
 
 Not blocking, do them when they get in the way:
 
-- [ ] Window size, CSP, and removing `greet`
+- [x] Window size and removing `greet` (the CSP is still open, and needs the Vonage domains)
 - [ ] Config module and `typecheck` script
 - [ ] Single import path for `cn`
 
@@ -462,7 +481,7 @@ Each blocking item is an hour or less and none of them changes what the app does
 1. **ACP agents acting like coding agents.** They may loop on file reads or ask for permissions we did not anticipate. The permission handler and the direct API fallback cover this.
 2. **Latency through a harness.** Expect 3 to 8 seconds to first token. The thread shows the `agent_turn` in `running` state immediately so the room sees it thinking.
 3. **Jev access.** Early access only. The Haiku fallback implements the same interface and we build against the interface from day one.
-4. **WebRTC in WKWebView.** Vonage Video in the Tauri webview is the one thing we cannot verify from the browser dev server. Check it in the real window early. Fallback is Electron, or running the call in a separate browser window while the canvas stays native.
+4. **WebRTC in WKWebView.** ~~The one thing we cannot verify from the browser dev server.~~ Closed. Camera, microphone, SDP and STUN all work in the real Tauri window, so we stay on Tauri and drop the Electron fallback. What is left is Vonage's SDK specifically, not WebRTC itself, plus the CSP that has to allow its domains.
 5. **Anthropic subscription policy.** Third-party use of Claude subscriptions through the Agent SDK works today but Anthropic paused, not canceled, a billing split in June 2026. The API-key placement keeps the demo independent of it.
 6. **tldraw watermark.** Present without a license. Fine for the hackathon, mention it if asked.
 

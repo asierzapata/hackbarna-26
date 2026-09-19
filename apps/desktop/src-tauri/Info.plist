@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  macOS refuses getUserMedia without these strings. Tauri picks this file up
+	  automatically because it sits next to tauri.conf.json: in dev it is embedded
+	  into the binary's __TEXT,__info_plist section, and the bundler merges it into
+	  the .app's Info.plist. No config key needed for either.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Kan uses your camera for the video call in a room.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Kan uses your microphone for the call in a room, so the others can hear you.</string>
+</dict>
+</plist>
