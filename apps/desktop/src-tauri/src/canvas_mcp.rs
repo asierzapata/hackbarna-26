@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 const MAX_MESSAGE: usize = 2 * 1024 * 1024;
-const TOOL_NAMES: [&str; 6] = ["addNode", "updateNode", "removeNodes", "connectNodes", "arrange", "getCanvas"];
+const TOOL_NAMES: [&str; 7] = ["addNode", "updateNode", "removeNodes", "connectNodes", "arrange", "groupNodes", "getCanvas"];
 type ToolResult = Result<Value, String>;
 type Emit = dyn Fn(Value) -> Result<(), String> + Send + Sync;
 
@@ -76,7 +76,7 @@ impl CanvasMcp {
         if tools.len() != TOOL_NAMES.len() || TOOL_NAMES.iter().any(|name| {
             tools.iter().filter(|tool| tool["name"] == *name && tool["inputSchema"]["type"] == "object").count() != 1
         }) {
-            return Err("Expected the six canvas tool schemas".into());
+            return Err("Expected the seven canvas tool schemas".into());
         }
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).map_err(|error| error.to_string())?;
         listener.set_nonblocking(true).map_err(|error| error.to_string())?;
@@ -309,7 +309,7 @@ mod tests {
         let bridge = bridge();
         let token = bridge.state.lock().unwrap().token.clone();
         let request = json!({"token": token, "rpc": {"id": 1, "method": "tools/list"}});
-        assert_eq!(bridge.dispatch(&request)["result"]["tools"].as_array().unwrap().len(), 6);
+        assert_eq!(bridge.dispatch(&request)["result"]["tools"].as_array().unwrap().len(), 7);
         assert!(bridge.dispatch(&json!({"token": "bad", "rpc": {"id": 1, "method": "tools/list"}})).get("error").is_some());
         bridge.rotate_session().unwrap();
         assert!(bridge.dispatch(&request).get("error").is_some());

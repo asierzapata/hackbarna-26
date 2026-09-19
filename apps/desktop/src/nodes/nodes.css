@@ -68,6 +68,11 @@
   background: color-mix(in oklab, var(--calendar-event-color) 7%, var(--card));
 }
 
+.canvas .tl-frame__body {
+  rx: 24px;
+  ry: 24px;
+}
+
 .kan-node {
   border-radius: 12px;
   padding-top: 0;
