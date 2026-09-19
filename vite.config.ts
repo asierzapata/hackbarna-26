@@ -1,3 +1,5 @@
+import path from "path";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
@@ -10,7 +12,20 @@ export default defineConfig(() => ({
   plugins: [
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react(),
+    tailwindcss(),
   ],
+
+  // @tldraw/assets uses `?url` imports that Vite's dependency pre-bundler
+  // cannot resolve; excluding it lets the asset plugin handle them instead.
+  optimizeDeps: {
+    exclude: ["@tldraw/assets"],
+  },
+
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

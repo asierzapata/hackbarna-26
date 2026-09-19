@@ -1,0 +1,224 @@
+import * as React from "react";
+import { RiCloseLine, RiLink } from "@remixicon/react";
+import { cn } from "cn";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import { Kbd } from "@/components/ui/kbd";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type {
+  CanvasAnchor,
+  Participant,
+  ThreadEntry,
+  ThreadFilter,
+} from "@/lib/thread";
+import { buildThreadRows, toParticipantMap } from "@/lib/thread";
+
+import { ThreadComposer, type ThreadComposerProps } from "./ThreadComposer";
+import { ThreadEntryRow, type ThreadRenderers } from "./ThreadEntryRow";
+import { TranscriptRun } from "./TranscriptRun";
+import { ThreadProvider, type ThreadActions } from "./thread-context";
+
+const filters: { value: ThreadFilter; label: string }[] = [
+  { value: "everything", label: "Everything" },
+  { value: "messages", label: "Messages" },
+  { value: "agent", label: "Agent activity" },
+];
+
+export interface ThreadPanelProps extends ThreadActions {
+  /** Room channel name shown next to the Thread badge. */
+  channel: string;
+  /** Merged, timestamp-ordered stream from all sources. */
+  entries: ThreadEntry[];
+  participants: Participant[];
+  currentUserId: string;
+  /** Canvas nodes selected right now — passed through to the composer. */
+  anchors?: CanvasAnchor[];
+  /** Total canvas node count, for the footer. */
+  canvasNodeCount?: number;
+  /** Register renderers for entry kinds beyond the built-in ones. */
+  renderers?: ThreadRenderers;
+  onClose?: () => void;
+  onCopyLink?: () => void;
+  composer?: Pick<
+    ThreadComposerProps,
+    "onSend" | "onAttach" | "onToggleMic" | "micActive" | "disabled"
+  >;
+  className?: string;
+}
+
+export function ThreadPanel({
+  channel,
+  entries,
+  participants,
+  currentUserId,
+  anchors = [],
+  canvasNodeCount,
+  renderers,
+  onClose,
+  onCopyLink,
+  composer,
+  className,
+  ...actions
+}: ThreadPanelProps) {
+  const [filter, setFilter] = React.useState<ThreadFilter>("everything");
+
+  const participantMap = React.useMemo(
+    () => toParticipantMap(participants),
+    [participants]
+  );
+  const rows = React.useMemo(
+    () => buildThreadRows(entries, filter),
+    [entries, filter]
+  );
+
+  const contextValue = React.useMemo(
+    () => ({ participants: participantMap, currentUserId, ...actions }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [participantMap, currentUserId, ...Object.values(actions)]
+  );
+
+  return (
+    <ThreadProvider value={contextValue}>
+      <aside
+        aria-label="Thread"
+        className={cn(
+          "flex h-full w-[440px] shrink-0 flex-col border-s border-border bg-background font-mono text-xs",
+          className
+        )}
+      >
+        <header className="flex flex-col gap-2.5 border-b border-border p-3">
+          <div className="flex items-center gap-2">
+            <Badge className="gap-1.5">
+              <span aria-hidden className="size-2 bg-primary-foreground" />
+              Thread
+            </Badge>
+            <span className="min-w-0 truncate text-muted-foreground">
+              {channel}
+            </span>
+            <span className="ms-auto flex shrink-0 items-center gap-1">
+              {onCopyLink ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Copy thread link"
+                  onClick={onCopyLink}
+                >
+                  <RiLink />
+                </Button>
+              ) : null}
+              {onClose ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-label="Close thread"
+                  onClick={onClose}
+                >
+                  <Kbd>Esc</Kbd>
+                  <RiCloseLine data-icon="inline-end" />
+                </Button>
+              ) : null}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-0.5">
+            <h2 className="font-heading text-base font-bold">Thread</h2>
+            <p className="text-muted-foreground">
+              source of truth of the discussion
+            </p>
+          </div>
+
+          <Tabs
+            value={filter}
+            onValueChange={(value) => setFilter(value as ThreadFilter)}
+          >
+            {/* Default TabsList variant on purpose: its active styles live in
+                the same Tailwind utility groups as the overrides below, so
+                tailwind-merge resolves them. The `line` variant scopes its
+                active styles through the list, which out-specifies them. */}
+            <TabsList className="h-auto gap-1 bg-transparent p-0">
+              {filters.map(({ value, label }) => (
+                <TabsTrigger
+                  key={value}
+                  value={value}
+                  className="h-7 flex-none border-border px-2 data-active:border-transparent data-active:bg-primary data-active:text-primary-foreground data-active:hover:bg-primary data-active:hover:text-primary-foreground dark:data-active:border-transparent dark:data-active:bg-primary dark:data-active:text-primary-foreground"
+                >
+                  {label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </header>
+
+        <MessageScrollerProvider autoScroll>
+          <MessageScroller className="flex-1 border-b border-border">
+            <MessageScrollerViewport>
+              {rows.length ? (
+                <MessageScrollerContent className="gap-3 p-3">
+                  {rows.map((row) => (
+                    <MessageScrollerItem
+                      key={row.id}
+                      messageId={row.id}
+                      scrollAnchor={
+                        row.type === "entry" &&
+                        row.entry.kind === "message" &&
+                        row.entry.authorId === currentUserId
+                      }
+                    >
+                      {row.type === "transcript-run" ? (
+                        <TranscriptRun entries={row.entries} />
+                      ) : (
+                        <div id={`thread-entry-${row.entry.id}`}>
+                          <ThreadEntryRow
+                            entry={row.entry}
+                            renderers={renderers}
+                          />
+                        </div>
+                      )}
+                    </MessageScrollerItem>
+                  ))}
+                </MessageScrollerContent>
+              ) : (
+                <Empty className="h-full">
+                  <EmptyHeader>
+                    <EmptyTitle>Nothing here yet</EmptyTitle>
+                    <EmptyDescription>
+                      {filter === "everything"
+                        ? "Start talking or type a message — the thread records both."
+                        : "No entries match this filter."}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </MessageScrollerViewport>
+            <MessageScrollerButton />
+          </MessageScroller>
+        </MessageScrollerProvider>
+
+        <div className="flex flex-col gap-2 p-3">
+          <ThreadComposer anchors={anchors} {...composer} />
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Thread is append-only · {entries.length} entries</span>
+            {canvasNodeCount !== undefined ? (
+              <span>Canvas: {canvasNodeCount} nodes</span>
+            ) : null}
+          </div>
+        </div>
+      </aside>
+    </ThreadProvider>
+  );
+}

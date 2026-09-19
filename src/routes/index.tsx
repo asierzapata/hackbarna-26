@@ -1,3 +1,4 @@
+import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
@@ -9,6 +10,18 @@ export const Route = createFileRoute("/")({
 });
 
 function WorkspacePage() {
+  // The workspace owns thread visibility so the panel's Esc / close control
+  // has something real to do.
+  const [threadOpen, setThreadOpen] = React.useState(true);
+
+  React.useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setThreadOpen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   return (
     <div className="workspace">
       <HeaderBar />
@@ -17,7 +30,7 @@ function WorkspacePage() {
           <Canvas />
           <CallBar />
         </div>
-        <ChatPanel />
+        {threadOpen ? <ChatPanel onClose={() => setThreadOpen(false)} /> : null}
       </main>
     </div>
   );
