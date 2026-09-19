@@ -13,6 +13,10 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Kbd } from "@/components/ui/kbd";
+import {
+  ModelSelectorKit,
+  type AiModelSelection,
+} from "@/components/ui/ai-model-select";
 import type { CanvasAnchor } from "@/lib/thread";
 
 export interface ThreadComposerProps {
@@ -26,6 +30,8 @@ export interface ThreadComposerProps {
   /** Toggle local mic capture; transcription lands back as transcript entries. */
   onToggleMic?: () => void;
   micActive?: boolean;
+  modelSelection?: AiModelSelection;
+  onModelSelectionChange?: (selection: AiModelSelection) => void;
 }
 
 export function ThreadComposer({
@@ -36,6 +42,8 @@ export function ThreadComposer({
   onAttach,
   onToggleMic,
   micActive,
+  modelSelection,
+  onModelSelectionChange,
 }: ThreadComposerProps) {
   const [text, setText] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
@@ -119,6 +127,15 @@ export function ThreadComposer({
             </span>
           ) : null}
         </span>
+
+        {modelSelection ? (
+          <ModelSelectorKit
+            value={modelSelection}
+            onValueChange={onModelSelectionChange}
+            className="min-w-0"
+            aria-label="Choose chat model"
+          />
+        ) : null}
 
         <InputGroupButton
           variant="default"

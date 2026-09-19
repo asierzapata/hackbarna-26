@@ -16,6 +16,11 @@ import { createMockTransport, demoParticipants } from "@/lib/thread-fixtures";
 import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
+import {
+  DEFAULT_AI_MODELS,
+  defaultSelectionFor,
+  type AiModelSelection,
+} from "@/components/ui/ai-model-select";
 
 const DEFAULT_USER = "You";
 const AGENT = "assistant";
@@ -94,6 +99,9 @@ export function ChatPanel({
     new Set()
   );
   const [micActive, setMicActive] = React.useState(false);
+  const [modelSelection, setModelSelection] = React.useState<AiModelSelection>(() =>
+    defaultSelectionFor(DEFAULT_AI_MODELS[0])
+  );
 
   /** Upsert by id: a replay and a live append are the same operation. */
   const upsert = React.useCallback((entry: ThreadEntry) => {
@@ -147,9 +155,10 @@ export function ChatPanel({
    * server exists there is nowhere to publish them. They carry `PENDING_SEQ`
    * so they sort after everything the room has numbered.
    */
-  async function askAgent(text: string) {
+  async function askAgent(text: string, selectedModel: AiModelSelection) {
     const id = `agent-${Date.now()}`;
     const startedAt = Date.now();
+    const model = DEFAULT_AI_MODELS.find((item) => item.id === selectedModel.id);
 
     upsert({
       id,
@@ -157,7 +166,7 @@ export function ChatPanel({
       kind: "agent",
       at: new Date().toISOString(),
       authorId: AGENT,
-      model: agent.status.agent ?? agent.status.providerLabel ?? "Agent",
+      model: model?.label ?? agent.status.agent ?? agent.status.providerLabel ?? "Agent",
       text: "",
     });
     setStreamingIds((prev) => new Set(prev).add(id));
@@ -220,7 +229,7 @@ export function ChatPanel({
     });
 
     // A connected agent answers every message; until then the thread is local.
-    if (agent.status.state === "ready") void askAgent(text);
+    if (agent.status.state === "ready") void askAgent(text, modelSelection);
   }
 
   function resolveSuggestion(suggestion: SuggestionEntry, accepted: boolean) {
@@ -263,6 +272,8 @@ export function ChatPanel({
         micActive,
         onToggleMic: () => setMicActive((on) => !on),
         disabled: agent.busy,
+        modelSelection,
+        onModelSelectionChange: setModelSelection,
       }}
     />
   );

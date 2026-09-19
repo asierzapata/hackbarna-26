@@ -61,7 +61,13 @@ export interface ThreadPanelProps extends ThreadActions {
   onCopyLink?: () => void;
   composer?: Pick<
     ThreadComposerProps,
-    "onSend" | "onAttach" | "onToggleMic" | "micActive" | "disabled"
+    "onSend"
+    | "onAttach"
+    | "onToggleMic"
+    | "micActive"
+    | "disabled"
+    | "modelSelection"
+    | "onModelSelectionChange"
   >;
   className?: string;
 }
