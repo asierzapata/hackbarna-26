@@ -451,6 +451,7 @@ export function ChatPanel({
       composer={{
         onSend: handleSend,
         disabled: userId === DEFAULT_USER || !roomSnapshot.ready,
+        agentReady: agent.status.state === "ready",
         modelSelection: models.length ? modelSelection : undefined,
         models,
         modelDisabled: agent.busy || agent.status.state !== "ready",
