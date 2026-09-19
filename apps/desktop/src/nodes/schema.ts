@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const cellValue = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+export const cellValue = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+]);
 export type CellValue = z.infer<typeof cellValue>;
 
 export const chartKind = z.enum(["bar", "line", "area", "pie"]);
@@ -10,8 +15,13 @@ export const chartSeries = z.object({
 });
 export const chartSpec = z.object({
   kind: chartKind,
-  x: z.string().describe("Field in each data row used for the x axis / pie slice label"),
-  series: z.array(chartSeries).min(1).describe("One entry per plotted series. Pie charts use only the first."),
+  x: z
+    .string()
+    .describe("Field in each data row used for the x axis / pie slice label"),
+  series: z
+    .array(chartSeries)
+    .min(1)
+    .describe("One entry per plotted series. Pie charts use only the first."),
   stacked: z.boolean().optional(),
   yLabel: z.string().optional(),
 });
@@ -25,7 +35,14 @@ export const mapMarker = z.object({
   note: z.string().optional(),
 });
 export const mapCenter = z.object({ lat: latitude, lng: longitude });
-export const mapStyle = z.enum(["streets", "aquarelle", "light", "dark", "satellite", "outdoor"]);
+export const mapStyle = z.enum([
+  "streets",
+  "aquarelle",
+  "light",
+  "dark",
+  "satellite",
+  "outdoor",
+]);
 
 export const markdownDraft = z.object({
   type: z.literal("markdown"),
@@ -37,7 +54,10 @@ export const chartDraft = z.object({
   title: z.string(),
   spec: chartSpec,
   data: z.array(z.record(z.string(), cellValue)).min(1),
-  sourceNote: z.string().optional().describe("Where the numbers came from, shown below the title"),
+  sourceNote: z
+    .string()
+    .optional()
+    .describe("Where the numbers came from, shown below the title"),
 });
 export const tableDraft = z.object({
   type: z.literal("table"),
@@ -57,39 +77,66 @@ export const imageDraft = z.object({
 export const mapDraft = z.object({
   type: z.literal("map"),
   title: z.string(),
-  markers: z.array(mapMarker).min(1).describe("Pins; the view fits all of them unless center/zoom are given"),
+  markers: z
+    .array(mapMarker)
+    .min(1)
+    .describe("Pins; the view fits all of them unless center/zoom are given"),
   center: mapCenter.optional(),
   zoom: z.number().min(0).max(22).optional(),
   style: mapStyle.optional().describe("Defaults to Aquarelle"),
 });
 export const logoDraft = z.object({
   type: z.literal("logo"),
-  domain: z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i).describe("Company domain, e.g. stripe.com"),
+  domain: z
+    .string()
+    .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i)
+    .describe("Company domain, e.g. stripe.com"),
   name: z.string().optional(),
-  note: z.string().optional().describe("One line, e.g. 'payments provider, option B'"),
+  note: z
+    .string()
+    .optional()
+    .describe("One line, e.g. 'payments provider, option B'"),
 });
 
-export const dateOnly = z.iso.date().refine((value) => value >= "0001-01-01", {
-  message: "Date must be in years 0001–9999",
-}).describe("Calendar date in YYYY-MM-DD format, without a time or timezone");
-export const calendarMonth = z.string().regex(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/)
+export const dateOnly = z.iso
+  .date()
+  .refine((value) => value >= "0001-01-01", {
+    message: "Date must be in years 0001–9999",
+  })
+  .describe("Calendar date in YYYY-MM-DD format, without a time or timezone");
+export const calendarMonth = z
+  .string()
+  .regex(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/)
   .describe("Displayed month in YYYY-MM format, years 0001–9999");
-export const datedEvent = z.object({
-  id: z.string().min(1).describe("Stable event ID, unique within this node"),
-  title: z.string().min(1).describe("Event or milestone label"),
-  start: dateOnly.describe("First day of the event, inclusive"),
-  end: dateOnly.optional().describe("Last day, inclusive; omit for a single-day event"),
-  description: z.string().optional().describe("Details shown when exploring the event"),
-  sourceNote: z.string().optional().describe("Source or reference for this event"),
-}).refine((event) => !event.end || event.end >= event.start, {
-  message: "Event end must be on or after its start",
-  path: ["end"],
-});
+export const datedEvent = z
+  .object({
+    id: z.string().min(1).describe("Stable event ID, unique within this node"),
+    title: z.string().min(1).describe("Event or milestone label"),
+    start: dateOnly.describe("First day of the event, inclusive"),
+    end: dateOnly
+      .optional()
+      .describe("Last day, inclusive; omit for a single-day event"),
+    description: z
+      .string()
+      .optional()
+      .describe("Details shown when exploring the event"),
+    sourceNote: z
+      .string()
+      .optional()
+      .describe("Source or reference for this event"),
+  })
+  .refine((event) => !event.end || event.end >= event.start, {
+    message: "Event end must be on or after its start",
+    path: ["end"],
+  });
 export type DatedEvent = z.infer<typeof datedEvent>;
-const datedEvents = z.array(datedEvent).refine(
-  (events) => new Set(events.map(({ id }) => id)).size === events.length,
-  { message: "Event IDs must be unique within the node" },
-).describe("Dated events; may be empty and supplied in any order");
+const datedEvents = z
+  .array(datedEvent)
+  .refine(
+    (events) => new Set(events.map(({ id }) => id)).size === events.length,
+    { message: "Event IDs must be unique within the node" },
+  )
+  .describe("Dated events; may be empty and supplied in any order");
 export const timelineDraft = z.object({
   type: z.literal("timeline"),
   title: z.string().describe("Timeline heading"),
@@ -100,7 +147,9 @@ export const calendarDraft = z.object({
   type: z.literal("calendar"),
   title: z.string().describe("Calendar heading"),
   events: datedEvents,
-  month: calendarMonth.optional().describe("Initial month; defaults to earliest event or current month"),
+  month: calendarMonth
+    .optional()
+    .describe("Initial month; defaults to earliest event or current month"),
   sourceNote: z.string().optional().describe("Source for the calendar"),
 });
 
@@ -131,25 +180,37 @@ const geoShapePatch = z.object({
 
 export const nodePatch = z.discriminatedUnion("type", [
   markdownDraft.partial().required({ type: true }).extend(geometryPatch),
-  chartDraft.partial().required({ type: true }).extend({
-    ...geometryPatch,
-    hiddenSeries: z.array(z.string()).optional(),
-    focusX: z.string().nullable().optional(),
-  }),
-  tableDraft.partial().required({ type: true }).extend({
-    ...geometryPatch,
-    highlightRow: z.number().int().min(-1).optional(),
-    selectedRows: z.array(z.number().int().nonnegative()).optional(),
-    sortBy: z.object({
-      column: z.number().int().nonnegative(),
-      dir: z.enum(["asc", "desc"]),
-    }).nullable().optional(),
-  }),
+  chartDraft
+    .partial()
+    .required({ type: true })
+    .extend({
+      ...geometryPatch,
+      hiddenSeries: z.array(z.string()).optional(),
+      focusX: z.string().nullable().optional(),
+    }),
+  tableDraft
+    .partial()
+    .required({ type: true })
+    .extend({
+      ...geometryPatch,
+      highlightRow: z.number().int().min(-1).optional(),
+      selectedRows: z.array(z.number().int().nonnegative()).optional(),
+      sortBy: z
+        .object({
+          column: z.number().int().nonnegative(),
+          dir: z.enum(["asc", "desc"]),
+        })
+        .nullable()
+        .optional(),
+    }),
   imageDraft.partial().required({ type: true }).extend(geometryPatch),
-  mapDraft.partial().required({ type: true }).extend({
-    ...geometryPatch,
-    selectedMarker: z.number().int().min(-1).optional(),
-  }),
+  mapDraft
+    .partial()
+    .required({ type: true })
+    .extend({
+      ...geometryPatch,
+      selectedMarker: z.number().int().min(-1).optional(),
+    }),
   logoDraft.partial().required({ type: true }).extend(geometryPatch),
   timelineDraft.partial().required({ type: true }).extend({
     ...geometryPatch,
@@ -173,8 +234,14 @@ export type Provenance = z.infer<typeof provenance>;
 
 export const addNodeInput = z.object({
   draft: nodeDraft,
-  near: z.object({ shapeId: z.string() }).optional().describe("Place next to this shape"),
-  at: z.object({ x: z.number(), y: z.number() }).optional().describe("Explicit page position; overrides near"),
+  near: z
+    .object({ shapeId: z.string() })
+    .optional()
+    .describe("Place next to this shape"),
+  at: z
+    .object({ x: z.number(), y: z.number() })
+    .optional()
+    .describe("Explicit page position; overrides near"),
   provenance: provenance.optional(),
 });
 export const updateNodeInput = z.object({
@@ -198,7 +265,9 @@ export const groupNodesInput = z.object({
   shapeIds: z.array(z.string()).min(2).describe("Existing canvas node IDs to place in one group"),
 });
 export const getCanvasInput = z.object({
-  scope: z.enum(["summary", "selection", "viewport", "full"]).default("summary"),
+  scope: z
+    .enum(["summary", "selection", "viewport", "full"])
+    .default("summary"),
   shapeIds: z.array(z.string()).optional(),
 });
 

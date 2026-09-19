@@ -90,21 +90,29 @@ export function ThreadPanel({
   ...actions
 }: ThreadPanelProps) {
   const [filter, setFilter] = React.useState<ThreadFilter>("everything");
-  const [replyTo, setReplyTo] = React.useState<{ id: string; label: string } | undefined>();
+  const [replyTo, setReplyTo] = React.useState<
+    { id: string; label: string } | undefined
+  >();
 
   const participantMap = React.useMemo(
     () => toParticipantMap(participants),
-    [participants]
+    [participants],
   );
   const rows = React.useMemo(
     () => buildThreadRows(entries, filter, view),
-    [entries, filter, view]
+    [entries, filter, view],
   );
 
   const contextValue = React.useMemo(
-    () => ({ participants: participantMap, currentUserId, ...actions, onReply: (entry: ThreadEntry) => setReplyTo({ id: entry.id, label: entry.kind }) }),
+    () => ({
+      participants: participantMap,
+      currentUserId,
+      ...actions,
+      onReply: (entry: ThreadEntry) =>
+        setReplyTo({ id: entry.id, label: entry.kind }),
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [participantMap, currentUserId, ...Object.values(actions)]
+    [participantMap, currentUserId, ...Object.values(actions)],
   );
 
   return (
@@ -113,7 +121,7 @@ export function ThreadPanel({
         aria-label="Thread"
         className={cn(
           "flex h-full w-[440px] shrink-0 flex-col border-s border-border bg-background font-mono text-xs",
-          className
+          className,
         )}
       >
         <header className="flex flex-col gap-2.5 border-b border-border p-3">
@@ -221,7 +229,12 @@ export function ThreadPanel({
         </MessageScrollerProvider>
 
         <div className="flex flex-col gap-2 p-3">
-          <ThreadComposer anchors={anchors} {...composer} replyTo={replyTo} onClearReply={() => setReplyTo(undefined)} />
+          <ThreadComposer
+            anchors={anchors}
+            {...composer}
+            replyTo={replyTo}
+            onClearReply={() => setReplyTo(undefined)}
+          />
           <div className="flex items-center justify-between text-muted-foreground">
             <span>Thread is append-only · {entries.length} entries</span>
             {canvasNodeCount !== undefined ? (

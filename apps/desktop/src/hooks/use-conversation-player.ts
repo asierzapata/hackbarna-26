@@ -1,6 +1,9 @@
 import * as React from "react";
 
-import type { ConversationLine, ConversationScript } from "@/lib/conversation-script";
+import type {
+  ConversationLine,
+  ConversationScript,
+} from "@/lib/conversation-script";
 
 export const DEFAULT_CONVERSATION_DELAY_MS = 1000;
 
@@ -14,7 +17,7 @@ export const DEFAULT_CONVERSATION_DELAY_MS = 1000;
  */
 export function useConversationPlayer(
   script: ConversationScript,
-  onLine: (line: ConversationLine, index: number) => void | Promise<void>
+  onLine: (line: ConversationLine, index: number) => void | Promise<void>,
 ) {
   const [playing, setPlaying] = React.useState(false);
   const [delayMs, setDelayMs] = React.useState(DEFAULT_CONVERSATION_DELAY_MS);
@@ -50,9 +53,12 @@ export function useConversationPlayer(
           }
         }
       },
-      cursor === 0 ? 0 : delayRef.current
+      cursor === 0 ? 0 : delayRef.current,
     );
-    return () => { cancelled = true; clearTimeout(timer); };
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [playing, cursor, total, script.lines]);
 
   const start = React.useCallback(() => {

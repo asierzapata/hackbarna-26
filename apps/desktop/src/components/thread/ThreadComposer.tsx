@@ -56,7 +56,11 @@ export function ThreadComposer({
   return (
     <InputGroup className="bg-muted">
       <InputGroupAddon align="block-start" className="justify-between">
-        {replyTo ? <Button variant="outline" size="xs" onClick={onClearReply}>Replying to {replyTo.label}</Button> : null}
+        {replyTo ? (
+          <Button variant="outline" size="xs" onClick={onClearReply}>
+            Replying to {replyTo.label}
+          </Button>
+        ) : null}
         {anchors.length ? (
           <span className="flex min-w-0 flex-wrap items-center gap-1">
             <Badge variant="outline" className="border-agent text-agent">

@@ -13,7 +13,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Spinner } from "@/components/ui/spinner";
-import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from "@/components/ui/empty";
+import {
+  Empty,
+  EmptyHeader,
+  EmptyTitle,
+  EmptyDescription,
+  EmptyMedia,
+} from "@/components/ui/empty";
 import { JoinRoomDialog } from "@/components/JoinRoomDialog";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
@@ -65,7 +71,9 @@ function CatalogPage() {
   const [loading, setLoading] = React.useState(true);
   const [userName, setUserName] = React.useState<string>("");
 
-  const [localCanvases, setLocalCanvases] = React.useState<CanvasCatalogEntry[]>([]);
+  const [localCanvases, setLocalCanvases] = React.useState<
+    CanvasCatalogEntry[]
+  >([]);
   const [serverRooms, setServerRooms] = React.useState<ServerRoomSummary[]>([]);
   const [isServerReachable, setIsServerReachable] = React.useState(true);
 
@@ -75,7 +83,12 @@ function CatalogPage() {
 
   const refreshCatalog = React.useCallback(async () => {
     const profile = await getInstallationProfile();
-    if (!profile || !profile.onboardingCompletedAt || !profile.name || profile.onboardingVersion < 2) {
+    if (
+      !profile ||
+      !profile.onboardingCompletedAt ||
+      !profile.name ||
+      profile.onboardingVersion < 2
+    ) {
       void navigate({ to: "/onboarding", replace: true });
       return;
     }
@@ -217,14 +230,15 @@ function CatalogPage() {
             <RiAddLine className="size-3.5" />
             New canvas
           </Button>
-
         </div>
       </header>
 
       {/* Catalog Container */}
       <main className="flex-1 max-w-5xl w-full mx-auto p-6 md:p-8 space-y-8">
         <div className="space-y-1">
-          <h1 className="font-heading text-xl font-bold text-foreground">Canvases</h1>
+          <h1 className="font-heading text-xl font-bold text-foreground">
+            Canvases
+          </h1>
           <p className="text-xs text-muted-foreground font-sans">
             Manage your local offline canvases and collaborative online rooms.
           </p>
@@ -235,12 +249,16 @@ function CatalogPage() {
           <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
               <RiHardDriveLine className="size-4 text-muted-foreground" />
-              <h2 id="offline-heading" className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground">
+              <h2
+                id="offline-heading"
+                className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground"
+              >
                 Offline Canvases
               </h2>
             </div>
             <span className="text-[11px] font-mono text-muted-foreground">
-              {offlineItems.length} {offlineItems.length === 1 ? "canvas" : "canvases"}
+              {offlineItems.length}{" "}
+              {offlineItems.length === 1 ? "canvas" : "canvases"}
             </span>
           </div>
 
@@ -248,9 +266,16 @@ function CatalogPage() {
             <Empty className="py-8 border border-border">
               <EmptyHeader>
                 <EmptyTitle>No offline canvases</EmptyTitle>
-                <EmptyDescription>Create your first offline canvas to start sketching.</EmptyDescription>
+                <EmptyDescription>
+                  Create your first offline canvas to start sketching.
+                </EmptyDescription>
               </EmptyHeader>
-              <Button size="sm" variant="outline" onClick={handleCreateNew} className="text-xs gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleCreateNew}
+                className="text-xs gap-1.5"
+              >
                 <RiAddLine className="size-3.5" />
                 Create canvas
               </Button>
@@ -276,7 +301,10 @@ function CatalogPage() {
                         {formatDate(canvas.lastOpenedAt)}
                       </span>
                       <span>·</span>
-                      <Badge variant="secondary" className="text-[10px] h-4 px-1 font-mono uppercase">
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] h-4 px-1 font-mono uppercase"
+                      >
                         Offline
                       </Badge>
                     </div>
@@ -317,11 +345,17 @@ function CatalogPage() {
           <div className="flex items-center justify-between pb-2 border-b border-border">
             <div className="flex items-center gap-2">
               <RiCloudLine className="size-4 text-primary" />
-              <h2 id="online-heading" className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground">
+              <h2
+                id="online-heading"
+                className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground"
+              >
                 Online Rooms
               </h2>
               {!isServerReachable ? (
-                <Badge variant="destructive" className="text-[10px] h-4 gap-1 px-1.5 font-mono">
+                <Badge
+                  variant="destructive"
+                  className="text-[10px] h-4 gap-1 px-1.5 font-mono"
+                >
                   <RiWifiOffLine className="size-2.5" /> Disconnected
                 </Badge>
               ) : null}
@@ -339,11 +373,17 @@ function CatalogPage() {
               <EmptyHeader>
                 <EmptyTitle>No online canvases yet</EmptyTitle>
                 <EmptyDescription>
-                  Make any offline canvas online to collaborate live, or join an existing room with a code.
+                  Make any offline canvas online to collaborate live, or join an
+                  existing room with a code.
                 </EmptyDescription>
               </EmptyHeader>
               <div className="flex items-center gap-2">
-                <Button size="sm" variant="outline" onClick={() => setJoinDialogOpen(true)} className="text-xs gap-1.5">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setJoinDialogOpen(true)}
+                  className="text-xs gap-1.5"
+                >
                   <RiLoginBoxLine className="size-3.5" />
                   Join canvas
                 </Button>
@@ -372,11 +412,16 @@ function CatalogPage() {
                       {room.roomCode ? (
                         <>
                           <span>·</span>
-                          <span className="uppercase text-primary/90 font-mono">Code: {room.roomCode}</span>
+                          <span className="uppercase text-primary/90 font-mono">
+                            Code: {room.roomCode}
+                          </span>
                         </>
                       ) : null}
                       <span>·</span>
-                      <Badge variant="default" className="text-[10px] h-4 px-1 font-mono uppercase">
+                      <Badge
+                        variant="default"
+                        className="text-[10px] h-4 px-1 font-mono uppercase"
+                      >
                         Online
                       </Badge>
                     </div>

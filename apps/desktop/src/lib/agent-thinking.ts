@@ -1,6 +1,16 @@
-export function canvasThinkingTargets(name: string, input: unknown, result?: unknown): string[] | null {
-  const args = input && typeof input === "object" ? input as Record<string, unknown> : {};
-  const output = result && typeof result === "object" ? result as Record<string, unknown> : {};
+export function canvasThinkingTargets(
+  name: string,
+  input: unknown,
+  result?: unknown,
+): string[] | null {
+  const args =
+    input && typeof input === "object"
+      ? (input as Record<string, unknown>)
+      : {};
+  const output =
+    result && typeof result === "object"
+      ? (result as Record<string, unknown>)
+      : {};
   let candidates: unknown[];
   switch (name) {
     case "addNode": {
@@ -23,6 +33,12 @@ export function canvasThinkingTargets(name: string, input: unknown, result?: unk
     default:
       return null;
   }
-  const ids = [...new Set(candidates.filter((id): id is string => typeof id === "string" && id.length > 0))];
+  const ids = [
+    ...new Set(
+      candidates.filter(
+        (id): id is string => typeof id === "string" && id.length > 0,
+      ),
+    ),
+  ];
   return ids.length ? ids : null;
 }

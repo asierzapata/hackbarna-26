@@ -1,8 +1,19 @@
 import * as React from "react";
 import { isTauri } from "@tauri-apps/api/core";
-import { useAgent, providerLabels, type Provider, type AuthMode } from "./agent-context";
+import {
+  useAgent,
+  providerLabels,
+  type Provider,
+  type AuthMode,
+} from "./agent-context";
 import { Button } from "./ui/button";
-import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "./ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "./ui/field";
 import { Input } from "./ui/input";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { ModelSelectorKit } from "./ui/ai-model-select";
@@ -31,7 +42,10 @@ export function AgentSetup() {
           <Field>
             <FieldLabel>Connected to {agent.status.providerLabel}</FieldLabel>
             <FieldDescription>
-              {agent.status.mode === "api_key" ? "API key saved in macOS Keychain." : "Using your subscription."} Kan will reconnect when you reopen the app.
+              {agent.status.mode === "api_key"
+                ? "API key saved in macOS Keychain."
+                : "Using your subscription."}{" "}
+              Kan will reconnect when you reopen the app.
             </FieldDescription>
           </Field>
           <Field>
@@ -40,34 +54,75 @@ export function AgentSetup() {
               <ModelSelectorKit
                 models={models.available}
                 value={{ id: models.current ?? "" }}
-                onValueChange={(selection) => { void agent.setModel(selection.id); }}
+                onValueChange={(selection) => {
+                  void agent.setModel(selection.id);
+                }}
                 disabled={pending}
                 aria-label="Choose default model"
               />
             ) : (
-              <FieldDescription>This provider does not expose a model picker. Its default model will be used.</FieldDescription>
+              <FieldDescription>
+                This provider does not expose a model picker. Its default model
+                will be used.
+              </FieldDescription>
             )}
-            <FieldDescription>Your choice applies to new sessions and is remembered after a restart. You can change it in chat.</FieldDescription>
+            <FieldDescription>
+              Your choice applies to new sessions and is remembered after a
+              restart. You can change it in chat.
+            </FieldDescription>
           </Field>
-          <Button type="button" variant="outline" disabled={pending} onClick={() => { void agent.signOut(); }}>Change account</Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            onClick={() => {
+              void agent.signOut();
+            }}
+          >
+            Change account
+          </Button>
         </>
       ) : (
         <>
           <Field>
             <FieldLabel id="provider-label">AI provider</FieldLabel>
-            <ToggleGroup aria-labelledby="provider-label" variant="outline" value={[provider]} disabled={pending} onValueChange={(values) => {
-              if (values[0]) { setProvider(values[0] as Provider); setKey(""); setEdited(true); }
-            }}>
+            <ToggleGroup
+              aria-labelledby="provider-label"
+              variant="outline"
+              value={[provider]}
+              disabled={pending}
+              onValueChange={(values) => {
+                if (values[0]) {
+                  setProvider(values[0] as Provider);
+                  setKey("");
+                  setEdited(true);
+                }
+              }}
+            >
               <ToggleGroupItem value="devin">Devin</ToggleGroupItem>
               <ToggleGroupItem value="openai">OpenAI</ToggleGroupItem>
             </ToggleGroup>
           </Field>
           <Field>
-            <FieldLabel id="auth-label">How would you like to sign in?</FieldLabel>
-            <ToggleGroup aria-labelledby="auth-label" variant="outline" value={[mode]} disabled={pending} onValueChange={(values) => {
-              if (values[0]) { setMode(values[0] as AuthMode); setKey(""); setEdited(true); }
-            }}>
-              <ToggleGroupItem value="subscription">Subscription</ToggleGroupItem>
+            <FieldLabel id="auth-label">
+              How would you like to sign in?
+            </FieldLabel>
+            <ToggleGroup
+              aria-labelledby="auth-label"
+              variant="outline"
+              value={[mode]}
+              disabled={pending}
+              onValueChange={(values) => {
+                if (values[0]) {
+                  setMode(values[0] as AuthMode);
+                  setKey("");
+                  setEdited(true);
+                }
+              }}
+            >
+              <ToggleGroupItem value="subscription">
+                Subscription
+              </ToggleGroupItem>
               <ToggleGroupItem value="api_key">API key</ToggleGroupItem>
             </ToggleGroup>
             <FieldDescription>
@@ -78,21 +133,52 @@ export function AgentSetup() {
           </Field>
           {mode === "api_key" && (
             <Field>
-              <FieldLabel htmlFor="onboarding-api-key">{providerLabels[provider]} API key</FieldLabel>
-              <Input id="onboarding-api-key" type="password" autoComplete="off" spellCheck={false} value={key} onChange={(event) => setKey(event.target.value)} disabled={pending} />
+              <FieldLabel htmlFor="onboarding-api-key">
+                {providerLabels[provider]} API key
+              </FieldLabel>
+              <Input
+                id="onboarding-api-key"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={key}
+                onChange={(event) => setKey(event.target.value)}
+                disabled={pending}
+              />
               <FieldDescription>
-                {provider === "openai" ? "Billed to your OpenAI API account, not your ChatGPT subscription. The Codex adapter also caches the key locally until sign-out." : "Use a personal API key from your Devin account."}
+                {provider === "openai"
+                  ? "Billed to your OpenAI API account, not your ChatGPT subscription. The Codex adapter also caches the key locally until sign-out."
+                  : "Use a personal API key from your Devin account."}
               </FieldDescription>
             </Field>
           )}
-          <Button type="button" disabled={pending || !isTauri() || (mode === "api_key" && !key.trim())} onClick={() => {
-            const apiKey = key.trim();
-            setKey("");
-            void agent.signIn(provider, mode, mode === "api_key" ? apiKey : undefined);
-          }}>
-            {pending ? <><Spinner data-icon="inline-start" />Connecting…</> : `Connect ${providerLabels[provider]}`}
+          <Button
+            type="button"
+            disabled={
+              pending || !isTauri() || (mode === "api_key" && !key.trim())
+            }
+            onClick={() => {
+              const apiKey = key.trim();
+              setKey("");
+              void agent.signIn(
+                provider,
+                mode,
+                mode === "api_key" ? apiKey : undefined,
+              );
+            }}
+          >
+            {pending ? (
+              <>
+                <Spinner data-icon="inline-start" />
+                Connecting…
+              </>
+            ) : (
+              `Connect ${providerLabels[provider]}`
+            )}
           </Button>
-          <FieldDescription>After connecting, choose from the models available to your account.</FieldDescription>
+          <FieldDescription>
+            After connecting, choose from the models available to your account.
+          </FieldDescription>
         </>
       )}
       {agent.status.message && <FieldError>{agent.status.message}</FieldError>}

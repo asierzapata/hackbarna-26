@@ -41,10 +41,10 @@ the workspace without it.
 activate on `npm install` — no husky, no dependency. If your hooks aren't
 firing, you haven't run `npm install` since they landed.
 
-| Hook | Runs | Cost |
-| --- | --- | --- |
-| `pre-commit` | typecheck, **only the workspaces the commit touches** | seconds |
-| `pre-push` | typecheck + tests + build, everything | ~10s warm |
+| Hook         | Runs                                                  | Cost      |
+| ------------ | ----------------------------------------------------- | --------- |
+| `pre-commit` | typecheck, **only the workspaces the commit touches** | seconds   |
+| `pre-push`   | typecheck + tests + build, everything                 | ~10s warm |
 
 Both block on failure. Bypass with `git commit --no-verify` / `git push
 --no-verify`, or `KAN_SKIP_HOOKS=1` for both. Use the bypass when you are
@@ -66,17 +66,17 @@ Scoping lives in `.githooks/_scope.sh`: `apps/desktop/*` checks the frontend,
 
 ## Commands
 
-| Task | Command |
-| --- | --- |
-| Dev server (browser) | `npm run dev` — serves on **port 1420**, `strictPort` |
-| Dev app (Tauri window) | `npm run tauri dev` |
-| Dev app + automation | `npm run tauri:drive` — adds WebDriver on :4445 |
-| Drive the running app | `node scripts/drive.mjs <cmd>` — see the `e2e` skill |
-| Typecheck (all) | `npm run typecheck` |
-| Build one workspace | `npx turbo run build --filter=@kan/desktop` |
-| Typecheck (frontend only) | `npm run typecheck -w @kan/desktop` |
-| Production build | `npm run build` |
-| Room server | `npm run server` |
+| Task                      | Command                                               |
+| ------------------------- | ----------------------------------------------------- |
+| Dev server (browser)      | `npm run dev` — serves on **port 1420**, `strictPort` |
+| Dev app (Tauri window)    | `npm run tauri dev`                                   |
+| Dev app + automation      | `npm run tauri:drive` — adds WebDriver on :4445       |
+| Drive the running app     | `node scripts/drive.mjs <cmd>` — see the `e2e` skill  |
+| Typecheck (all)           | `npm run typecheck`                                   |
+| Build one workspace       | `npx turbo run build --filter=@kan/desktop`           |
+| Typecheck (frontend only) | `npm run typecheck -w @kan/desktop`                   |
+| Production build          | `npm run build`                                       |
+| Room server               | `npm run server`                                      |
 
 `tauri.conf.json` points `devUrl` at `http://localhost:1420`, so the port is
 fixed — if it's taken, the dev server fails rather than picking another.
@@ -121,13 +121,13 @@ streaming `AgentEntry`.
 Two providers, one protocol — the difference between them is a command line and
 an env var, so everything below the launcher is shared:
 
-| Provider | Command | Subscription | API key |
-| --- | --- | --- | --- |
-| Devin | `devin acp` | `devin auth login` creds, else `authenticate` with `devin-browser` | `WINDSURF_API_KEY` |
-| OpenAI | `npx -y @agentclientprotocol/codex-acp` | `authenticate` with `chat-gpt` (opens a browser) | `CODEX_API_KEY` |
+| Provider | Command                                 | Subscription                                                       | API key            |
+| -------- | --------------------------------------- | ------------------------------------------------------------------ | ------------------ |
+| Devin    | `devin acp`                             | `devin auth login` creds, else `authenticate` with `devin-browser` | `WINDSURF_API_KEY` |
+| OpenAI   | `npx -y @agentclientprotocol/codex-acp` | `authenticate` with `chat-gpt` (opens a browser)                   | `CODEX_API_KEY`    |
 
-`Sign In` opens a submenu per provider, each offering *With Subscription* or
-*With API Key*; the key is typed into a dialog. One `agent_sign_in(provider,
+`Sign In` opens a submenu per provider, each offering _With Subscription_ or
+_With API Key_; the key is typed into a dialog. One `agent_sign_in(provider,
 mode, apiKey)` command covers all four combinations.
 
 - Both CLIs run under the user's own subscription; the app never holds a model
@@ -161,7 +161,7 @@ mode, apiKey)` command covers all four combinations.
 - Sign-out kills the child and forgets the session; stored subscription
   credentials are untouched. There is no real logout: neither adapter advertises
   `agentCapabilities.auth.logout`, and clearing credentials would mean `devin
-  auth logout` / `codex logout` — which would log the user out of their terminal
+auth logout` / `codex logout` — which would log the user out of their terminal
   too.
 
 ## Canvas nodes and the tool layer (`apps/desktop/src/nodes/`)
@@ -206,7 +206,7 @@ Keys: `apps/desktop/src/lib/config.ts` zod-parses `VITE_MAPTILER_KEY` and
 Vite's `envDir` keeps that location stable after the workspace move. Both are
 optional — the map falls back to MapLibre demo tiles, the logo to a favicon.
 `VITE_*` vars are embedded in the frontend bundle, so only publishable keys
-belong there (the Brandfetch *client id* is publishable; its API key is not).
+belong there (the Brandfetch _client id_ is publishable; its API key is not).
 `kan-logo` is deliberately chromeless (no `NodeCard`), aspect-locked, and
 `addNode({ near })` overlaps it on the near shape's top-right corner
 (`placementByType` in `draft.ts`). The map disables MapLibre's own `dragPan`
@@ -223,7 +223,7 @@ accept them. Arrow bindings need `snap: "none"` in tldraw 5; labels are
 ## Gotchas
 
 - **The Devin CLI owns `~/.codex`.** It is a Codex fork, and its `auth.json`
-  there holds *Devin* tokens in Codex's format. The Codex adapter is therefore
+  there holds _Devin_ tokens in Codex's format. The Codex adapter is therefore
   spawned with `CODEX_HOME` pointed at a scratch dir under the app data dir, so
   the two cannot read each other's credentials. Codex also refuses to start if
   `CODEX_HOME` does not already exist, so we create it first.
@@ -249,12 +249,12 @@ The authoritative implemented contract is the new backend section of
 `ARCHITECTURE.md` and the schemas in `packages/protocol`, not its historical
 host/server-fallback or thread-route proposals. Use Node >=24 from the repo root:
 
-| Task | Command |
-| --- | --- |
-| Room server (default :8787) | `npm run server` |
-| Standalone scoped ACP executor | `npm run runner` |
-| Backend TypeScript | `npm run typecheck:backend` |
-| Backend runtime tests | `npm run test:backend` |
+| Task                           | Command                     |
+| ------------------------------ | --------------------------- |
+| Room server (default :8787)    | `npm run server`            |
+| Standalone scoped ACP executor | `npm run runner`            |
+| Backend TypeScript             | `npm run typecheck:backend` |
+| Backend runtime tests          | `npm run test:backend`      |
 
 `apps/agent-runner` is a separate Node/tsx executor, not a replacement for the
 existing Rust Devin integration above. Automatic claiming defaults off; configure

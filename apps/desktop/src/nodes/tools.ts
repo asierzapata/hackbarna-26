@@ -11,11 +11,7 @@ import {
   type TLShapePartial,
 } from "tldraw";
 
-import {
-  draftToShapePartial,
-  placementByType,
-  shapeToSummary,
-} from "./draft";
+import { draftToShapePartial, placementByType, shapeToSummary } from "./draft";
 import {
   addNodeInput,
   arrangeInput,
@@ -42,17 +38,12 @@ type Bounds = { x: number; y: number; w: number; h: number };
 
 function intersects(a: Bounds, b: Bounds) {
   return (
-    a.x < b.x + b.w &&
-    a.x + a.w > b.x &&
-    a.y < b.y + b.h &&
-    a.y + a.h > b.y
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
   );
 }
 
 function easeInOutQuart(t: number) {
-  return t < 0.5
-    ? 8 * t * t * t * t
-    : 1 - Math.pow(-2 * t + 2, 4) / 2;
+  return t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
 }
 
 const GROUP_PADDING = 28;
@@ -111,7 +102,9 @@ function textFromRichText(value: unknown): string {
 function summarizeShape(editor: Editor, shape: TLShape, full = false) {
   if (isKanShape(shape)) {
     const summary = shapeToSummary(shape);
-    return full ? { ...summary, props: shape.props, meta: shape.meta } : summary;
+    return full
+      ? { ...summary, props: shape.props, meta: shape.meta }
+      : summary;
   }
   const bounds = editor.getShapePageBounds(shape);
   const common = {
@@ -144,8 +137,13 @@ function getConnections(editor: Editor) {
     .getCurrentPageShapes()
     .filter((shape): shape is TLArrowShape => shape.type === "arrow")
     .flatMap((arrow) => {
-      const bindings = editor.getBindingsFromShape<TLArrowBinding>(arrow, "arrow");
-      const start = bindings.find((binding) => binding.props.terminal === "start");
+      const bindings = editor.getBindingsFromShape<TLArrowBinding>(
+        arrow,
+        "arrow",
+      );
+      const start = bindings.find(
+        (binding) => binding.props.terminal === "start",
+      );
       const end = bindings.find((binding) => binding.props.terminal === "end");
       if (!start || !end) return [];
       return [
@@ -270,14 +268,21 @@ export function createCanvasTools(editor: Editor) {
     addNode(input: unknown) {
       const parsed = addNodeInput.parse(input);
       const id = createShapeId();
-      const preview = draftToShapePartial(parsed.draft, id, { x: 0, y: 0 }, parsed.provenance);
+      const preview = draftToShapePartial(
+        parsed.draft,
+        id,
+        { x: 0, y: 0 },
+        parsed.provenance,
+      );
       const props = preview.props as { w: number; h: number };
       let position: { x: number; y: number };
 
       if (parsed.at) {
         position = parsed.at;
       } else if (parsed.near) {
-        const nearBounds = editor.getShapePageBounds(parsed.near.shapeId as TLShapeId);
+        const nearBounds = editor.getShapePageBounds(
+          parsed.near.shapeId as TLShapeId,
+        );
         if (!nearBounds) {
           throw new Error(`Shape not found: ${parsed.near.shapeId}`);
         }
@@ -294,7 +299,8 @@ export function createCanvasTools(editor: Editor) {
             h: props.h,
           };
           const overlaps = editor.getCurrentPageShapes().some((shape) => {
-            if (!isKanShape(shape) || shape.id === parsed.near?.shapeId) return false;
+            if (!isKanShape(shape) || shape.id === parsed.near?.shapeId)
+              return false;
             const bounds = editor.getShapePageBounds(shape);
             return bounds ? intersects(right, bounds) : false;
           });
@@ -384,8 +390,12 @@ export function createCanvasTools(editor: Editor) {
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.title !== undefined ? { title: parsed.patch.title } : {}),
-            ...(parsed.patch.body !== undefined ? { body: parsed.patch.body } : {}),
+            ...(parsed.patch.title !== undefined
+              ? { title: parsed.patch.title }
+              : {}),
+            ...(parsed.patch.body !== undefined
+              ? { body: parsed.patch.body }
+              : {}),
           };
           break;
         }
@@ -397,17 +407,21 @@ export function createCanvasTools(editor: Editor) {
           const hiddenSeries = (
             parsed.patch.hiddenSeries ?? current.props.hiddenSeries
           ).filter((key) => seriesKeys.has(key));
-          const focusCandidate = parsed.patch.focusX !== undefined
-            ? parsed.patch.focusX
-            : current.props.focusX;
+          const focusCandidate =
+            parsed.patch.focusX !== undefined
+              ? parsed.patch.focusX
+              : current.props.focusX;
           const xValues = new Set(data.map((row) => String(row[spec.x] ?? "")));
-          const focusX = focusCandidate !== null && xValues.has(focusCandidate)
-            ? focusCandidate
-            : null;
+          const focusX =
+            focusCandidate !== null && xValues.has(focusCandidate)
+              ? focusCandidate
+              : null;
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.title !== undefined ? { title: parsed.patch.title } : {}),
+            ...(parsed.patch.title !== undefined
+              ? { title: parsed.patch.title }
+              : {}),
             ...(parsed.patch.spec !== undefined ? { spec } : {}),
             ...(parsed.patch.data !== undefined ? { data } : {}),
             ...(parsed.patch.sourceNote !== undefined
@@ -425,22 +439,26 @@ export function createCanvasTools(editor: Editor) {
           const selectedRows = (
             parsed.patch.selectedRows ?? current.props.selectedRows
           ).filter((index) => index < rows.length);
-          const highlightCandidate = parsed.patch.highlightRow !== undefined
-            ? parsed.patch.highlightRow
-            : current.props.highlightRow;
-          const highlightRow = highlightCandidate < rows.length
-            ? highlightCandidate
-            : -1;
-          const sortCandidate = parsed.patch.sortBy !== undefined
-            ? parsed.patch.sortBy
-            : current.props.sortBy;
-          const sortBy = sortCandidate && sortCandidate.column < columns.length
-            ? sortCandidate
-            : null;
+          const highlightCandidate =
+            parsed.patch.highlightRow !== undefined
+              ? parsed.patch.highlightRow
+              : current.props.highlightRow;
+          const highlightRow =
+            highlightCandidate < rows.length ? highlightCandidate : -1;
+          const sortCandidate =
+            parsed.patch.sortBy !== undefined
+              ? parsed.patch.sortBy
+              : current.props.sortBy;
+          const sortBy =
+            sortCandidate && sortCandidate.column < columns.length
+              ? sortCandidate
+              : null;
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.title !== undefined ? { title: parsed.patch.title } : {}),
+            ...(parsed.patch.title !== undefined
+              ? { title: parsed.patch.title }
+              : {}),
             ...(parsed.patch.columns !== undefined ? { columns } : {}),
             ...(parsed.patch.rows !== undefined ? { rows } : {}),
             ...(parsed.patch.sourceNote !== undefined
@@ -456,9 +474,15 @@ export function createCanvasTools(editor: Editor) {
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.title !== undefined ? { title: parsed.patch.title } : {}),
-            ...(parsed.patch.src !== undefined ? { src: parsed.patch.src } : {}),
-            ...(parsed.patch.alt !== undefined ? { alt: parsed.patch.alt } : {}),
+            ...(parsed.patch.title !== undefined
+              ? { title: parsed.patch.title }
+              : {}),
+            ...(parsed.patch.src !== undefined
+              ? { src: parsed.patch.src }
+              : {}),
+            ...(parsed.patch.alt !== undefined
+              ? { alt: parsed.patch.alt }
+              : {}),
             ...(parsed.patch.caption !== undefined
               ? { caption: parsed.patch.caption }
               : {}),
@@ -468,20 +492,30 @@ export function createCanvasTools(editor: Editor) {
         case "map": {
           const current = shape as MapShape;
           const markers = parsed.patch.markers ?? current.props.markers;
-          const selectedCandidate = parsed.patch.selectedMarker !== undefined
-            ? parsed.patch.selectedMarker
-            : current.props.selectedMarker;
-          const selectedMarker = selectedCandidate >= 0 && selectedCandidate < markers.length
-            ? selectedCandidate
-            : -1;
+          const selectedCandidate =
+            parsed.patch.selectedMarker !== undefined
+              ? parsed.patch.selectedMarker
+              : current.props.selectedMarker;
+          const selectedMarker =
+            selectedCandidate >= 0 && selectedCandidate < markers.length
+              ? selectedCandidate
+              : -1;
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.title !== undefined ? { title: parsed.patch.title } : {}),
+            ...(parsed.patch.title !== undefined
+              ? { title: parsed.patch.title }
+              : {}),
             ...(parsed.patch.markers !== undefined ? { markers } : {}),
-            ...(parsed.patch.center !== undefined ? { center: parsed.patch.center } : {}),
-            ...(parsed.patch.zoom !== undefined ? { zoom: parsed.patch.zoom } : {}),
-            ...(parsed.patch.style !== undefined ? { style: parsed.patch.style } : {}),
+            ...(parsed.patch.center !== undefined
+              ? { center: parsed.patch.center }
+              : {}),
+            ...(parsed.patch.zoom !== undefined
+              ? { zoom: parsed.patch.zoom }
+              : {}),
+            ...(parsed.patch.style !== undefined
+              ? { style: parsed.patch.style }
+              : {}),
             selectedMarker,
           };
           break;
@@ -490,20 +524,29 @@ export function createCanvasTools(editor: Editor) {
           const current = shape as TimelineShape;
           const { type: _type, x: _x, y: _y, ...props } = parsed.patch;
           const events = props.events ?? current.props.events;
-          const candidate = props.selectedEventId !== undefined
-            ? props.selectedEventId : current.props.selectedEventId;
+          const candidate =
+            props.selectedEventId !== undefined
+              ? props.selectedEventId
+              : current.props.selectedEventId;
           shapeUpdate.props = {
             ...props,
-            selectedEventId: events.some(({ id }) => id === candidate) ? candidate : null,
+            selectedEventId: events.some(({ id }) => id === candidate)
+              ? candidate
+              : null,
           };
           break;
         }
         case "calendar": {
           const current = shape as CalendarShape;
           const { type: _type, x: _x, y: _y, ...props } = parsed.patch;
-          const month = props.selectedDate?.slice(0, 7) ?? props.month ?? current.props.month;
-          const candidate = props.selectedDate !== undefined
-            ? props.selectedDate : current.props.selectedDate;
+          const month =
+            props.selectedDate?.slice(0, 7) ??
+            props.month ??
+            current.props.month;
+          const candidate =
+            props.selectedDate !== undefined
+              ? props.selectedDate
+              : current.props.selectedDate;
           shapeUpdate.props = {
             ...props,
             month,
@@ -515,9 +558,15 @@ export function createCanvasTools(editor: Editor) {
           shapeUpdate.props = {
             ...(w !== undefined ? { w } : {}),
             ...(h !== undefined ? { h } : {}),
-            ...(parsed.patch.domain !== undefined ? { domain: parsed.patch.domain } : {}),
-            ...(parsed.patch.name !== undefined ? { name: parsed.patch.name } : {}),
-            ...(parsed.patch.note !== undefined ? { note: parsed.patch.note } : {}),
+            ...(parsed.patch.domain !== undefined
+              ? { domain: parsed.patch.domain }
+              : {}),
+            ...(parsed.patch.name !== undefined
+              ? { name: parsed.patch.name }
+              : {}),
+            ...(parsed.patch.note !== undefined
+              ? { note: parsed.patch.note }
+              : {}),
           };
           break;
         }
@@ -534,7 +583,10 @@ export function createCanvasTools(editor: Editor) {
         const shape = editor.getShape(id as TLShapeId);
         if (!shape) continue;
         removed.add(shape.id);
-        for (const binding of editor.getBindingsToShape<TLArrowBinding>(shape, "arrow")) {
+        for (const binding of editor.getBindingsToShape<TLArrowBinding>(
+          shape,
+          "arrow",
+        )) {
           const arrow = editor.getShape(binding.fromId);
           if (arrow?.type === "arrow") removed.add(arrow.id);
         }
@@ -551,7 +603,8 @@ export function createCanvasTools(editor: Editor) {
       if (!to) throw new Error(`Shape not found: ${parsed.to}`);
       const fromBounds = editor.getShapePageBounds(from);
       const toBounds = editor.getShapePageBounds(to);
-      if (!fromBounds || !toBounds) throw new Error("Unable to read node bounds");
+      if (!fromBounds || !toBounds)
+        throw new Error("Unable to read node bounds");
       const id = createShapeId();
 
       editor.run(() => {
@@ -563,8 +616,10 @@ export function createCanvasTools(editor: Editor) {
           props: {
             start: { x: 0, y: 0 },
             end: {
-              x: toBounds.x + toBounds.w / 2 - (fromBounds.x + fromBounds.w / 2),
-              y: toBounds.y + toBounds.h / 2 - (fromBounds.y + fromBounds.h / 2),
+              x:
+                toBounds.x + toBounds.w / 2 - (fromBounds.x + fromBounds.w / 2),
+              y:
+                toBounds.y + toBounds.h / 2 - (fromBounds.y + fromBounds.h / 2),
             },
             richText: toRichText(parsed.label ?? ""),
           },
@@ -641,11 +696,19 @@ export function createCanvasTools(editor: Editor) {
           columnWidths[column] = Math.max(columnWidths[column], bounds.w);
           rowHeights[row] = Math.max(rowHeights[row], bounds.h);
         });
-        const xPositions = columnWidths.map((_, index) =>
-          anchorX + columnWidths.slice(0, index).reduce((sum, width) => sum + width + gap, 0),
+        const xPositions = columnWidths.map(
+          (_, index) =>
+            anchorX +
+            columnWidths
+              .slice(0, index)
+              .reduce((sum, width) => sum + width + gap, 0),
         );
-        const yPositions = rowHeights.map((_, index) =>
-          anchorY + rowHeights.slice(0, index).reduce((sum, height) => sum + height + gap, 0),
+        const yPositions = rowHeights.map(
+          (_, index) =>
+            anchorY +
+            rowHeights
+              .slice(0, index)
+              .reduce((sum, height) => sum + height + gap, 0),
         );
         shapes.forEach(({ shape }, index) => {
           updates.push({

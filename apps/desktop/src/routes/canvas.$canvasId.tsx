@@ -11,7 +11,11 @@ import { SharingHintBanner } from "../components/SharingHintBanner";
 import { PublishConfirmationDialog } from "../components/PublishConfirmationDialog";
 import { WorkspacePanels } from "../components/WorkspacePanels";
 import { Spinner } from "../components/ui/spinner";
-import { getCanvasEntry, touchCanvas, type CanvasCatalogEntry } from "@/lib/canvas-repository";
+import {
+  getCanvasEntry,
+  touchCanvas,
+  type CanvasCatalogEntry,
+} from "@/lib/canvas-repository";
 import { publishCanvas } from "@/lib/publish-canvas";
 
 export const Route = createFileRoute("/canvas/$canvasId")({
@@ -22,7 +26,8 @@ function CanvasPage() {
   const { canvasId } = Route.useParams();
   const navigate = useNavigate();
 
-  const [canvasEntry, setCanvasEntry] = React.useState<CanvasCatalogEntry | null>(null);
+  const [canvasEntry, setCanvasEntry] =
+    React.useState<CanvasCatalogEntry | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [threadOpen, setThreadOpen] = React.useState(true);
   const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
@@ -64,9 +69,12 @@ function CanvasPage() {
     return (
       <main className="flex h-full w-full flex-col items-center justify-center gap-4 bg-background p-6 text-center">
         <RiAlertLine className="size-8 text-muted-foreground" />
-        <h1 className="font-heading text-base font-medium text-foreground">Canvas Not Found</h1>
+        <h1 className="font-heading text-base font-medium text-foreground">
+          Canvas Not Found
+        </h1>
         <p className="text-xs text-muted-foreground max-w-sm">
-          The requested offline canvas does not exist on this device or has been deleted.
+          The requested offline canvas does not exist on this device or has been
+          deleted.
         </p>
         <Link
           to="/"
@@ -145,7 +153,11 @@ function CanvasPageContent({
       setPublishDialogOpen(false);
       onPublishSuccess(result.room.id);
     } catch (err) {
-      setPublishError(err instanceof Error ? err.message : "Failed to publish canvas to server");
+      setPublishError(
+        err instanceof Error
+          ? err.message
+          : "Failed to publish canvas to server",
+      );
       setIsPublishing(false);
     }
   };

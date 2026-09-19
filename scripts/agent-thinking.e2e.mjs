@@ -5,10 +5,14 @@ import { fileURLToPath } from "node:url";
 
 const driver = fileURLToPath(new URL("./drive.mjs", import.meta.url));
 const drive = (...args) => {
-  const output = execFileSync(process.execPath, [driver, ...args], { encoding: "utf8", timeout: 15000 });
+  const output = execFileSync(process.execPath, [driver, ...args], {
+    encoding: "utf8",
+    timeout: 15000,
+  });
   return args[0] === "shot" ? output.trim() : JSON.parse(output);
 };
-const evaluate = (expression) => drive("eval", `({result: (${expression})})`).result;
+const evaluate = (expression) =>
+  drive("eval", `({result: (${expression})})`).result;
 const run = (body) => evaluate(`(() => { ${body} })()`);
 const waitFor = async (expression) => {
   const deadline = Date.now() + 20000;
@@ -18,27 +22,45 @@ const waitFor = async (expression) => {
     if (evaluate(expression)) return;
     await pause(100);
   }
-  throw new Error(`Timed out: ${expression}; ${JSON.stringify(evaluate("({status:window.__thinkingTest?.agent?.status,editor:!!window.__kan,errors:window.__kanErrors,fixture:document.querySelector('#thinking-test')?.textContent?.slice(0,200)})"))}`);
+  throw new Error(
+    `Timed out: ${expression}; ${JSON.stringify(evaluate("({status:window.__thinkingTest?.agent?.status,editor:!!window.__kan,errors:window.__kanErrors,fixture:document.querySelector('#thinking-test')?.textContent?.slice(0,200)})"))}`,
+  );
 };
-const targets = () => evaluate("Array.from(document.querySelectorAll('#thinking-test [data-thinking-shape]'), el => el.dataset.thinkingShape)");
+const targets = () =>
+  evaluate(
+    "Array.from(document.querySelectorAll('#thinking-test [data-thinking-shape]'), el => el.dataset.thinkingShape)",
+  );
 const start = async (ids) => {
-  run(`const t = window.__thinkingTest; t.pending = null; t.done = false; t.agent.prompt('Controlled thinking test', {canvas:{id:t.id, shapeIds:${JSON.stringify(ids)}, execute:(name,input) => t.execute(t.tools,name,input)}}).then(() => {t.done = true;}, error => {t.turnError = String(error); t.done = true;}); return true;`);
+  run(
+    `const t = window.__thinkingTest; t.pending = null; t.done = false; t.agent.prompt('Controlled thinking test', {canvas:{id:t.id, shapeIds:${JSON.stringify(ids)}, execute:(name,input) => t.execute(t.tools,name,input)}}).then(() => {t.done = true;}, error => {t.turnError = String(error); t.done = true;}); return true;`,
+  );
   await waitFor("!!window.__thinkingTest.pending");
 };
 const tool = async (name, input, extra = {}) => {
-  run(`const t = window.__thinkingTest; t.response = null; t.invoke('plugin:event|emit', {event:'canvas:tool',payload:{requestId:crypto.randomUUID(),turnId:t.pending.turnId,canvasId:t.id,name:${JSON.stringify(name)},arguments:${JSON.stringify(input)},expiresAt:Date.now()+10000,...${JSON.stringify(extra)}}}); return true;`);
-  if (!Object.keys(extra).length) await waitFor("!!window.__thinkingTest.response");
+  run(
+    `const t = window.__thinkingTest; t.response = null; t.invoke('plugin:event|emit', {event:'canvas:tool',payload:{requestId:crypto.randomUUID(),turnId:t.pending.turnId,canvasId:t.id,name:${JSON.stringify(name)},arguments:${JSON.stringify(input)},expiresAt:Date.now()+10000,...${JSON.stringify(extra)}}}); return true;`,
+  );
+  if (!Object.keys(extra).length)
+    await waitFor("!!window.__thinkingTest.response");
   await pause(150);
 };
 const finish = async (failure = false) => {
-  run(`const t = window.__thinkingTest; t.pending.${failure ? "reject(new Error('fixture failure'))" : "resolve('end_turn')"}; return true;`);
-  await waitFor("window.__thinkingTest.done && !window.__thinkingTest.agent.busy");
+  run(
+    `const t = window.__thinkingTest; t.pending.${failure ? "reject(new Error('fixture failure'))" : "resolve('end_turn')"}; return true;`,
+  );
+  await waitFor(
+    "window.__thinkingTest.done && !window.__thinkingTest.agent.busy",
+  );
   assert.deepEqual(targets(), []);
 };
 
 try {
   assert.equal(evaluate("!!window.__TAURI_INTERNALS__"), true);
-  assert.equal(evaluate("!!window.__kan"), false, "Run from the canvas catalog, not an active user canvas");
+  assert.equal(
+    evaluate("!!window.__kan"),
+    false,
+    "Run from the canvas catalog, not an active user canvas",
+  );
   run(`
     const t = window.__thinkingTest = {id:'thinking-test-'+crypto.randomUUID()};
     t.invoke = window.__TAURI_INTERNALS__.invoke;
@@ -82,7 +104,9 @@ try {
     }).catch(error => {t.error = String(error);});
     return true;
   `);
-  await waitFor("!!window.__kan && window.__thinkingTest.agent?.status.state === 'ready'");
+  await waitFor(
+    "!!window.__kan && window.__thinkingTest.agent?.status.state === 'ready'",
+  );
   const ids = run(`
     const t = window.__thinkingTest;
     t.editor = window.__kan.editor;
@@ -95,51 +119,115 @@ try {
   assert.deepEqual(targets(), []);
   await start([ids[0]]);
   assert.deepEqual(targets(), [ids[0]]);
-  assert.equal(evaluate("getComputedStyle(document.querySelector('[data-thinking-shape]')).pointerEvents"), "none");
-  const firstFrame = evaluate("document.querySelector('[data-thinking-shape] canvas').toDataURL()");
+  assert.equal(
+    evaluate(
+      "getComputedStyle(document.querySelector('[data-thinking-shape]')).pointerEvents",
+    ),
+    "none",
+  );
+  const firstFrame = evaluate(
+    "document.querySelector('[data-thinking-shape] canvas').toDataURL()",
+  );
   await pause(350);
-  assert.notEqual(evaluate("document.querySelector('[data-thinking-shape] canvas').toDataURL()"), firstFrame);
-  assert.ok(evaluate("(() => {const c=document.querySelector('[data-thinking-shape] canvas'); const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data; return pixels.some((v,i)=>i%4===3 && v>0 && v<150);})()"));
-  console.log("PASS selected node only, translucent blue pixels, autonomous animation, pointer passthrough");
+  assert.notEqual(
+    evaluate(
+      "document.querySelector('[data-thinking-shape] canvas').toDataURL()",
+    ),
+    firstFrame,
+  );
+  assert.ok(
+    evaluate(
+      "(() => {const c=document.querySelector('[data-thinking-shape] canvas'); const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data; return pixels.some((v,i)=>i%4===3 && v>0 && v<150);})()",
+    ),
+  );
+  console.log(
+    "PASS selected node only, translucent blue pixels, autonomous animation, pointer passthrough",
+  );
 
-  run(`window.__thinkingTest.editor.select(${JSON.stringify(ids[1])}); return true;`);
+  run(
+    `window.__thinkingTest.editor.select(${JSON.stringify(ids[1])}); return true;`,
+  );
   await pause(150);
   assert.deepEqual(targets(), [ids[0]]);
-  const beforePan = evaluate("document.querySelector('[data-thinking-shape]').getBoundingClientRect().x");
-  run("const e=window.__thinkingTest.editor; const c=e.getCamera(); e.setCamera({...c,x:c.x+35}); return true;");
+  const beforePan = evaluate(
+    "document.querySelector('[data-thinking-shape]').getBoundingClientRect().x",
+  );
+  run(
+    "const e=window.__thinkingTest.editor; const c=e.getCamera(); e.setCamera({...c,x:c.x+35}); return true;",
+  );
   await pause(150);
-  assert.notEqual(evaluate("document.querySelector('[data-thinking-shape]').getBoundingClientRect().x"), beforePan);
-  assert.ok(evaluate(`(() => { const t=window.__thinkingTest; const e=t.editor; const b=e.getShapePageBounds(${JSON.stringify(ids[0])}); const p=e.pageToViewport(b); return Math.abs(parseFloat(document.querySelector('[data-thinking-shape]').style.left)-Math.max(-6,p.x-6))<1; })()`));
-  console.log("PASS selection changes do not retarget the turn; overlay tracks the camera");
+  assert.notEqual(
+    evaluate(
+      "document.querySelector('[data-thinking-shape]').getBoundingClientRect().x",
+    ),
+    beforePan,
+  );
+  assert.ok(
+    evaluate(
+      `(() => { const t=window.__thinkingTest; const e=t.editor; const b=e.getShapePageBounds(${JSON.stringify(ids[0])}); const p=e.pageToViewport(b); return Math.abs(parseFloat(document.querySelector('[data-thinking-shape]').style.left)-Math.max(-6,p.x-6))<1; })()`,
+    ),
+  );
+  console.log(
+    "PASS selection changes do not retarget the turn; overlay tracks the camera",
+  );
 
-  await tool("updateNode", { shapeId: ids[1], patch: { type: "markdown", title: "Wrong turn" } }, { turnId: "stale-turn" });
+  await tool(
+    "updateNode",
+    { shapeId: ids[1], patch: { type: "markdown", title: "Wrong turn" } },
+    { turnId: "stale-turn" },
+  );
   assert.deepEqual(targets(), [ids[0]]);
-  await tool("updateNode", { shapeId: ids[1], patch: { type: "markdown", title: "Wrong canvas" } }, { canvasId: "other-canvas" });
+  await tool(
+    "updateNode",
+    { shapeId: ids[1], patch: { type: "markdown", title: "Wrong canvas" } },
+    { canvasId: "other-canvas" },
+  );
   assert.deepEqual(targets(), [ids[0]]);
-  await tool("updateNode", { shapeId: ids[1], patch: { type: "markdown", title: "Now considering this node" } });
+  await tool("updateNode", {
+    shapeId: ids[1],
+    patch: { type: "markdown", title: "Now considering this node" },
+  });
   assert.deepEqual(targets(), [ids[1]]);
   assert.equal(evaluate("window.__thinkingTest.response.error ?? null"), null);
   await tool("getCanvas", { scope: "full" });
   assert.deepEqual(targets(), [ids[1]]);
-  console.log("PASS native canvas events retarget only the active turn/canvas; broad reads do not highlight everything");
+  console.log(
+    "PASS native canvas events retarget only the active turn/canvas; broad reads do not highlight everything",
+  );
 
-  run("const t=window.__thinkingTest; t.motion.matches=true; t.motion.dispatchEvent(new Event('change')); return true;");
+  run(
+    "const t=window.__thinkingTest; t.motion.matches=true; t.motion.dispatchEvent(new Event('change')); return true;",
+  );
   await pause(100);
-  const still = evaluate("document.querySelector('[data-thinking-shape] canvas').toDataURL()");
+  const still = evaluate(
+    "document.querySelector('[data-thinking-shape] canvas').toDataURL()",
+  );
   await pause(350);
-  assert.equal(evaluate("document.querySelector('[data-thinking-shape] canvas').toDataURL()"), still);
-  run("const t=window.__thinkingTest; t.motion.matches=false; t.motion.dispatchEvent(new Event('change')); t.editor.selectNone(); const ctx=document.querySelector('[data-thinking-shape] canvas').getContext('2d'); const clear=ctx.clearRect.bind(ctx); t.draws=0; ctx.clearRect=(...args)=>{t.draws++; return clear(...args);}; return true;");
+  assert.equal(
+    evaluate(
+      "document.querySelector('[data-thinking-shape] canvas').toDataURL()",
+    ),
+    still,
+  );
+  run(
+    "const t=window.__thinkingTest; t.motion.matches=false; t.motion.dispatchEvent(new Event('change')); t.editor.selectNone(); const ctx=document.querySelector('[data-thinking-shape] canvas').getContext('2d'); const clear=ctx.clearRect.bind(ctx); t.draws=0; ctx.clearRect=(...args)=>{t.draws++; return clear(...args);}; return true;",
+  );
   await pause(100);
   drive("shot", "/tmp/kan-thinking-effect.png");
   await finish();
   const draws = evaluate("window.__thinkingTest.draws");
   await pause(150);
   assert.equal(evaluate("window.__thinkingTest.draws"), draws);
-  console.log("PASS reduced-motion freezes the effect; completion removes it and stops drawing");
+  console.log(
+    "PASS reduced-motion freezes the effect; completion removes it and stops drawing",
+  );
 
   await start([]);
   assert.deepEqual(targets(), []);
-  await tool("addNode", { draft: { type: "markdown", title: "Created by fixture", body: "New node" }, near: { shapeId: ids[0] } });
+  await tool("addNode", {
+    draft: { type: "markdown", title: "Created by fixture", body: "New node" },
+    near: { shapeId: ids[0] },
+  });
   const created = evaluate("window.__thinkingTest.response.result.shapeId");
   run("window.__thinkingTest.editor.zoomToFit(); return true;");
   await pause(150);
@@ -147,7 +235,9 @@ try {
   await tool("removeNodes", { shapeIds: [created] });
   assert.deepEqual(targets(), []);
   await finish();
-  console.log("PASS newly created nodes get the effect; removed nodes clear it");
+  console.log(
+    "PASS newly created nodes get the effect; removed nodes clear it",
+  );
 
   await start([ids[0]]);
   run("window.__thinkingTest.agent.cancel(); return true;");
@@ -157,7 +247,9 @@ try {
   await finish(true);
   assert.match(evaluate("window.__thinkingTest.turnError"), /fixture failure/);
   assert.deepEqual(evaluate("window.__kanErrors"), []);
-  console.log("PASS cancellation and failure clean up; no frontend runtime errors");
+  console.log(
+    "PASS cancellation and failure clean up; no frontend runtime errors",
+  );
 } finally {
   run(`
     const t = window.__thinkingTest;
