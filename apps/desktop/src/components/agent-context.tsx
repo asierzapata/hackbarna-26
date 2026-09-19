@@ -13,6 +13,7 @@ import * as React from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
+import { canvasThinkingTargets } from "@/lib/agent-thinking";
 
 /** Providers, keyed the way the Rust side deserializes them. */
 export type Provider = "devin" | "openai";
@@ -65,7 +66,7 @@ export interface PromptHandlers {
   /** A chunk of the agent's reply. Append, don't replace. */
   onText?: (text: string) => void;
   onTool?: (call: AgentToolCall) => void;
-  canvas?: { id: string; execute: (name: string, input: unknown) => unknown };
+  canvas?: { id: string; shapeIds?: string[]; execute: (name: string, input: unknown) => unknown };
 }
 
 interface CanvasToolRequest {
@@ -95,6 +96,7 @@ interface AgentApi {
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
   busy: boolean;
+  thinkingShapeIds: string[];
   cancel: () => Promise<void>;
 }
 
@@ -110,6 +112,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const [busy, setBusy] = React.useState(false);
   const [preferences, setPreferences] = React.useState<AgentPreferences | null>(null);
   const generation = React.useRef(0);
+  const [thinkingShapeIds, setThinkingShapeIds] = React.useState<string[]>([]);
 
   // One listener for the whole app; the in-flight prompt claims it.
   const handlers = React.useRef<PromptHandlers | null>(null);
@@ -119,6 +122,8 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   React.useEffect(() => {
     if (!isTauri()) return;
     let mounted = true;
+    setThinkingShapeIds([]);
+    setBusy(false);
     const request = ++generation.current;
     setStatus({ state: "connecting" });
     void invoke<AgentPreferences>("agent_preferences").then((saved) => {
@@ -166,6 +171,8 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       try {
         if (Date.now() >= payload.expiresAt) throw new Error("Canvas tool request expired");
         result = active.execute(payload.name, payload.arguments);
+        const targets = canvasThinkingTargets(payload.name, payload.arguments, result);
+        if (targets) setThinkingShapeIds(targets);
       } catch (cause) {
         error = cause instanceof Error ? cause.message : String(cause);
       }
@@ -176,6 +183,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       handlers.current = null;
       turnId.current = null;
       setBusy(false);
+      setThinkingShapeIds([]);
       // Losing a live connection is worth reporting; following our own
       // sign-out (which already reset the status) is not.
       setStatus((prev) =>
@@ -202,6 +210,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const api: AgentApi = {
     status,
     busy,
+    thinkingShapeIds,
     preferences,
     setModel: async (modelId) => {
       setBusy(true);
@@ -229,6 +238,8 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       }
     },
     signOut: async () => {
+      setThinkingShapeIds([]);
+      handlers.current = null;
       ++generation.current;
       setStatus({ state: "connecting" });
       try {
@@ -242,6 +253,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     cancel: async () => {
       const activeId = turnId.current;
       handlers.current = null;
+      setThinkingShapeIds([]);
       if (activeId) await invoke("agent_cancel", { turnId: activeId });
     },
     prompt: async (text, next) => {
@@ -249,6 +261,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       const id = crypto.randomUUID();
       turnId.current = id;
       handlers.current = next;
+      setThinkingShapeIds(next.canvas?.shapeIds ?? []);
       setBusy(true);
       try {
         await listenersReady.current;
@@ -258,6 +271,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         if (turnId.current === id) {
           turnId.current = null;
           handlers.current = null;
+          setThinkingShapeIds([]);
           setBusy(false);
         }
       }

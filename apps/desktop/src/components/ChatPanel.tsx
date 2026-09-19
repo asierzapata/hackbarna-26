@@ -184,9 +184,11 @@ export function ChatPanel({
     setStreamingIds((prev) => new Set(prev).add(id));
 
     try {
-      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context) : text, {
+      const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
+      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds) : text, {
         canvas: canvasTools && roomId ? {
           id: roomId,
+          shapeIds,
           execute: (name, input) => {
             const result = executeCanvasTool(canvasTools, name, name === "addNode" ? {
               ...(input as object),
