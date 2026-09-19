@@ -3,9 +3,11 @@ import {
   BaseBoxShapeUtil,
   HTMLContainer,
   stopEventPropagation,
+  type Editor,
 } from "tldraw";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Table,
@@ -42,6 +44,169 @@ function displayValue(value: CellValue) {
 
 function companyBrand(value: CellValue) {
   return typeof value === "string" ? brandForText(value) : null;
+}
+
+function parseEditedCellValue(text: string, previous: CellValue): CellValue {
+  if (previous === null && text === "") return null;
+  if (typeof previous === "number" && text.trim()) {
+    const number = Number(text);
+    if (Number.isFinite(number)) return number;
+  }
+  if (typeof previous === "boolean") {
+    const normalized = text.trim().toLowerCase();
+    if (normalized === "true" || normalized === "yes") return true;
+    if (normalized === "false" || normalized === "no") return false;
+  }
+  return text;
+}
+
+type EditableTextProps = {
+  value: string;
+  ariaLabel: string;
+  onCommit: (value: string) => void;
+  placeholder?: string;
+  className?: string;
+  dataTestId?: string;
+};
+
+function EditableText({
+  value,
+  ariaLabel,
+  onCommit,
+  placeholder,
+  className,
+  dataTestId,
+}: EditableTextProps) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(value);
+  const editingRef = React.useRef(false);
+  const cancelledRef = React.useRef(false);
+
+  const startEditing = () => {
+    cancelledRef.current = false;
+    editingRef.current = true;
+    setDraft(value);
+    setEditing(true);
+  };
+  const finishEditing = () => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    const cancelled = cancelledRef.current;
+    cancelledRef.current = false;
+    setEditing(false);
+    if (!cancelled && draft !== value) onCommit(draft);
+  };
+  const cancelEditing = () => {
+    cancelledRef.current = true;
+    editingRef.current = false;
+    setDraft(value);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <Input
+        autoFocus
+        aria-label={ariaLabel}
+        data-testid={dataTestId}
+        value={draft}
+        placeholder={placeholder}
+        className={cn(
+          "box-border h-7 max-w-full min-w-0 rounded-sm border-primary/40 bg-background px-2 shadow-sm focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20",
+          className,
+        )}
+        onPointerDown={stopEventPropagation}
+        onClick={stopEventPropagation}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          stopEventPropagation(event);
+          if (event.key === "Enter") {
+            event.preventDefault();
+            finishEditing();
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            cancelEditing();
+          }
+        }}
+        onBlur={finishEditing}
+        onFocus={(event) => event.currentTarget.select()}
+      />
+    );
+  }
+
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      data-testid={dataTestId}
+      title="Double-click to edit"
+      className={cn(
+        "box-border block h-7 min-w-8 max-w-full cursor-text truncate rounded-sm px-2 py-1 transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50",
+        className,
+      )}
+      onDoubleClick={(event) => {
+        stopEventPropagation(event);
+        startEditing();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        stopEventPropagation(event);
+        startEditing();
+      }}
+    >
+      {value || placeholder}
+    </span>
+  );
+}
+
+const SHORT_TABLE_ROW_LIMIT = 10;
+const TABLE_MIN_HEIGHT = 280;
+const TABLE_HEADER_HEIGHT = 40;
+const TABLE_ROW_HEIGHT = 48;
+const TABLE_CHROME_HEIGHT = 96;
+
+function tableHeightForRows(rowCount: number) {
+  return Math.max(
+    TABLE_MIN_HEIGHT,
+    TABLE_CHROME_HEIGHT +
+      TABLE_HEADER_HEIGHT +
+      Math.max(rowCount, 1) * TABLE_ROW_HEIGHT,
+  );
+}
+
+function TableHeightSync({ editor, shape }: { editor: Editor; shape: TableShape }) {
+  const rowCount = shape.props.rows.length;
+  const lastHeightRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (rowCount >= SHORT_TABLE_ROW_LIMIT) return;
+    const nextHeight = tableHeightForRows(rowCount);
+    if (shape.props.h >= nextHeight || lastHeightRef.current === nextHeight) return;
+    lastHeightRef.current = nextHeight;
+    editor.updateShape({
+      id: shape.id,
+      type: shape.type,
+      props: { h: nextHeight },
+    });
+  }, [editor, rowCount, shape.id, shape.props.h, shape.type]);
+
+  return null;
+}
+
+function TableViewport({
+  scroll,
+  children,
+}: {
+  scroll: boolean;
+  children: React.ReactNode;
+}) {
+  return scroll ? (
+    <ScrollArea className="min-h-0 flex-1">{children}</ScrollArea>
+  ) : (
+    <div className="min-h-0 flex-1 overflow-visible">{children}</div>
+  );
 }
 
 function CompanyLogo({ domain, name }: { domain: string; name: string }) {
@@ -171,36 +336,73 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
 
     return (
       <HTMLContainer style={{ pointerEvents: "all" }}>
+        <TableHeightSync editor={this.editor} shape={shape} />
         <NodeCard
           type="table"
-          title={shape.props.title}
-          description={shape.props.sourceNote || undefined}
+          title={
+            <EditableText
+              value={shape.props.title}
+              ariaLabel="Table title"
+              dataTestId="table-title"
+              placeholder="Table title"
+              className="w-full"
+              onCommit={(title) => update({ title })}
+            />
+          }
+          description={
+            <EditableText
+              value={shape.props.sourceNote}
+              ariaLabel="Table source note"
+              dataTestId="table-source-note"
+              placeholder="Add source note"
+              className="w-full"
+              onCommit={(sourceNote) => update({ sourceNote })}
+            />
+          }
           headerMeta={<span className="text-xs text-muted-foreground">{rows.length} rows</span>}
           contentClassName="px-0"
         >
-          <ScrollArea className="min-h-0 flex-1">
-            <Table>
+          <TableViewport scroll={rows.length >= SHORT_TABLE_ROW_LIMIT}>
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  {columns.map((column, index) => (
-                    <TableHead key={`${column}-${index}`}>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="w-full justify-start px-0"
-                        data-testid={`table-sort-${index}`}
-                        onPointerDown={stopEventPropagation}
-                        onClick={() => cycleSort(index)}
-                      >
-                        {column}
-                        {sortBy?.column === index
-                          ? sortBy.dir === "asc"
-                            ? " ↑"
-                            : " ↓"
-                          : null}
-                      </Button>
-                    </TableHead>
-                  ))}
+                  {columns.map((column, index) => {
+                    const columnLabel = column || `Column ${index + 1}`;
+                    return (
+                      <TableHead key={`${column}-${index}`} className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-1">
+                          <EditableText
+                            value={column}
+                            ariaLabel={`Column ${index + 1}`}
+                            dataTestId={`table-column-${index}`}
+                            className="min-w-0 flex-1"
+                            onCommit={(nextColumn) =>
+                              update({
+                                columns: columns.map((current, columnIndex) =>
+                                  columnIndex === index ? nextColumn : current,
+                                ),
+                              })
+                            }
+                          />
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0"
+                            aria-label={`Sort by ${columnLabel}`}
+                            data-testid={`table-sort-${index}`}
+                            onPointerDown={stopEventPropagation}
+                            onClick={() => cycleSort(index)}
+                          >
+                            {sortBy?.column === index
+                              ? sortBy.dir === "asc"
+                                ? "↑"
+                                : "↓"
+                              : "↕"}
+                          </Button>
+                        </div>
+                      </TableHead>
+                    );
+                  })}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -224,19 +426,42 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
                         const isLogoCell = cellIndex === logoColumnIndex;
                         const name = displayValue(value);
                         const brand = isLogoCell ? companyBrand(value) : null;
+                        const editCell = (text: string) => {
+                          const nextRows = rows.map((currentRow, rowIndex) => {
+                            if (rowIndex !== originalIndex) return currentRow;
+                            const nextRow = [...currentRow];
+                            nextRow[cellIndex] = parseEditedCellValue(text, value);
+                            return nextRow;
+                          });
+                          update({ rows: nextRows });
+                        };
 
                         return (
                           <TableCell
                             key={cellIndex}
-                            className={cn(isLogoCell ? "py-2" : "py-3")}
+                            className={cn("min-w-0", isLogoCell ? "py-2" : "py-3")}
                           >
                             {brand ? (
                               <div className="flex min-w-0 items-center gap-2">
                                 <CompanyLogo domain={brand.domain} name={name} />
-                                <span className="truncate">{name}</span>
+                                <EditableText
+                                  value={value === null ? "" : name}
+                                  placeholder={value === null ? "—" : undefined}
+                                  ariaLabel={`Row ${originalIndex + 1}, column ${cellIndex + 1}`}
+                                  dataTestId={`table-cell-${originalIndex}-${cellIndex}`}
+                                  className="min-w-0 flex-1 truncate"
+                                  onCommit={editCell}
+                                />
                               </div>
                             ) : (
-                              name
+                              <EditableText
+                                value={value === null ? "" : name}
+                                placeholder={value === null ? "—" : undefined}
+                                ariaLabel={`Row ${originalIndex + 1}, column ${cellIndex + 1}`}
+                                dataTestId={`table-cell-${originalIndex}-${cellIndex}`}
+                                className="w-full truncate"
+                                onCommit={editCell}
+                              />
                             )}
                           </TableCell>
                         );
@@ -246,7 +471,7 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
                 })}
               </TableBody>
             </Table>
-          </ScrollArea>
+          </TableViewport>
         </NodeCard>
       </HTMLContainer>
     );
