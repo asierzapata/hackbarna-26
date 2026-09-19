@@ -35,6 +35,35 @@ of failing fast.
 `packageManager` is pinned in the root `package.json`. Turbo refuses to resolve
 the workspace without it.
 
+## Git hooks
+
+`.githooks/`, wired through `core.hooksPath` by the `prepare` script, so they
+activate on `npm install` — no husky, no dependency. If your hooks aren't
+firing, you haven't run `npm install` since they landed.
+
+| Hook | Runs | Cost |
+| --- | --- | --- |
+| `pre-commit` | typecheck, **only the workspaces the commit touches** | seconds |
+| `pre-push` | typecheck + tests + build, everything | ~10s warm |
+
+Both block on failure. Bypass with `git commit --no-verify` / `git push
+--no-verify`, or `KAN_SKIP_HOOKS=1` for both. Use the bypass when you are
+mid-refactor and know it is broken — that is what it is for.
+
+Two things to know about them:
+
+- **They check the working tree, not the staged snapshot.** Stashing unstaged
+  work would be more correct, but more than one agent writes in this repo at
+  once and a stash mid-write is how you lose someone else's work. The trade is
+  that a partially-staged commit can pass the hook and still be broken.
+- **`tsx --test` exits 0 when its glob matches nothing**, which reads as a pass
+  and is not one. `pre-push` counts the test files first and warns loudly on an
+  empty suite rather than letting it show green.
+
+Scoping lives in `.githooks/_scope.sh`: `apps/desktop/*` checks the frontend,
+`apps/room-server/*` and `apps/agent-runner/*` check the backend, and
+`packages/*` or a root config change checks both.
+
 ## Commands
 
 | Task | Command |
