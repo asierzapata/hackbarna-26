@@ -76,6 +76,7 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           persistenceKey={`kan-room-${roomId}`}
           assetUrls={assetUrls}
           shapeUtils={canvasShapeUtils}
+          components={{ PageMenu: null, NavigationPanel: null }}
           onMount={onMount}
         />
       </div>
@@ -127,6 +128,7 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
           store={store}
           assetUrls={assetUrls}
           shapeUtils={shapeUtils}
+          components={{ PageMenu: null, NavigationPanel: null }}
           onMount={onMount}
         />
       </div>
