@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./assistant-policy";
+export * from "./diagnostics";
 
 const uuid = z.uuid();
 const isoDate = z.iso.datetime();

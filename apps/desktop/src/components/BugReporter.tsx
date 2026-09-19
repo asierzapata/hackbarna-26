@@ -9,6 +9,8 @@ import { Textarea } from "./ui/textarea";
 import { Spinner } from "./ui/spinner";
 import { qaRegistry, redactQaContext } from "@/lib/qa-context";
 import { getQaErrors } from "@/lib/qa-errors";
+import { getDiagnostics, refreshDiagnostics } from "@/lib/agent-diagnostics";
+import { AgentDiagnostics } from "./AgentDiagnostics";
 
 type SavedReport = { id: string; path: string };
 
@@ -30,13 +32,18 @@ export function BugReporter() {
       setDescription("");
       report.current = {
         id: crypto.randomUUID(), schemaVersion: 1, capturedAt: new Date().toISOString(),
-        route, context: qaRegistry.capture(route), errors: getQaErrors(),
+        route, context: qaRegistry.capture(route), errors: getQaErrors(), diagnostics: getDiagnostics(),
         environment: {
           userAgent: navigator.userAgent, language: navigator.language, online: navigator.onLine,
           viewport: { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio },
           desktop: isTauri(), development: import.meta.env.DEV,
         },
       };
+      const snapshot = report.current;
+      const capturedAt = Date.now();
+      void refreshDiagnostics().then((diagnostics) => {
+        snapshot.diagnostics = { ...diagnostics, events: diagnostics.events.filter((event) => event.at <= capturedAt) };
+      }).catch(() => { snapshot.diagnosticReadFailed = true; });
     }
     setOpen(next);
   }
@@ -89,6 +96,7 @@ export function BugReporter() {
                 Embedded images are omitted. Stored locally in qa_bugs/.
               </FieldDescription>
             </Field>
+            <AgentDiagnostics />
             {error ? <FieldError role="alert">{error}</FieldError> : null}
           </FieldGroup>
         )}

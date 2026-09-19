@@ -239,7 +239,7 @@ export function ChatPanel({
         const value = await getServerRunContext(roomId!, lease.runId, lease.leaseToken);
         return { revision: value.revision, value };
       },
-      run: (mode, context, signal) => runAssistantTurn({ ready: agent.status.state === "ready", agentId: agent.status.agent ?? "Kan", run: (nextMode, nextContext, nextSignal) => agent.runStructured(nextMode, nextContext, nextSignal, trigger.anchors) }, mode, context, signal),
+      run: (mode, context, signal) => runAssistantTurn({ ready: agent.status.state === "ready", agentId: agent.status.agent ?? "Kan", run: (nextMode, nextContext, nextSignal) => agent.runStructured(nextMode, nextContext, nextSignal, trigger.anchors, lease.runId) }, mode, context, signal),
       heartbeat: () => online ? heartbeatServerRun(roomId!, lease.runId, lease.leaseToken) : (transport as LocalTransport).heartbeatLocal(lease.runId),
       complete: (input, signal) => {
         if (signal.aborted) return Promise.reject(new DOMException("assistant turn cancelled", "AbortError"));
@@ -353,11 +353,14 @@ export function ChatPanel({
     try {
       const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
       await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds) : text, {
+        onTrace: (traceId) => patchAgent(id, (entry) => ({ ...entry, traceId, status: "running" })),
         canvas: canvasTools && roomId ? {
           id: roomId,
           shapeIds,
-          execute: (name, input) => {
-            const result = executeCanvasTool(canvasTools, name, name === "addNode" ? {
+          execute: (name, input, assertActive) => {
+            const pageId = editor?.getCurrentPageId();
+            const guarded = editor ? createCanvasTools(editor, () => { assertActive?.(); if (editor.getCurrentPageId() !== pageId) throw new Error("Canvas page is no longer active"); }) : canvasTools;
+            const result = executeCanvasTool(guarded, name, name === "addNode" ? {
               ...(input as object),
               provenance: { entryId: id, runId: id, agentId: AGENT, byUserId: userId },
             } : input);
@@ -372,10 +375,13 @@ export function ChatPanel({
             steps: mergeStep(entry.steps ?? [], call),
           })),
       });
+      patchAgent(id, (entry) => ({ ...entry, status: "done" }));
     } catch (error) {
+      const cancelled = error instanceof Error && error.name === "AbortError";
       patchAgent(id, (entry) => ({
         ...entry,
-        text: `${entry.text}${entry.text ? "\n\n" : ""}The agent could not complete this turn: ${error}`,
+        status: cancelled ? "cancelled" : "failed",
+        text: `${entry.text}${entry.text ? "\n\n" : ""}${cancelled ? "Turn cancelled. Any completed changes were kept." : `The agent could not complete this turn: ${describeError(error)}`}`,
       }));
       throw error;
     } finally {

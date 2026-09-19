@@ -125,6 +125,7 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         kind: "agent",
         authorId: entry.agentId,
         text: entry.text,
+        traceId: entry.runId,
         steps: toSteps(entry.steps),
         sources: entry.sources,
         status: entry.status,

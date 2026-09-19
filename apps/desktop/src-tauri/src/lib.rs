@@ -2,6 +2,7 @@ mod agent;
 mod agent_preferences;
 mod canvas_mcp;
 mod qa;
+mod diagnostics;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +12,7 @@ pub fn run() {
     }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| { diagnostics::initialize(app.handle()); Ok(()) })
         .manage(agent::Agent::default())
         .manage(agent::AgentOperations::default())
         .invoke_handler(tauri::generate_handler![
@@ -25,6 +27,10 @@ pub fn run() {
             agent::agent_preferences,
             agent::agent_canvas_result,
             qa::qa_save_report,
+            diagnostics::agent_diagnostic_record,
+            diagnostics::agent_diagnostics,
+            diagnostics::agent_diagnostics_capture,
+            diagnostics::agent_diagnostics_details,
         ]);
 
     // Automation server for e2e tests. Gated behind the `webdriver` feature so

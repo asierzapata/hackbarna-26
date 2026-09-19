@@ -8,6 +8,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+use crate::diagnostics;
+use std::hash::{Hash, Hasher};
 
 const MAX_MESSAGE: usize = 2 * 1024 * 1024;
 const TOOL_NAMES: [&str; 9] = ["addNode", "addMermaidDiagram", "updateNode", "removeNodes", "connectNodes", "arrange", "focusNodes", "groupNodes", "getCanvas"];
@@ -26,6 +28,7 @@ struct State {
     turn: Option<Turn>,
     pending: HashMap<String, Sender<ToolResult>>,
     canvas_tool_calls: HashSet<String>,
+    operations: HashMap<String, (u64, Option<ToolResult>)>,
 }
 
 pub struct AgentWorkspace(pub PathBuf);
@@ -108,6 +111,7 @@ impl CanvasMcp {
                 turn: None,
                 pending: HashMap::new(),
                 canvas_tool_calls: HashSet::new(),
+                operations: HashMap::new(),
             }),
             emit,
         });
@@ -207,6 +211,7 @@ impl CanvasMcp {
         }
         state.token = nonce()?;
         state.canvas_tool_calls.clear();
+        state.operations.clear();
         Ok(())
     }
 
@@ -314,10 +319,34 @@ impl CanvasMcp {
             .map_err(|_| "Canvas request expired".into())
     }
 
+    fn tool_failure(message: &str) -> Value {
+        if let Ok(value) = serde_json::from_str::<Value>(message) {
+            if value["code"].is_string() { return diagnostics::sanitize(&json!({"failure": value}))["failure"].clone(); }
+        }
+        let (code, outcome) = match message {
+            "Unknown canvas tool" => ("TOOL_NOT_FOUND", "not_applied"),
+            "Canvas tool timed out" | "Operation still running" => ("TOOL_TIMEOUT", "unknown"),
+            "Operation ID conflict" => ("OPERATION_CONFLICT", "not_applied"),
+            "Too many pending canvas tools" | "Operation cache full" => ("TOO_MANY_REQUESTS", "not_applied"),
+            "No active offline canvas turn" | "Canvas session expired" => ("STALE_TURN", "not_applied"),
+            "Canvas turn ended" => ("CANCELLED", "unknown"),
+            _ => ("TOOL_EXECUTION_FAILED", "unknown"),
+        };
+        diagnostics::failure(code, "bridge", outcome)
+    }
+
     fn call(&self, token: &str, name: &str, arguments: Value) -> ToolResult {
         if !TOOL_NAMES.contains(&name) {
             return Err("Unknown canvas tool".into());
         }
+        let started = std::time::Instant::now();
+        let operation_id = arguments.get("requestId").and_then(Value::as_str).map(str::to_owned);
+        if operation_id.as_ref().is_some_and(|id| id.len() != 36 || !id.bytes().all(|c| c.is_ascii_hexdigit() || c == b'-')) {
+            return Err(diagnostics::failure("TOOL_VALIDATION_FAILED", "validation", "not_applied").to_string());
+        }
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut hash);
+        arguments.to_string().hash(&mut hash);
         let (sender, receiver) = channel();
         let request_id = nonce()?;
         let turn = {
@@ -333,15 +362,36 @@ impl CanvasMcp {
             if state.pending.len() >= 8 {
                 return Err("Too many pending canvas tools".into());
             }
+            turn.canvas_id.hash(&mut hash);
+            if let Some(id) = &operation_id {
+                if let Some((fingerprint, result)) = state.operations.get(id) {
+                    if *fingerprint != hash.finish() { return Err("Operation ID conflict".into()); }
+                    diagnostics::record(None, json!({"event": "tool.deduplicated", "turnId": turn.id, "requestId": request_id, "tool": name}));
+                    return result.clone().unwrap_or_else(|| Err("Operation still running".into()));
+                }
+                if state.operations.len() >= 128 { return Err("Operation cache full".into()); }
+                state.operations.insert(id.clone(), (hash.finish(), None));
+            }
             state.pending.insert(request_id.clone(), sender);
             turn
         };
+        diagnostics::record(None, json!({"event": "tool.received", "turnId": turn.id, "sessionId": turn.session_id, "requestId": request_id, "tool": name, "bytes": arguments.to_string().len()}));
         let result = (self.emit)(json!({
             "requestId": request_id, "turnId": turn.id, "canvasId": turn.canvas_id,
             "name": name, "arguments": arguments,
             "expiresAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64 + 19000
         })).and_then(|_| receiver.recv_timeout(Duration::from_secs(20)).map_err(|_| "Canvas tool timed out".to_string())?);
-        self.state.lock().unwrap().pending.remove(&request_id);
+        let mut state = self.state.lock().unwrap();
+        state.pending.remove(&request_id);
+        if let Some(id) = operation_id {
+            let cached = match &result {
+                Ok(value) if value.to_string().len() > 65536 => Err(diagnostics::failure("RESULT_TOO_LARGE", "deduplication", if name == "getCanvas" { "not_applied" } else { "applied" }).to_string()),
+                _ => result.clone(),
+            };
+            if let Some(entry) = state.operations.get_mut(&id) { entry.1 = Some(cached); }
+        }
+        drop(state);
+        diagnostics::record(None, json!({"event": if result.is_ok() { "tool.bridge_completed" } else { "tool.bridge_failed" }, "turnId": turn.id, "sessionId": turn.session_id, "requestId": request_id, "tool": name, "durationMs": started.elapsed().as_millis() as u64, "failure": result.as_ref().err().map(|e| Self::tool_failure(e))}));
         result
     }
 
@@ -370,7 +420,8 @@ impl CanvasMcp {
                         json!({"content": [{"type": "text", "text": value.to_string()}], "isError": false})
                     }
                     Err(error) => {
-                        json!({"content": [{"type": "text", "text": error}], "isError": true})
+                        diagnostics::record(None, json!({"event":"tool.mcp_failed", "turnId":self.state.lock().unwrap().turn.as_ref().map(|turn| turn.id.clone()), "requestId":id.to_string(), "tool":rpc["params"]["name"], "failure":Self::tool_failure(&error)}));
+                        json!({"content": [{"type": "text", "text": Self::tool_failure(&error).to_string()}], "isError": true})
                     }
                 }
             }
@@ -378,7 +429,13 @@ impl CanvasMcp {
                 return json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Unsupported MCP method"}})
             }
         };
-        json!({"jsonrpc": "2.0", "id": id, "result": result})
+        let response = json!({"jsonrpc": "2.0", "id": id, "result": result});
+        if response.to_string().len() > MAX_MESSAGE {
+            let error = diagnostics::failure("RESULT_TOO_LARGE", "delivery", if rpc["params"]["name"] == "getCanvas" { "not_applied" } else { "unknown" });
+            diagnostics::record(None, json!({"event":"tool.response_too_large", "turnId":self.state.lock().unwrap().turn.as_ref().map(|turn| turn.id.clone()), "tool":rpc["params"]["name"], "failure":error}));
+            return json!({"jsonrpc":"2.0", "id":id, "result":{"isError":true,"content":[{"type":"text","text":error.to_string()}]}});
+        }
+        response
     }
 }
 
@@ -467,6 +524,37 @@ mod tests {
         assert!(bridge.finish("turn"));
         assert!(!bridge.allows(Some("session"), None, Some("mcp__kan-canvas__addNode")));
         assert!(bridge.complete("unknown", "turn", Ok(json!({}))).is_err());
+    }
+
+    #[test]
+    fn operation_ids_deduplicate_and_conflicts_never_execute() {
+        let (send, receive) = channel();
+        let tools = TOOL_NAMES.iter().map(|name| json!({"name":name, "inputSchema":{"type":"object"}})).collect();
+        let bridge = CanvasMcp::with_emitter(tools, Box::new(move |event| send.send(event).map_err(|e| e.to_string()))).unwrap();
+        let token = bridge.state.lock().unwrap().token.clone();
+        bridge.begin("turn".into(), Some("canvas".into()), "session".into()).unwrap();
+        let input = json!({"requestId":"b394dcfc-705e-43c7-9715-9ae74d3a9104", "draft":{"type":"geo"}});
+        let worker = { let bridge = bridge.clone(); let token = token.clone(); let input = input.clone(); std::thread::spawn(move || bridge.call(&token, "addNode", input)) };
+        let event = receive.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(bridge.call(&token, "addNode", input.clone()).unwrap_err().contains("still running"));
+        bridge.complete(event["requestId"].as_str().unwrap(), "turn", Ok(json!({"shapeId":"shape:one"}))).unwrap();
+        let first = worker.join().unwrap().unwrap();
+        assert_eq!(bridge.call(&token, "addNode", input.clone()).unwrap(), first);
+        bridge.finish("turn");
+        bridge.begin("next".into(), Some("canvas".into()), "session".into()).unwrap();
+        assert_eq!(bridge.call(&token, "addNode", input.clone()).unwrap(), first);
+        let mut changed = input;
+        changed["draft"] = json!({"type":"different"});
+        assert!(bridge.call(&token, "addNode", changed).unwrap_err().contains("conflict"));
+        assert!(receive.try_recv().is_err());
+        bridge.finish("next");
+    }
+
+    #[test]
+    fn errors_keep_validation_issues_and_unknown_timeout_outcomes() {
+        let error = diagnostics::failure("TOOL_VALIDATION_FAILED", "validation", "not_applied");
+        assert_eq!(CanvasMcp::tool_failure(&error.to_string())["code"], "TOOL_VALIDATION_FAILED");
+        assert_eq!(CanvasMcp::tool_failure("Canvas tool timed out")["outcome"], "unknown");
     }
 
     #[test]

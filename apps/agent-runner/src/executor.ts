@@ -6,6 +6,8 @@ import { z } from "zod";
 import { AssistantResultSchema, EventsServerMessage, LeaseSchema, RegisterInput, TriggerSchema, buildAssistantPrompt, type Trigger, type Lease } from "@kan/protocol";
 import { openAgentSession, type AgentCommand } from "./acp-session";
 import { HttpError, requestJson, RunClient, validateServerUrl } from "./run-client";
+import { AgentRequestError, failure, normalizeFailure, type AgentFailure } from "@kan/protocol";
+import { recordRunnerDiagnostic } from "./diagnostics";
 import { buildRunnerPrompt } from "./prompt";
 import type { ToolCallStatus } from "@agentclientprotocol/sdk";
 import type { TOOL_DESCRIPTIONS } from "./tool-descriptions";
@@ -13,7 +15,7 @@ import type { TOOL_DESCRIPTIONS } from "./tool-descriptions";
 type CanvasToolName = keyof typeof TOOL_DESCRIPTIONS;
 export interface RunStep { id: string; tool: CanvasToolName | "unknown"; status: ToolCallStatus }
 
-export type ExecutorEvent = { type: "connected" | "disconnected" | "ready" | "run.started" | "run.done" | "run.failed" | "error"; ready?: boolean; runId?: string; error?: "agent_unavailable" | "connection_failed" | "claim_failed" };
+export type ExecutorEvent = { type: "connected" | "disconnected" | "ready" | "run.started" | "run.done" | "run.failed" | "error"; ready?: boolean; runId?: string; failure?: AgentFailure; error?: "agent_unavailable" | "connection_failed" | "claim_failed" };
 export interface ExecutorOptions {
   serverUrl: string;
   roomId: string;
@@ -68,30 +70,33 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
     const run = new RunClient(base, options.roomId, lease.runId, lease.leaseToken, signal);
     let agent: Awaited<ReturnType<typeof openAgentSession>> | undefined;
     let stopWrites = false, terminal = false, dirty = false, text = "";
+    let phase = "context";
+    let rootFailure: AgentFailure | undefined;
     const steps: RunStep[] = [];
     const stepIndexes = new Map<string, number>();
     let writing: Promise<unknown> = Promise.resolve();
     let writeBusy = false;
     let deadline: ReturnType<typeof setTimeout>;
-    const expire = (at: number) => { clearTimeout(deadline); deadline = setTimeout(() => { stopWrites = true; controller.abort(); }, Math.max(0, at - Date.now())); };
+    const expire = (at: number) => { clearTimeout(deadline); deadline = setTimeout(() => { stopWrites = true; rootFailure = failure("LEASE_EXPIRED", "heartbeat", "unknown"); controller.abort(new AgentRequestError(rootFailure)); }, Math.max(0, at - Date.now())); };
     expire(lease.expiresAt);
-    const sessionTimer = setTimeout(() => controller.abort(), timeoutMs);
+    const sessionTimer = setTimeout(() => { rootFailure = failure("AGENT_TIMEOUT", "agent", "unknown"); controller.abort(new AgentRequestError(rootFailure)); }, timeoutMs);
     const heartbeat = setInterval(() => {
-      void run.request<{ expiresAt: number }>("/heartbeat", "POST", undefined, false).then((response) => expire(response.expiresAt)).catch(() => { stopWrites = true; controller.abort(); });
+      void run.request<{ expiresAt: number }>("/heartbeat", "POST", undefined, false).then((response) => expire(response.expiresAt)).catch((error) => { stopWrites = true; rootFailure = { ...normalizeFailure(error, "heartbeat"), phase: "heartbeat" }; controller.abort(new AgentRequestError(rootFailure)); });
     }, 10_000);
     const stream = setInterval(() => {
       if (!dirty || signal.aborted || writeBusy) return;
       dirty = false; writeBusy = true;
       const snapshot = { id: randomUUID(), text, steps: [...steps] };
-      writing = run.request("", "PATCH", snapshot).catch(() => { stopWrites = true; controller.abort(); }).finally(() => { writeBusy = false; });
+      writing = run.request("", "PATCH", snapshot).catch((error) => { stopWrites = true; rootFailure = { ...normalizeFailure(error, "stream"), phase: "stream" }; controller.abort(new AgentRequestError(rootFailure)); }).finally(() => { writeBusy = false; });
     }, 250);
     emit({ type: "run.started", runId: lease.runId });
     try {
       const context = contextSchema.parse(await run.request("/context"));
       const contextual = context.trigger.mode !== "act";
       const tools: CanvasToolName[] = context.trigger.mode === "act" ? ["getCanvas", "queryData", "addNode", "updateNode", "connectNodes", "arrange"] : ["getCanvas", "queryData", "proposeNode"];
+      phase = "initialize";
       agent = await openAgentSession(options.agent, {
-        signal,
+        signal, runId: lease.runId,
         allowedTools: contextual ? [] : tools,
         mcpServers: contextual ? [] : [{ name: "kan-canvas", command: process.execPath, args: ["--import", loader, mcpEntry], env: [
           { name: "KAN_RUN_SERVER_URL", value: base }, { name: "KAN_RUN_ROOM_ID", value: options.roomId }, { name: "KAN_RUN_RUN_ID", value: lease.runId }, { name: "KAN_RUN_LEASE_TOKEN", value: lease.leaseToken },
@@ -114,29 +119,37 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
           }
         },
       });
+      phase = "agent";
       const response = await agent.prompt(contextual ? buildAssistantPrompt("context", context) : buildRunnerPrompt(context));
       signal.throwIfAborted();
       clearInterval(stream); await writing;
       signal.throwIfAborted();
       if (contextual) {
-        if (response.stopReason !== "end_turn") throw new Error("agent_turn_incomplete");
+        if (response.stopReason !== "end_turn") throw new AgentRequestError(failure("TURN_INCOMPLETE", "agent", "not_applied"));
+        phase = "parse";
         const result = AssistantResultSchema.parse(JSON.parse(text));
+        phase = "complete";
         await run.request("/complete", "POST", { id: randomUUID(), revision: context.revision, result });
         terminal = true;
         emit({ type: "run.done", runId: lease.runId });
       } else {
         const status = response.stopReason === "end_turn" ? "done" : "failed";
+        phase = "complete";
+        if (status === "failed") recordRunnerDiagnostic({ event: "prompt.incomplete", runId: lease.runId, failure: failure("TURN_INCOMPLETE", "agent", "unknown") });
         await run.request("", "PATCH", { id: randomUUID(), text, steps, status });
         terminal = true;
         emit({ type: status === "done" ? "run.done" : "run.failed", runId: lease.runId });
       }
-    } catch {
+    } catch (cause) {
+      const detail = rootFailure ?? (phase === "parse" ? failure("STRUCTURED_OUTPUT_INVALID", phase, "not_applied") : normalizeFailure(cause, phase));
+      recordRunnerDiagnostic({ event: "run.failed", runId: lease.runId, phase, failure: detail });
       if (!agent) { capable = false; readiness(false); }
       if (!terminal && !stopWrites) {
         terminal = true;
-        try { await new RunClient(base, options.roomId, lease.runId, lease.leaseToken).request("", "PATCH", { id: randomUUID(), text, steps, status: "failed" }); } catch {}
+        try { await new RunClient(base, options.roomId, lease.runId, lease.leaseToken).request("", "PATCH", { id: randomUUID(), text, steps, status: "failed" }); }
+        catch (error) { recordRunnerDiagnostic({ event: "run.report_failed", runId: lease.runId, phase: "report", failure: normalizeFailure(error, "report") }); }
       }
-      emit({ type: "run.failed", runId: lease.runId });
+      emit({ type: "run.failed", runId: lease.runId, failure: detail });
     } finally {
       clearInterval(stream); clearInterval(heartbeat); clearTimeout(sessionTimer); clearTimeout(deadline!);
       controller.abort();

@@ -101,6 +101,7 @@ export interface AgentEntry extends ThreadEntryBase {
   /** e.g. "Claude" — shown as "via Claude". */
   model?: string;
   durationMs?: number;
+  traceId?: string;
   steps?: AgentStep[];
   sources?: { kind: "entry" | "shape"; id: string }[];
   status?: "running" | "done" | "failed" | "cancelled";

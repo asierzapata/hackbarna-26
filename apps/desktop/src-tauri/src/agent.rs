@@ -43,6 +43,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::canvas_mcp::{AgentWorkspace, CanvasMcp};
+use crate::diagnostics;
 use crate::agent_preferences::{self as preferences, Models, Preferences};
 
 /// JSON-RPC error code for "authentication required" (ACP reserves -32000).
@@ -283,51 +284,38 @@ impl Drop for Conn {
 
 impl Conn {
     fn request(&self, method: &str, params: Value) -> Result<Value, RpcError> {
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = channel();
-        self.pending.lock().unwrap().insert(id, tx);
-
-        if let Err(error) = write_message(
-            &self.stdin,
-            &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
-        ) {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(error);
-        }
-
         // The sender is dropped if the process dies, which unblocks us.
-        let reply = rx.recv_timeout(std::time::Duration::from_secs(300));
-        self.pending.lock().unwrap().remove(&id);
-        let reply = reply.map_err(|_| RpcError::transport("the agent exited or timed out before replying"))?;
-
-        if let Some(err) = reply.get("error") {
-            return Err(RpcError {
-                code: err.get("code").and_then(Value::as_i64).unwrap_or(0),
-                message: err
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown error")
-                    .to_string(),
-            });
-        }
-        Ok(reply.get("result").cloned().unwrap_or(Value::Null))
+        self.request_timeout(method, params, std::time::Duration::from_secs(300))
     }
 
     fn request_timeout(&self, method: &str, params: Value, timeout: std::time::Duration) -> Result<Value, RpcError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let started = std::time::Instant::now();
+        let turn_id = ACTIVE_TURN.lock().unwrap().as_ref().filter(|turn| turn.conn_id == self.id).map(|turn| turn.turn_id.clone());
+        let mut event = json!({"event":"rpc.started", "connectionId":self.id.to_string(), "turnId":turn_id, "requestId":id.to_string(), "sessionId":params.get("sessionId"), "phase":method.replace('/', "."), "deadline":diagnostics::now() + timeout.as_millis() as u64, "provider":self.provider});
+        diagnostics::record(None, event.clone());
         let (tx, rx) = channel();
         self.pending.lock().unwrap().insert(id, tx);
-        if let Err(error) = write_message(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })) {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(error);
+        let result = (|| {
+            write_message(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }))?;
+            let reply = match rx.recv_timeout(timeout) {
+                Ok(reply) => reply,
+                Err(RecvTimeoutError::Timeout) => return Err(RpcError::transport("agent turn timed out")),
+                Err(RecvTimeoutError::Disconnected) => return Err(RpcError::transport("the agent exited before replying")),
+            };
+            if let Some(err) = reply.get("error") { return Err(RpcError { code: err.get("code").and_then(Value::as_i64).unwrap_or(0), message: err.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_string() }); }
+            Ok(reply.get("result").cloned().unwrap_or(Value::Null))
+        })();
+        self.pending.lock().unwrap().remove(&id);
+        event["event"] = json!(if result.is_ok() { "rpc.completed" } else { "rpc.failed" });
+        event["durationMs"] = json!(started.elapsed().as_millis() as u64);
+        if let Err(error) = &result {
+            let mut failure = diagnostics::from_message(&error.message, "acp");
+            failure["rpcCode"] = json!(error.code);
+            event["failure"] = failure;
         }
-        let reply = match rx.recv_timeout(timeout) {
-            Ok(reply) => reply,
-            Err(RecvTimeoutError::Timeout) => { self.pending.lock().unwrap().remove(&id); return Err(RpcError::transport("agent turn timed out")); }
-            Err(RecvTimeoutError::Disconnected) => return Err(RpcError::transport("the agent exited before replying")),
-        };
-        if let Some(err) = reply.get("error") { return Err(RpcError { code: err.get("code").and_then(Value::as_i64).unwrap_or(0), message: err.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_string() }); }
-        Ok(reply.get("result").cloned().unwrap_or(Value::Null))
+        diagnostics::record(None, event);
+        result
     }
 
     /// The advertised method matching the user's choice.
@@ -373,8 +361,14 @@ fn reader_loop(
     structured_buffer: Arc<Mutex<Option<StructuredBuffer>>>,
 ) {
     for line in BufReader::new(stdout).lines() {
-        let Ok(line) = line else { break };
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(line) = line else {
+            diagnostics::record(Some(&app), json!({"event":"protocol.read_failed", "connectionId":conn_id.to_string(), "failure":diagnostics::failure("TRANSPORT_FAILED", "acp", "unknown")}));
+            break;
+        };
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+            diagnostics::record(Some(&app), json!({"event":"protocol.invalid", "connectionId":conn_id.to_string(), "turnId":ACTIVE_TURN.lock().unwrap().as_ref().filter(|turn| turn.conn_id == conn_id).map(|turn| turn.turn_id.clone()), "bytes":line.len(), "failure":diagnostics::failure("PROTOCOL_INVALID", "acp", "unknown")}));
+            continue;
+        };
 
         let id = msg.get("id").cloned();
         // Owned, so an arm is free to move `msg`.
@@ -403,7 +397,9 @@ fn reader_loop(
                         "error": { "code": -32601, "message": format!("{method} not supported") }
                     }),
                 };
-                let _ = write_message(&stdin, &reply);
+                if write_message(&stdin, &reply).is_err() {
+                    diagnostics::record(Some(&app), json!({"event":"protocol.write_failed", "connectionId":conn_id.to_string(), "failure":diagnostics::failure("TRANSPORT_FAILED", "acp", "unknown")}));
+                }
             }
             // Notification.
             (Some("session/update"), None) => {
@@ -430,7 +426,9 @@ fn reader_loop(
                         } else if let Some(session_id) = session_id {
                             canvas_mcp.record_tool_call(session_id, update);
                             if let Some(turn_id) = canvas_mcp.active_turn(session_id) {
-                                let _ = app.emit_to("main", "agent:update", json!({"turnId": turn_id, "update": update}));
+                                if app.emit_to("main", "agent:update", json!({"turnId": turn_id, "update": update})).is_err() {
+                                    diagnostics::record(Some(&app), json!({"event":"protocol.delivery_failed", "turnId":turn_id, "connectionId":conn_id.to_string(), "failure":diagnostics::failure("RESULT_DELIVERY_FAILED", "ipc", "unknown")}));
+                                }
                             }
                         }
                     }
@@ -452,12 +450,15 @@ fn reader_loop(
             let mut slot = state.0.lock().unwrap();
             let active = slot.as_ref().is_some_and(|conn| conn.id == conn_id);
             if active {
+                let exit_code = slot.as_ref().and_then(|conn| conn.child.lock().ok().and_then(|mut child| child.try_wait().ok().flatten())).and_then(|status| status.code());
+                diagnostics::record(Some(&app), json!({"event":"process.exit_status", "connectionId":conn_id.to_string(), "exitCode":exit_code}));
                 *slot = None;
             }
             active
         })
         .unwrap_or(false);
 
+    diagnostics::record(Some(&app), json!({"event":"process.closed", "connectionId":conn_id.to_string(), "turnId": ACTIVE_TURN.lock().unwrap().as_ref().filter(|turn| turn.conn_id == conn_id).map(|turn| turn.turn_id.clone())}));
     if was_active {
         let _ = app.emit("agent:closed", ());
     }
@@ -475,6 +476,7 @@ fn permission_reply(msg: &Value, canvas: &CanvasMcp) -> Value {
     let tool_call_id = msg.pointer("/params/toolCall/toolCallId").and_then(Value::as_str);
     let tool_name = msg.pointer("/params/toolCall/name").and_then(Value::as_str);
     let allowed_canvas = canvas.allows(session_id, tool_call_id, tool_name);
+    diagnostics::record(None, json!({"event": if allowed_canvas { "permission.allowed" } else { "permission.denied" }, "sessionId":session_id, "turnId":session_id.and_then(|id| canvas.active_turn(id)), "toolCallId":tool_call_id, "tool":tool_name.map(|name| name.strip_prefix("mcp__kan-canvas__").unwrap_or(name)), "failure":if allowed_canvas { Value::Null } else { diagnostics::failure("PERMISSION_DENIED", "permission", "not_applied") }}));
     let wanted: [&str; 2] = if AUTO_APPROVE_TOOLS || allowed_canvas {
         ["allow_once", "allow_always"]
     } else {
@@ -586,6 +588,7 @@ fn open(
     let canvas_mcp = CanvasMcp::start(app.clone(), tools).map_err(RpcError::transport)?;
     let workspace = canvas_mcp.workspace(&scratch(app, "agent-workspaces")?, provider == Provider::Devin).map_err(RpcError::transport)?;
 
+    let diagnostic_secrets = spec.env.iter().map(|(_, value)| value.clone()).collect();
     let mut child = Command::new(&spec.program)
         .current_dir(&workspace.0)
         .args(&spec.args)
@@ -595,7 +598,7 @@ fn open(
         .envs(spec.env)
         // These CLIs log heavily to stderr and also write a log file; piping it
         // without draining would eventually fill the pipe and wedge the agent.
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -608,6 +611,8 @@ fn open(
     let pending: Arc<Mutex<HashMap<u64, Sender<Value>>>> = Arc::default();
     let structured_buffer: Arc<Mutex<Option<StructuredBuffer>>> = Arc::default();
     let id = NEXT_CONN.fetch_add(1, Ordering::SeqCst);
+    if let Some(stderr) = child.stderr.take() { diagnostics::drain_stderr(app.clone(), id, stderr, diagnostic_secrets); }
+    diagnostics::record(Some(app), json!({"event": "process.started", "connectionId": id.to_string(), "provider": provider}));
 
     {
         let app = app.clone();
@@ -886,9 +891,9 @@ pub async fn agent_sign_in(
 /// Runs one isolated structured turn. The model's JSON is buffered from ACP
 /// message chunks and returned to the webview; it never becomes a chat entry.
 #[tauri::command]
-pub async fn agent_prompt_structured(app: AppHandle, prompt: String, turn_id: String) -> Result<String, String> {
+pub async fn agent_prompt_structured(app: AppHandle, prompt: String, turn_id: String) -> Result<String, Value> {
     if prompt.len() > 128 * 1024 || turn_id.is_empty() || turn_id.len() > 128 {
-        return Err("Invalid agent prompt".into());
+        return Err(diagnostics::failure("TOOL_VALIDATION_FAILED", "prompt", "not_applied"));
     }
     tauri::async_runtime::spawn_blocking(move || {
         let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or_else(|| "no agent is connected".to_string())?;
@@ -924,15 +929,15 @@ pub async fn agent_prompt_structured(app: AppHandle, prompt: String, turn_id: St
         if ACTIVE_TURN.lock().unwrap().as_ref().is_none_or(|turn| turn.cancelled || turn.turn_id != turn_id) { return Err("structured agent turn cancelled".to_string()); }
         if buffer.text.trim().is_empty() { return Err("structured agent returned no JSON".to_string()); }
         Ok(buffer.text)
-    }).await.map_err(|e| e.to_string())?
+    }).await.map_err(|_| diagnostics::failure("AGENT_RPC_FAILED", "agent", "unknown"))?.map_err(|error: String| diagnostics::from_message(&error, "agent"))
 }
 
 /// Runs one prompt turn. Text streams back as `agent:update` events; this
 /// resolves with the stop reason when the turn ends.
 #[tauri::command]
-pub async fn agent_prompt(app: AppHandle, text: String, turn_id: String, canvas_id: Option<String>) -> Result<String, String> {
+pub async fn agent_prompt(app: AppHandle, text: String, turn_id: String, canvas_id: Option<String>) -> Result<String, Value> {
     if text.len() > 128 * 1024 || turn_id.is_empty() || turn_id.len() > 128 || canvas_id.as_ref().is_some_and(|id| id.len() > 128) {
-        return Err("Invalid agent prompt".into());
+        return Err(diagnostics::failure("TOOL_VALIDATION_FAILED", "prompt", "not_applied"));
     }
     tauri::async_runtime::spawn_blocking(move || {
         let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or("no agent is connected")?;
@@ -950,17 +955,26 @@ pub async fn agent_prompt(app: AppHandle, text: String, turn_id: String, canvas_
         let was_active = conn.canvas_mcp.finish(&turn_id);
         if result.is_err() {
             let _ = write_message(&conn.stdin, &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}));
+            if let Ok(mut child) = conn.child.lock() { let _ = child.kill(); }
         }
         if !was_active { return Err("Agent turn cancelled".into()); }
-        Ok(result?.get("stopReason").and_then(Value::as_str).unwrap_or("end_turn").to_string())
-    }).await.map_err(|error| error.to_string())?
+        Ok(result?.get("stopReason").and_then(Value::as_str).unwrap_or("unknown").to_string())
+    }).await.map_err(|_| diagnostics::failure("AGENT_RPC_FAILED", "agent", "unknown"))?.map_err(|error: String| diagnostics::from_message(&error, "agent"))
 }
 
 #[tauri::command]
-pub fn agent_canvas_result(app: AppHandle, request_id: String, turn_id: String, result: Value, error: Option<String>) -> Result<(), String> {
-    let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or("Agent disconnected")?;
-    if result.to_string().len() > 2 * 1024 * 1024 { return Err("Canvas result too large".into()); }
-    conn.canvas_mcp.complete(&request_id, &turn_id, error.map_or(Ok(result), Err))
+pub fn agent_canvas_result(app: AppHandle, request_id: String, turn_id: String, result: Value, error: Option<Value>) -> Result<(), Value> {
+    let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or_else(|| diagnostics::failure("AGENT_EXITED", "delivery", "unknown"))?;
+    let response = if result.to_string().len() > 1024 * 1024 {
+        Err(diagnostics::failure("RESULT_TOO_LARGE", "delivery", "unknown").to_string())
+    } else {
+        error.map_or(Ok(result), |error| Err(diagnostics::sanitize(&json!({"failure":error}))["failure"].to_string()))
+    };
+    conn.canvas_mcp.complete(&request_id, &turn_id, response).map_err(|_| {
+        let failure = diagnostics::failure("STALE_TURN", "delivery", "unknown");
+        diagnostics::record(Some(&app), json!({"event":"tool.late_result", "turnId":turn_id, "requestId":request_id, "failure":failure}));
+        failure
+    })
 }
 
 #[tauri::command]
@@ -985,6 +999,7 @@ pub fn agent_cancel(app: AppHandle, turn_id: String) -> Result<(), String> {
         current.cancelled = true;
     }
     conn.canvas_mcp.finish(&turn_id);
+    diagnostics::record(Some(&app), json!({"event":"prompt.cancel_requested", "turnId":turn_id, "connectionId":conn.id.to_string(), "failure":diagnostics::failure("CANCELLED", "agent", "unknown")}));
     let _ = write_message(&conn.stdin, &json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": active.session_id, "turnId": turn_id } }));
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));

@@ -272,7 +272,16 @@ function groupShapes(editor: Editor, shapeIds: string[]) {
   return { shapeId: groupId, memberShapeIds: groupableIds };
 }
 
-export function createCanvasTools(editor: Editor) {
+export function createCanvasTools(editor: Editor, assertActive?: () => void) {
+  if (assertActive) {
+    const original = editor;
+    editor = new Proxy(original, {
+      get(target, key) {
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? (...args: unknown[]) => { assertActive(); return value.apply(target, args); } : value;
+      },
+    });
+  }
   return {
     addNode(input: unknown) {
       const parsed = addNodeInput.parse(input);

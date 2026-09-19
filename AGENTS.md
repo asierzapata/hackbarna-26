@@ -150,9 +150,11 @@ mode, apiKey)` command covers all four combinations.
 - A bundled macOS app inherits a stripped PATH, so `devin` and `npx` are probed
   at `$PATH`, `~/.local/bin`, the nvm prefixes, Homebrew and `/usr/local/bin`.
   `DEVIN_BIN` and `NPX_BIN` override.
-- The child's stderr goes to `Stdio::null()` on purpose — these CLIs log heavily
-  and an undrained pipe would eventually wedge the agent. Devin's own log file
-  is at `~/.local/share/devin/cli/logs/`.
+- The child's stderr is continuously drained on a dedicated thread so it cannot
+  wedge the agent. Default diagnostics retain only byte counts; the optional
+  five-minute detail capture keeps a bounded, redacted tail in memory, never in
+  the rotating metadata log. Devin's own log file is at
+  `~/.local/share/devin/cli/logs/`.
 - Sessions get a scratch cwd under the app data dir, not the repo.
 - A sign-in that fails is dropped from the connection slot rather than left
   there, or the next attempt would reuse the broken child and fail identically.
@@ -394,3 +396,36 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   causes for retry; later jobs must still run. Open suggestions/offers and recent
   resolved contributions have separate bounded context lists so neither crowds
   out the other.
+
+## Agent diagnostics and fault injection
+
+- `packages/protocol/src/diagnostics.ts` defines content-free events and typed
+  failures. Desktop traces join frontend, Rust ACP, and native MCP events by
+  turn/request IDs. Structured assistant turns use the lease run ID as their
+  turn ID. Regular chat/Ask Kan uses structured turns; the conversation simulator
+  uses the local canvas MCP path. Do not assume a failed Ask Kan request used MCP.
+- `Report bug` → `View diagnostics` previews/copies the recent trace. Local agent
+  entries also expose per-turn diagnostics. QA reports include frozen metadata
+  traces. Optional error-stack/stderr capture is memory-only, expires after five
+  minutes, and can still contain private text; preview before copying.
+- Native metadata logs live under app-local-data `diagnostics/`, with two bounded
+  files and private permissions. The runner uses `~/.local/state/kan/diagnostics`
+  (override with `KAN_DIAGNOSTICS_DIR`); neither log contains prompts, raw tool
+  arguments, result contents, or credentials by default.
+- Desktop mutation `requestId` UUIDs deduplicate identical retries within the
+  current canvas agent session, including across turns. Conflicting reuse is
+  rejected. Deduplication is not durable across process/session replacement;
+  inspect the canvas after an unknown outcome rather than blindly replaying.
+- Native fault regression: launch an isolated app with
+  `DEVIN_BIN="$PWD/scripts/diagnostics-fake-agent.mjs" TAURI_WEBDRIVER_PORT=4449 KAN_QA_DIR=/tmp/kan-diagnostics-qa npm run tauri:drive -w @kan/desktop -- --config '{"identifier":"com.asierzapata.kan.diagnostics-qa","build":{"devUrl":"http://localhost:1426","beforeDevCommand":"npm run dev -- --port 1426"}}'`.
+  Complete onboarding with the fixture subscription provider, then run
+  `TAURI_WEBDRIVER_URL=http://127.0.0.1:4449 node scripts/agent-diagnostics.e2e.mjs`.
+  It refuses a real provider, uses actual ACP/MCP subprocesses and native IPC,
+  injects result-delivery faults, and exercises both tool and structured paths.
+  It cleans its canvas and leaves its report in the isolated QA directory.
+- Dynamic test harness imports must preserve Vite's `?v=` dependency hashes as
+  well as HMR queries. Resolve React/ReactDOM URLs from transformed `src/main.tsx`;
+  importing bare optimized-dependency URLs can create a second React dispatcher.
+- Focused tests: `npx tsx --tsconfig apps/desktop/tsconfig.json --test apps/desktop/test/agent-diagnostics.test.ts`,
+  `npx tsx --test apps/agent-runner/test/diagnostics.test.ts`, and
+  `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.

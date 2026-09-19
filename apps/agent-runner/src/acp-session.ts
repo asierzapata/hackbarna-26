@@ -3,6 +3,8 @@ import { Readable, Writable } from "node:stream";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { AgentRequestError, failure, normalizeFailure } from "@kan/protocol";
+import { recordRunnerDiagnostic } from "./diagnostics";
 import { client, ndJsonStream, PROTOCOL_VERSION, type McpServer, type SessionNotification, type RequestPermissionRequest } from "@agentclientprotocol/sdk";
 
 export interface AgentCommand { command: string; args: string[] }
@@ -21,12 +23,16 @@ export function permissionResult(request: RequestPermissionRequest, allowed: Set
   return reject ? { outcome: { outcome: "selected" as const, optionId: reject.optionId } } : { outcome: { outcome: "cancelled" as const } };
 }
 
-export async function openAgentSession(agent: AgentCommand, options: { signal: AbortSignal; mcpServers?: McpServer[]; allowedTools?: string[]; onUpdate?: (notification: SessionNotification) => void }) {
+export async function openAgentSession(agent: AgentCommand, options: { signal: AbortSignal; runId?: string; mcpServers?: McpServer[]; allowedTools?: string[]; onUpdate?: (notification: SessionNotification) => void }) {
   if (!agent.command || !Array.isArray(agent.args) || agent.args.some((arg) => typeof arg !== "string")) throw new Error("invalid_agent_command");
   const cwd = await mkdtemp(join(tmpdir(), "kan-agent-"));
-  const child = spawn(agent.command, agent.args, { cwd, shell: false, detached: process.platform !== "win32", env: safeEnvironment(), stdio: ["pipe", "pipe", "ignore"] });
+  const child = spawn(agent.command, agent.args, { cwd, shell: false, detached: process.platform !== "win32", env: safeEnvironment(), stdio: ["pipe", "pipe", "pipe"] });
+  let stderrBytes = 0;
+  child.stderr.on("data", (chunk: Buffer) => { stderrBytes += chunk.length; });
   let exited = false;
-  const exit = new Promise<void>((resolve) => { child.once("exit", () => { exited = true; resolve(); }); child.once("error", () => { exited = true; resolve(); }); });
+  const trace = { runId: options.runId, connectionId: String(child.pid ?? "spawn") };
+  recordRunnerDiagnostic({ ...trace, event: "process.started" });
+  const exit = new Promise<void>((resolve) => { child.once("exit", (code) => { exited = true; recordRunnerDiagnostic({ ...trace, event: "process.closed", exitCode: code ?? undefined, bytes: stderrBytes }); resolve(); }); child.once("error", () => { exited = true; recordRunnerDiagnostic({ ...trace, event: "process.start_failed", failure: failure("AGENT_EXITED", "spawn", "not_applied") }); resolve(); }); });
   const kill = (signal: NodeJS.Signals) => {
     try {
       if (child.pid && process.platform !== "win32") process.kill(-child.pid, signal);
@@ -36,7 +42,12 @@ export async function openAgentSession(agent: AgentCommand, options: { signal: A
   const denied = () => { throw new Error("permission_denied"); };
   const allowed = new Set((options.allowedTools ?? []).map((name) => `mcp__kan-canvas__${name}`));
   const app = client()
-    .onRequest("session/request_permission", ({ params }) => permissionResult(params, allowed))
+    .onRequest("session/request_permission", ({ params }) => {
+      const result = permissionResult(params, allowed);
+      const permitted = typeof params.toolCall.name === "string" && allowed.has(params.toolCall.name);
+      recordRunnerDiagnostic({ ...trace, event: permitted ? "permission.allowed" : "permission.denied", tool: typeof params.toolCall.name === "string" ? params.toolCall.name.replace("mcp__kan-canvas__", "") : "unknown", failure: permitted ? undefined : failure("PERMISSION_DENIED", "permission", "not_applied") });
+      return result;
+    })
     .onRequest("fs/read_text_file", denied)
     .onRequest("fs/write_text_file", denied)
     .onRequest("terminal/create", denied)
@@ -72,8 +83,10 @@ export async function openAgentSession(agent: AgentCommand, options: { signal: A
     const session = await connection.agent.request("session/new", { cwd, mcpServers: options.mcpServers ?? [] }, requestOptions);
     if (!session.sessionId) throw new Error("agent_unavailable");
     return { close, prompt: (text: string) => connection.agent.request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, requestOptions) };
-  } catch {
+  } catch (cause) {
+    const detail = options.signal.aborted ? normalizeFailure(options.signal.reason, "initialize") : failure("AGENT_RPC_FAILED", "initialize", "not_applied");
+    recordRunnerDiagnostic({ ...trace, event: "rpc.failed", failure: detail });
     await close();
-    throw new Error("agent_unavailable");
+    throw new AgentRequestError(detail, { cause });
   }
 }

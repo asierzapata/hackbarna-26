@@ -17,6 +17,9 @@ import { canvasThinkingTargets } from "@/lib/agent-thinking";
 import { buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
 import { parseStructuredOutput } from "@/lib/assistant-controller";
 import { useQaSource } from "@/lib/qa-source";
+import { AgentRequestError, failure, normalizeFailure, type AgentFailure } from "@kan/protocol";
+import { captureFailureDetails, getDiagnostics, recordDiagnostic, refreshDiagnostics, startDiagnostics } from "@/lib/agent-diagnostics";
+import { executeInstrumentedTool } from "@/lib/tool-execution";
 
 /** Providers, keyed the way the Rust side deserializes them. */
 export type Provider = "devin" | "openai";
@@ -69,7 +72,8 @@ export interface PromptHandlers {
   /** A chunk of the agent's reply. Append, don't replace. */
   onText?: (text: string) => void;
   onTool?: (call: AgentToolCall) => void;
-  canvas?: { id: string; shapeIds?: string[]; execute: (name: string, input: unknown) => unknown | Promise<unknown> };
+  onTrace?: (turnId: string) => void;
+  canvas?: { id: string; shapeIds?: string[]; execute: (name: string, input: unknown, assertActive?: () => void) => unknown | Promise<unknown> };
 }
 
 interface CanvasToolRequest {
@@ -107,7 +111,8 @@ interface AgentApi {
     mode: "act" | "context" | "propose",
     context: unknown,
     signal: AbortSignal,
-    shapeIds?: string[]
+    shapeIds?: string[],
+    runId?: string
   ) => Promise<AssistantResult>;
   busy: boolean;
   thinkingShapeIds: string[];
@@ -129,13 +134,16 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const [thinkingShapeIds, setThinkingShapeIds] = React.useState<string[]>([]);
   useQaSource("agent", () => ({
     state: status.state, provider: status.provider, model: status.models?.current,
-    message: status.message, busy, thinkingShapeIds,
+    message: status.message, busy, thinkingShapeIds, diagnostics: getDiagnostics(),
   }));
 
   // One listener for the whole app; the in-flight prompt claims it.
   const handlers = React.useRef<PromptHandlers | null>(null);
   const turnId = React.useRef<string | null>(null);
   const listenersReady = React.useRef<Promise<unknown>>(Promise.resolve());
+  const toolRequests = React.useRef(new Set<string>());
+  const deliveryFailure = React.useRef<AgentFailure | null>(null);
+  const cancelledTurn = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (!isTauri()) return;
@@ -183,18 +191,32 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
 
     const canvas = listen<CanvasToolRequest>("canvas:tool", async ({ payload }) => {
       const active = handlers.current?.canvas;
-      if (!mounted || !active || payload.turnId !== turnId.current || payload.canvasId !== active.id) return;
-      let result: unknown = null;
-      let error: string | undefined;
-      try {
-        if (Date.now() >= payload.expiresAt) throw new Error("Canvas tool request expired");
-        result = await active.execute(payload.name, payload.arguments);
-        const targets = canvasThinkingTargets(payload.name, payload.arguments, result);
-        if (targets) setThinkingShapeIds(targets);
-      } catch (cause) {
-        error = cause instanceof Error ? cause.message : String(cause);
+      if (!mounted || !active || payload.turnId !== turnId.current || payload.canvasId !== active.id) {
+        recordDiagnostic({ event: "tool.stale_event", turnId: payload.turnId, requestId: payload.requestId, tool: payload.name, failure: failure("STALE_TURN", "delivery", "not_applied") });
+        return;
       }
-      void invoke("agent_canvas_result", { requestId: payload.requestId, turnId: payload.turnId, result, error }).catch(() => {});
+      if (toolRequests.current.has(payload.requestId)) return;
+      toolRequests.current.add(payload.requestId);
+      try {
+        await executeInstrumentedTool(payload, {
+          active: () => mounted && handlers.current?.canvas === active && payload.turnId === turnId.current && cancelledTurn.current !== payload.turnId,
+          execute: async (name, input, assertActive) => {
+            try { return await active.execute(name, input, assertActive); }
+            catch (error) { captureFailureDetails(payload.turnId, error); throw error; }
+          },
+          deliver: (value) => invoke("agent_canvas_result", value),
+          record: recordDiagnostic,
+          onResult: (result) => {
+            const targets = canvasThinkingTargets(payload.name, payload.arguments, result);
+            if (targets) setThinkingShapeIds(targets);
+          },
+        });
+      } catch (error) {
+        if (payload.turnId !== turnId.current) return;
+        deliveryFailure.current = normalizeFailure(error, "delivery");
+        setStatus((previous) => ({ ...previous, message: deliveryFailure.current!.message }));
+        void invoke("agent_cancel", { turnId: payload.turnId }).catch((cause) => recordDiagnostic({ event: "prompt.cancel_failed", turnId: payload.turnId, failure: normalizeFailure(cause, "cancel") }));
+      }
     });
 
     const closed = listen("agent:closed", () => {
@@ -211,7 +233,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       );
     });
 
-    listenersReady.current = Promise.all([updates, closed, canvas]);
+    listenersReady.current = Promise.all([updates, closed, canvas, startDiagnostics()]);
     return () => {
       mounted = false;
       ++generation.current;
@@ -270,6 +292,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     },
     cancel: async () => {
       const activeId = turnId.current;
+      cancelledTurn.current = activeId;
       handlers.current = null;
       setThinkingShapeIds([]);
       if (activeId) await invoke("agent_cancel", { turnId: activeId });
@@ -278,13 +301,30 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       if (turnId.current) throw new Error("An agent turn is already running");
       const id = crypto.randomUUID();
       turnId.current = id;
+      toolRequests.current.clear();
+      deliveryFailure.current = null;
+      cancelledTurn.current = null;
+      const startedAt = performance.now();
+      next.onTrace?.(id);
+      recordDiagnostic({ event: "prompt.started", turnId: id, provider: status.provider ?? undefined, model: status.models?.current ?? undefined, phase: "tools" });
       handlers.current = next;
       setThinkingShapeIds(next.canvas?.shapeIds ?? []);
       setBusy(true);
       try {
         await listenersReady.current;
         if (turnId.current !== id || !handlers.current) throw new Error("Agent turn cancelled");
-        await invoke<string>("agent_prompt", { text, turnId: id, canvasId: next.canvas?.id });
+        const stop = await invoke<string>("agent_prompt", { text, turnId: id, canvasId: next.canvas?.id });
+        if (deliveryFailure.current) throw new AgentRequestError(deliveryFailure.current);
+        if (cancelledTurn.current === id || stop === "cancelled") throw new AgentRequestError(failure("CANCELLED", "agent", "unknown"));
+        if (stop !== "end_turn") throw new AgentRequestError(failure("TURN_INCOMPLETE", "agent", "unknown"));
+        await refreshDiagnostics(id).catch(() => undefined);
+        const toolErrors = getDiagnostics(id).events.some((event) => !!event.failure && event.event.startsWith("tool."));
+        recordDiagnostic({ event: toolErrors ? "prompt.completed_with_tool_errors" : "prompt.completed", turnId: id, durationMs: performance.now() - startedAt });
+      } catch (cause) {
+        const error = deliveryFailure.current ?? (cancelledTurn.current === id ? failure("CANCELLED", "agent", "unknown") : normalizeFailure(cause, "agent"));
+        captureFailureDetails(id, cause);
+        recordDiagnostic({ event: error.code === "CANCELLED" ? "prompt.cancelled" : "prompt.failed", turnId: id, durationMs: performance.now() - startedAt, failure: error });
+        throw new AgentRequestError(error, { cause });
       } finally {
         if (turnId.current === id) {
           turnId.current = null;
@@ -294,14 +334,16 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         }
       }
     },
-    runStructured: async (mode, context, signal, shapeIds) => {
+    runStructured: async (mode, context, signal, shapeIds, runId) => {
       if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
       if (turnId.current) throw new Error("An agent turn is already running");
-      const id = crypto.randomUUID();
+      const id = runId ?? crypto.randomUUID();
       turnId.current = id;
       setThinkingShapeIds(shapeIds ?? []);
       setBusy(true);
       let abortHandler: (() => void) | undefined;
+      const startedAt = performance.now();
+      recordDiagnostic({ event: "prompt.started", turnId: id, provider: status.provider ?? undefined, model: status.models?.current ?? undefined, phase: "structured" });
       try {
         await listenersReady.current;
         if (signal.aborted || turnId.current !== id) throw new DOMException("assistant turn cancelled", "AbortError");
@@ -317,9 +359,15 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
         let result: AssistantResult;
         try { result = parseStructuredOutput(raw); }
-        catch (error) { throw new Error(`agent returned unusable structured output: ${error instanceof Error ? error.message : error}`); }
+        catch (error) { captureFailureDetails(id, error); throw new AgentRequestError(failure("STRUCTURED_OUTPUT_INVALID", "parse", "not_applied"), { cause: error }); }
         if ((mode === "context" || mode === "propose") && result.kind === "act") throw new Error("contextual assistant turns cannot act");
+        recordDiagnostic({ event: "prompt.completed", turnId: id, durationMs: performance.now() - startedAt });
         return result;
+      } catch (cause) {
+        const error = normalizeFailure(cause, "structured");
+        recordDiagnostic({ event: error.code === "CANCELLED" ? "prompt.cancelled" : "prompt.failed", turnId: id, durationMs: performance.now() - startedAt, failure: error });
+        if (error.code === "CANCELLED") throw new DOMException(error.message, "AbortError");
+        throw new AgentRequestError(error, { cause });
       } finally {
         if (abortHandler) signal.removeEventListener("abort", abortHandler);
         if (turnId.current === id) {
