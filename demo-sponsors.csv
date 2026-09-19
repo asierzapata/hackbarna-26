@@ -1,0 +1,7 @@
+id,company,estimated_sponsorship_eur,status,data_kind
+preply,Preply,12000,candidate,synthetic_demo
+slng,SLNG,8000,candidate,synthetic_demo
+vonage,Vonage,15000,candidate,synthetic_demo
+cognition,Cognition,10000,candidate,synthetic_demo
+nebius,Nebius,9000,candidate,synthetic_demo
+coca-cola,The Coca-Cola Company,7000,candidate,synthetic_demo
