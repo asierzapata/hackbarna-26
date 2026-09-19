@@ -105,7 +105,7 @@ export class Engine {
   private readonly schema = createKanSchema();
   private readonly rooms = new Map<string, RoomHandle>();
   private readonly classifierChains = new Map<string, Promise<void>>();
-  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; previous: Promise<void> }>();
+  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; reject: (reason: unknown) => void; previous: Promise<void> }>();
   private readonly lastAssigned = new Map<string, number>();
   private interval: ReturnType<typeof setInterval> | null = null;
   private broadcastQueue: RoomEvent[] = [];
@@ -945,10 +945,11 @@ export class Engine {
     const pending = this.pendingClassification.get(roomId);
     if (pending) { pending.cause = cause; clearTimeout(pending.timer); pending.timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs); return; }
     let resolve!: () => void;
-    const promise = new Promise<void>((done) => { resolve = done; });
-    const previous = this.classifierChains.get(roomId) ?? Promise.resolve();
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+    const previous = this.classifierChains.get(roomId)?.catch(() => {}) ?? Promise.resolve();
     const timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs);
-    this.pendingClassification.set(roomId, { cause, timer, promise, resolve, previous });
+    this.pendingClassification.set(roomId, { cause, timer, promise, resolve, reject, previous });
     this.classifierChains.set(roomId, promise);
     void promise.catch(() => console.error("room-server classification_persistence_error"));
   }
@@ -957,7 +958,7 @@ export class Engine {
     const pending = this.pendingClassification.get(roomId);
     if (!pending) return;
     this.pendingClassification.delete(roomId);
-    void pending.previous.then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.resolve);
+    void pending.previous.then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.reject);
   }
 
   classifierIdle(roomId: string): Promise<void> {
@@ -1027,7 +1028,11 @@ export class Engine {
     const shapeById = new Map(records.filter((r) => (r as { typeName?: string }).typeName === "shape").map((r) => [(r as { id: string }).id, r]));
     const shapes = summary.shapes.slice(0, 50).map((s) => ({ id: s.id, label: (s.label ?? "").slice(0, 240), type: s.type, props: boundedContextProps((shapeById.get(s.id) as { props?: unknown } | undefined)?.props) }));
     const openSuggestions = this.db
-      .prepare("SELECT data FROM entries WHERE room_id=? AND kind IN ('suggestion','offer') ORDER BY seq DESC LIMIT 20")
+      .prepare("SELECT data FROM entries WHERE room_id=? AND kind IN ('suggestion','offer') AND json_extract(data,'$.status')='open' ORDER BY seq DESC LIMIT 20")
+      .all(roomId)
+      .map((r) => JSON.parse((r as { data: string }).data));
+    const recentResolvedContributions = this.db
+      .prepare("SELECT data FROM entries WHERE room_id=? AND kind IN ('suggestion','offer') AND json_extract(data,'$.status')!='open' ORDER BY seq DESC LIMIT 20")
       .all(roomId)
       .map((r) => JSON.parse((r as { data: string }).data));
     const state: ClassificationState = {
@@ -1040,6 +1045,7 @@ export class Engine {
       recentEntries,
       shapes,
       openSuggestions,
+      recentResolvedContributions,
     };
     return state;
   }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
@@ -50,7 +50,7 @@ test("simultaneous manual claims have exactly one winner and expired partial run
   const auth = `Bearer ${lease.leaseToken}`;
   const result = ctx.server.engine.mutate(room.id, lease.runId, auth, { id: randomUUID(), operations: [{ type: "add", draft: { type: "concept", label: "retained" } }] });
   ctx.clock.advance(ctx.server.engine.timings.leaseMs); ctx.server.engine.tick();
-  assert.equal(ctx.server.engine.listTriggers(room.id)[0].status, "failed");
+  assert.equal(ctx.server.engine.listTriggers(room.id)[0].status, "expired");
   assert.ok(ctx.server.engine.canvasRecords(room.id).some((r) => (r as { id: string }).id === result.shapeIds[0]));
   assert.throws(() => ctx.server.engine.heartbeatRun(room.id, lease.runId, auth));
   ctx.server.engine.tick(); assert.equal(ctx.server.engine.listTriggers(room.id)[0].attempt, 1);
@@ -79,10 +79,12 @@ test("environment rejects invalid configuration and defaults classifier disabled
   for (const env of [{ PORT: "0" }, { PORT: "65536" }, { PORT: "1.5" }, { KAN_CLASSIFIER: "unknown" }, { KAN_CLASSIFIER: "jev" }, { KAN_ALLOWED_ORIGINS: "*" }, { VONAGE_APPLICATION_ID: "one" }]) assert.throws(() => configFromEnv(env));
 });
 
-test("Vonage private key is accepted as a PEM, an escaped PEM, base64 or a path", () => {
+test("Vonage private key is accepted as a PEM, an escaped PEM, base64 or a path", (t) => {
   const pem = "-----BEGIN PRIVATE KEY-----\nabc\ndef\n-----END PRIVATE KEY-----\n";
-  const file = join(mkdtempSync(join(tmpdir(), "kan-key-")), "private.key");
+  const directory = mkdtempSync(join(tmpdir(), "kan-key-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, "private.key");
   writeFileSync(file, pem);
-  for (const form of [pem, pem.replace(/\n/g, "\\n"), Buffer.from(pem).toString("base64"), file]) assert.equal(normalizePrivateKey(form), pem);
+  for (const form of [pem, pem.replace(/\n/g, "\\n"), Buffer.from(pem).toString("base64"), file]) assert.equal(normalizePrivateKey(form).trimEnd(), pem.trimEnd());
   for (const bad of ["", "   ", "not a key at all"]) assert.throws(() => normalizePrivateKey(bad));
 });

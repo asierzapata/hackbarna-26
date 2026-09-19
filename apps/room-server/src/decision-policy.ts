@@ -17,6 +17,7 @@ export interface ClassificationState {
   recentEntries: unknown[];
   shapes: { id: string; label: string; props?: unknown; type?: string }[];
   openSuggestions: unknown[];
+  recentResolvedContributions?: unknown[];
 }
 
 export const CLASSIFIER_MODEL = "typesafe-ai/jev";

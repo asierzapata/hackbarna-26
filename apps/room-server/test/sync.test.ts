@@ -136,11 +136,13 @@ test("forged provenance on client writes is stripped server-side", async () => {
   await ctx.cleanup();
 });
 
-test("human canvas edits produce debounced system entries attributed to the editor", async () => {
+test("human canvas edits produce debounced system entries attributed to the editor", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base, "Ada");
   const room = await createRoom(u1, ctx.base);
   const c1 = await syncClient(ctx.server.port(), room.id, await ticket(u1, ctx.base, room.id, "sync"));
+  t.after(() => c1.close());
   c1.store.put([textShape("shape:e1", "first idea")]);
   await sleep(300);
   ctx.clock.advance(3000);
@@ -151,6 +153,7 @@ test("human canvas edits produce debounced system entries attributed to the edit
   assert.equal(sys.authorId, u1.id);
   assert.ok(sys.shapeIds.includes("shape:e1"));
   assert.match(sys.text, /Ada/);
+  await ctx.server.engine.classifierIdle(room.id);
   // classifier saw it as a system cause (no agent loop: agent writes never reach here)
   assert.ok(ctx.classifier.calls.some((s) => s.cause.kind === "system"));
   c1.close();

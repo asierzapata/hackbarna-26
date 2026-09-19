@@ -387,3 +387,10 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   currently resolve different Zod versions, so composing their Zod object types
   directly fails typechecking. Keep desktop date helpers importable by the plain
   `node --test scripts/date-nodes.test.mjs` command as well as tsx.
+- Backend test fixtures must register server/socket cleanup with `t.after`; an
+  assertion before end-of-test cleanup otherwise leaves the pre-push runner open.
+  Await `classifierIdle` after debounced human edits before inspecting decisions.
+- Classifier persistence failures reject `classifierIdle` while retaining durable
+  causes for retry; later jobs must still run. Open suggestions/offers and recent
+  resolved contributions have separate bounded context lists so neither crowds
+  out the other.

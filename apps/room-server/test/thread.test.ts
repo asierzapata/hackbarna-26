@@ -7,8 +7,9 @@ async function postMsg(ctx: any, u: any, roomId: string, body: Record<string, un
   return api(u, ctx.base, `/rooms/${roomId}/messages`, { method: "POST", body: JSON.stringify(body) });
 }
 
-test("messages: idempotent by client id, conflict on different payload, spoofed fields rejected", async () => {
+test("messages: idempotent by client id, conflict on different payload, spoofed fields rejected", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const u2 = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
@@ -48,8 +49,9 @@ test("messages: idempotent by client id, conflict on different payload, spoofed 
   await ctx.cleanup();
 });
 
-test("events: replay, cursor bounds, hasMore, updated entries keep seq with new cursor", async () => {
+test("events: replay, cursor bounds, hasMore, updated entries keep seq with new cursor", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   for (let i = 0; i < 3; i++) {
@@ -76,8 +78,9 @@ test("events: replay, cursor bounds, hasMore, updated entries keep seq with new 
   await ctx.cleanup();
 });
 
-test("imported publish messages never trigger classification", async () => {
+test("imported publish messages never trigger classification", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base, {
     messages: [{ id: randomUUID(), text: "@assistant draw a chart", at: new Date().toISOString() }],
@@ -89,11 +92,12 @@ test("imported publish messages never trigger classification", async () => {
   await ctx.cleanup();
 });
 
-test("@assistant mention creates explicit trigger without classifier call", async () => {
+test("@assistant mention creates explicit trigger without classifier call", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
-  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "hey @assistant add a decision node" });
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "@assistant add a decision node" });
   await ctx.server.engine.classifierIdle(room.id);
   const triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 1);
@@ -103,8 +107,9 @@ test("@assistant mention creates explicit trigger without classifier call", asyn
   await ctx.cleanup();
 });
 
-test("classifier act/propose paths, cooldown suppresses repeat proposes, failure is graceful", async () => {
+test("classifier context paths preserve consent and cooldown, failure is graceful", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
 
@@ -122,8 +127,9 @@ test("classifier act/propose paths, cooldown suppresses repeat proposes, failure
   await ctx.server.engine.classifierIdle(room.id);
   let triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 1);
-  assert.equal(triggers[0].mode, "act");
+  assert.equal(triggers[0].mode, "context");
   assert.equal(triggers[0].status, "needs_claim"); // no ready executors
+  ctx.clock.advance(ctx.server.engine.timings.cooldownMs);
 
   // propose trigger, sets cooldown
   ctx.classifier.next = {
@@ -139,7 +145,7 @@ test("classifier act/propose paths, cooldown suppresses repeat proposes, failure
   await ctx.server.engine.classifierIdle(room.id);
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
-  assert.equal(triggers[1].mode, "propose");
+  assert.equal(triggers[1].mode, "context");
 
   // second propose inside cooldown suppressed
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "we decided Y too" });

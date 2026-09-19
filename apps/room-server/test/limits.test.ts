@@ -25,7 +25,7 @@ test("run touched limit 500 rejects excess atomically and generated ids include 
   }
   const rejected = await api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, { method: "POST", headers: { authorization: auth }, body: JSON.stringify({ id: randomUUID(), operations: [{ type: "add", draft: { type: "concept", label: "overflow" } }] }) });
   assert.equal(rejected.status, 400); assert.equal(ctx.server.engine.canvasSummary(room.id).counts.shapes, 500);
-  ctx.server.engine.patchRun(room.id, lease.runId, auth, { id: randomUUID(), status: "done" });
+  ctx.server.engine.patchRun(room.id, lease.runId, auth, { id: randomUUID(), status: "failed" });
   ctx.server.engine.retryTrigger(user.id, room.id, trigger.id, randomUUID());
   const secondLease = ctx.server.engine.claimTrigger(user.id, room.id, trigger.id, { sessionId: ev.sessionId, manual: true });
   const second = ctx.server.engine.mutate(room.id, secondLease.runId, `Bearer ${secondLease.leaseToken}`, { id: requestId, operations: [{ type: "add", draft: { type: "concept", label: "second" } }] });
@@ -48,11 +48,11 @@ test("future websocket cursor does not consume ticket, exact expiry rejects unus
   assert.equal(ctx.server.engine.db.prepare("SELECT used FROM tickets WHERE hash=?").get(createHash("sha256").update(expiring.ticket).digest("hex"))!.used, 0);
 });
 
-test("suggestion deterministic shape collision returns conflict without overwriting human work", async (t) => {
-  const ctx = await setup(); t.after(() => ctx.cleanup());
-  ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 1, intent: "capture", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 4 };
-  const { user, room, lease, auth } = await readyRun(ctx, "A concrete decision");
-  const entry = ctx.server.engine.createSuggestion(room.id, lease.runId, auth, { id: randomUUID(), draft: { type: "concept", label: "Suggestion" } }).entry;
+test("legacy suggestion deterministic shape collision returns conflict without overwriting human work", async (t) => {
+  const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
+  const user = await registerUser(ctx.base), room = await createRoom(user, ctx.base);
+  const entry = { id: randomUUID(), roomId: room.id, seq: 1, at: new Date().toISOString(), kind: "suggestion", triggerId: randomUUID(), runId: randomUUID(), draft: { type: "concept", label: "Suggestion" }, status: "open", shapeId: null };
+  ctx.server.engine.db.prepare("INSERT INTO entries(room_id,seq,id,kind,data,at) VALUES (?,?,?,?,?,?)").run(room.id, entry.seq, entry.id, entry.kind, JSON.stringify(entry), entry.at);
   const id = `shape:k${createHash("sha256").update(`suggest:${entry.id}:0`).digest("hex").slice(0, 24)}`;
   const human = { id, typeName: "shape", type: "kan-node", x: 0, y: 0, rotation: 0, parentId: "page:page", index: "a1", isLocked: false, opacity: 1, meta: {}, props: { w: 320, h: 200, draft: { type: "concept", label: "Human preserved" } } };
   ctx.server.engine.getRoomHandle(room.id).storage.transaction((txn) => txn.set(id, human as never));

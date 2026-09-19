@@ -121,12 +121,22 @@ test("classifier database failure rolls trigger and decision back while retainin
   const ctx = await setup(); t.after(() => ctx.cleanup());
   const user = await registerUser(ctx.base), room = await createRoom(user, ctx.base);
   ctx.server.engine.db.exec("CREATE TEMP TRIGGER fail_decision BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT,'fixture decision failure'); END");
+  ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 1, intent: "capture", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 4 };
   const id = randomUUID();
-  await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id, text: "@assistant act" }) });
-  await assert.rejects(ctx.server.engine.classifierIdle(room.id));
+  const response = await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id, text: "We decided to use SQLite" }) });
+  assert.equal(response.status, 200);
+  await assert.rejects(ctx.server.engine.classifierIdle(room.id), /fixture decision failure/);
   assert.equal(ctx.server.engine.listTriggers(room.id).length, 0);
+  assert.equal(ctx.server.engine.db.prepare("SELECT COUNT(*) n FROM decisions").get()!.n, 0);
   assert.equal(ctx.server.engine.db.prepare("SELECT COUNT(*) n FROM pending_classification WHERE entry_id=?").get(id)!.n, 1);
   assert.equal(ctx.server.engine.eventsSince(room.id, 0, 100).events.length, 1);
+  ctx.server.engine.db.exec("DROP TRIGGER fail_decision");
+  await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "The SQLite decision is confirmed" }) });
+  await ctx.server.engine.classifierIdle(room.id);
+  assert.equal(ctx.server.engine.listTriggers(room.id).length, 1);
+  ctx.server.engine.enqueueClassification(room.id, ctx.server.engine.getEntry(room.id, id)!);
+  await ctx.server.engine.classifierIdle(room.id);
+  assert.equal(ctx.server.engine.db.prepare("SELECT COUNT(*) n FROM pending_classification WHERE entry_id=?").get(id)!.n, 0);
 });
 
 test("classifier context filters open suggestions before limiting and hashes explicit cause state", async (t) => {
@@ -138,6 +148,8 @@ test("classifier context filters open suggestions before limiting and hashes exp
   }
   await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "normal" }) }); await ctx.server.engine.classifierIdle(room.id);
   assert.equal(ctx.classifier.calls[0].openSuggestions.length, 1);
+  assert.equal(ctx.classifier.calls[0].recentResolvedContributions?.length, 20);
+  assert.ok(ctx.classifier.calls[0].recentResolvedContributions?.every((entry) => (entry as { status: string }).status === "dismissed"));
   const id = randomUUID(); await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id, text: "@assistant latest" }) }); await ctx.server.engine.classifierIdle(room.id);
   const hashes = ctx.server.engine.db.prepare("SELECT state_hash,status FROM decisions ORDER BY rowid").all();
   assert.notEqual(hashes[0].state_hash, hashes[1].state_hash); assert.equal(hashes[1].status, "explicit");
