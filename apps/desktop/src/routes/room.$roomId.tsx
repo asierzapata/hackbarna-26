@@ -4,7 +4,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
 import { ChatPanel } from "../components/ChatPanel";
-import { CallBar } from "../components/CallBar";
 import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider } from "../components/canvas-context";
 import { getServerRoom } from "@/lib/api-client";
@@ -94,7 +93,6 @@ function RoomPage() {
           <main className="workspace__body">
             <div className="workspace__canvas">
               <Canvas roomId={roomId} online />
-              <CallBar />
             </div>
             {threadOpen ? (
               <ChatPanel roomId={roomId} online onClose={() => setThreadOpen(false)} />

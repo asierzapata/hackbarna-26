@@ -5,7 +5,6 @@ import { RiAlertLine, RiArrowLeftLine } from "@remixicon/react";
 import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
 import { ChatPanel } from "../components/ChatPanel";
-import { CallBar } from "../components/CallBar";
 import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider, useCanvas } from "../components/canvas-context";
 import { SharingHintBanner } from "../components/SharingHintBanner";
@@ -165,7 +164,6 @@ function CanvasPageContent({
         <div className="workspace__canvas relative">
           <SharingHintBanner onMakeOnline={() => setPublishDialogOpen(true)} />
           <Canvas roomId={canvasId} />
-          <CallBar />
         </div>
         {threadOpen ? (
           <ChatPanel roomId={canvasId} onClose={() => setThreadOpen(false)} />
