@@ -92,7 +92,7 @@ export const mapFixture = {
     { lat: 41.387, lng: 2.1701, label: "Plaça Catalunya" },
     { lat: 41.3797, lng: 2.1897, label: "Barceloneta" },
   ],
-  style: "streets",
+  style: "aquarelle",
 } satisfies NodeDraft;
 
 export const logoFixture = {

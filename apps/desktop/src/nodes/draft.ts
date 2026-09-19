@@ -109,7 +109,7 @@ export function draftToShapePartial(
           markers: draft.markers,
           center: draft.center ?? null,
           zoom: draft.zoom ?? null,
-          style: draft.style ?? "streets",
+          style: draft.style ?? "aquarelle",
           selectedMarker: -1,
         },
       };
