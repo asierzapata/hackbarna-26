@@ -8,10 +8,17 @@ import {
 } from "tldraw";
 
 import { Badge } from "@/components/ui/badge";
+import {
+  brandForText,
+  brandInitials,
+  brandfetchImageUrl,
+  faviconImageUrl,
+} from "@/lib/brand-assets";
 import { config } from "@/lib/config";
 import { NodeCard } from "./NodeCard";
 import {
   mapShapeProps,
+  type MapMarker,
   type MapNodeStyle,
   type MapShape,
 } from "./types";
@@ -25,6 +32,8 @@ function mapStyleFor(style: MapNodeStyle) {
   switch (style) {
     case "streets":
       return maptilersdk.MapStyle.STREETS;
+    case "aquarelle":
+      return maptilersdk.MapStyle.AQUARELLE;
     case "light":
       return maptilersdk.MapStyle.BASE.LIGHT;
     case "dark":
@@ -49,6 +58,46 @@ function viewDiffers(
   );
 }
 
+function createBrandMarkerElement(markerData: MapMarker, selected: boolean) {
+  const brand = brandForText(`${markerData.label} ${markerData.note ?? ""}`);
+  if (!brand) return null;
+
+  const element = document.createElement("button");
+  element.type = "button";
+  element.className = [
+    "flex cursor-pointer items-center justify-center",
+    selected ? "size-12" : "size-10",
+  ].join(" ");
+  element.setAttribute("aria-label", `${markerData.label} marker`);
+  element.title = markerData.label;
+
+  const image = document.createElement("img");
+  image.className = "size-full object-contain";
+  image.alt = `${brand.name} logo`;
+  image.draggable = false;
+
+  const fallback = document.createElement("span");
+  fallback.className = "font-heading text-[10px] font-semibold text-muted-foreground";
+  fallback.textContent = brandInitials(brand.name);
+
+  const brandfetchUrl = brandfetchImageUrl(brand.domain);
+  const faviconUrl = faviconImageUrl(brand.domain);
+  let source: "brandfetch" | "favicon" = brandfetchUrl ? "brandfetch" : "favicon";
+  image.addEventListener("error", () => {
+    if (source === "brandfetch") {
+      source = "favicon";
+      image.src = faviconUrl;
+      return;
+    }
+    image.remove();
+    element.append(fallback);
+  });
+  image.src = brandfetchUrl ?? faviconUrl;
+  element.append(image);
+
+  return element;
+}
+
 export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
   static override type = "kan-map" as const;
   static override props = mapShapeProps;
@@ -61,7 +110,7 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
       markers: [{ lat: 41.387, lng: 2.1701, label: "Barcelona" }],
       center: null,
       zoom: null,
-      style: "streets",
+      style: "aquarelle",
       selectedMarker: -1,
     };
   }
@@ -236,10 +285,18 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
       const selected = styles.getPropertyValue("--agent").trim();
 
       markerRefs.current = shape.props.markers.map((markerData, index) => {
-        const marker = new maptilersdk.Marker({
-          color: index === shape.props.selectedMarker ? selected : primary,
-          scale: index === shape.props.selectedMarker ? 1.2 : 0.9,
-        })
+        const customElement = createBrandMarkerElement(
+          markerData,
+          index === shape.props.selectedMarker,
+        );
+        const marker = new maptilersdk.Marker(
+          customElement
+            ? { element: customElement, anchor: "bottom" }
+            : {
+                color: index === shape.props.selectedMarker ? selected : primary,
+                scale: index === shape.props.selectedMarker ? 1.2 : 0.9,
+              },
+        )
           .setLngLat([markerData.lng, markerData.lat])
           .addTo(map);
         marker.getElement().dataset.testid = `map-marker-${index}`;

@@ -7,7 +7,6 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { config } from "@/lib/config";
 import {
   Table,
   TableBody,
@@ -16,6 +15,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  brandForText,
+  brandInitials,
+  brandfetchImageUrl,
+  faviconImageUrl,
+} from "@/lib/brand-assets";
 import { cn } from "@/lib/utils";
 import type { CellValue } from "../schema";
 import { NodeCard } from "./NodeCard";
@@ -35,38 +40,22 @@ function displayValue(value: CellValue) {
   return String(value);
 }
 
-const knownCompanyDomains = [
-  ["vonage", "vonage.com"],
-  ["cognition", "cognition.ai"],
-  ["nebius", "nebius.ai"],
-  ["preply", "preply.com"],
-] as const;
-
-function companyDomain(value: CellValue) {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim().toLowerCase();
-  return knownCompanyDomains.find(([name]) => normalized.includes(name))?.[1] ?? null;
-}
-
-function companyInitials(name: string) {
-  return name.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
+function companyBrand(value: CellValue) {
+  return typeof value === "string" ? brandForText(value) : null;
 }
 
 function CompanyLogo({ domain, name }: { domain: string; name: string }) {
-  const hasBrandfetch = Boolean(config.brandfetchClientId);
+  const brandfetchUrl = brandfetchImageUrl(domain);
   const [source, setSource] = React.useState<"brandfetch" | "favicon" | "initials">(
-    hasBrandfetch ? "brandfetch" : "favicon",
+    brandfetchUrl ? "brandfetch" : "favicon",
   );
 
   React.useEffect(() => {
-    setSource(hasBrandfetch ? "brandfetch" : "favicon");
-  }, [domain, hasBrandfetch]);
+    setSource(brandfetchUrl ? "brandfetch" : "favicon");
+  }, [brandfetchUrl, domain]);
 
-  const brandfetchUrl = config.brandfetchClientId
-    ? `https://cdn.brandfetch.io/domain/${domain}/w/512/h/512/fallback/lettermark?c=${encodeURIComponent(config.brandfetchClientId)}`
-    : "";
-  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
-  const imageUrl = source === "brandfetch" ? brandfetchUrl : faviconUrl;
+  const faviconUrl = faviconImageUrl(domain);
+  const imageUrl = source === "brandfetch" ? brandfetchUrl ?? faviconUrl : faviconUrl;
   const displayName = name || domain;
 
   return (
@@ -76,7 +65,7 @@ function CompanyLogo({ domain, name }: { domain: string; name: string }) {
     >
       {source === "initials" ? (
         <span className="font-heading text-[10px] font-semibold text-muted-foreground">
-          {companyInitials(displayName)}
+          {brandInitials(displayName)}
         </span>
       ) : (
         <img
@@ -156,7 +145,7 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
     );
     const logoColumnIndex = namedLogoColumn >= 0
       ? namedLogoColumn
-      : rows.some((row) => companyDomain(row[0] ?? null))
+      : rows.some((row) => companyBrand(row[0] ?? null))
         ? 0
         : -1;
 
@@ -234,16 +223,16 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
                         const value = row[cellIndex] ?? null;
                         const isLogoCell = cellIndex === logoColumnIndex;
                         const name = displayValue(value);
-                        const domain = isLogoCell ? companyDomain(value) : null;
+                        const brand = isLogoCell ? companyBrand(value) : null;
 
                         return (
                           <TableCell
                             key={cellIndex}
                             className={cn(isLogoCell ? "py-2" : "py-3")}
                           >
-                            {domain ? (
+                            {brand ? (
                               <div className="flex min-w-0 items-center gap-2">
-                                <CompanyLogo domain={domain} name={name} />
+                                <CompanyLogo domain={brand.domain} name={name} />
                                 <span className="truncate">{name}</span>
                               </div>
                             ) : (

@@ -25,7 +25,7 @@ export const mapMarker = z.object({
   note: z.string().optional(),
 });
 export const mapCenter = z.object({ lat: latitude, lng: longitude });
-export const mapStyle = z.enum(["streets", "light", "dark", "satellite", "outdoor"]);
+export const mapStyle = z.enum(["streets", "aquarelle", "light", "dark", "satellite", "outdoor"]);
 
 export const markdownDraft = z.object({
   type: z.literal("markdown"),
@@ -60,7 +60,7 @@ export const mapDraft = z.object({
   markers: z.array(mapMarker).min(1).describe("Pins; the view fits all of them unless center/zoom are given"),
   center: mapCenter.optional(),
   zoom: z.number().min(0).max(22).optional(),
-  style: mapStyle.optional().describe("Defaults to streets"),
+  style: mapStyle.optional().describe("Defaults to Aquarelle"),
 });
 export const logoDraft = z.object({
   type: z.literal("logo"),

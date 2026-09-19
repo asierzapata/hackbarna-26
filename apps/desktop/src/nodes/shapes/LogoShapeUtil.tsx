@@ -1,12 +1,12 @@
 import * as React from "react";
 import { BaseBoxShapeUtil, HTMLContainer } from "tldraw";
 
-import { config } from "@/lib/config";
+import {
+  brandInitials,
+  brandfetchImageUrl,
+  faviconImageUrl,
+} from "@/lib/brand-assets";
 import { logoShapeProps, type LogoShape } from "./types";
-
-function initials(name: string) {
-  return name.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
-}
 
 export class LogoShapeUtil extends BaseBoxShapeUtil<LogoShape> {
   static override type = "kan-logo" as const;
@@ -45,20 +45,17 @@ export class LogoShapeUtil extends BaseBoxShapeUtil<LogoShape> {
   }
 
   component(shape: LogoShape) {
-    const hasBrandfetch = Boolean(config.brandfetchClientId);
+    const brandfetchUrl = brandfetchImageUrl(shape.props.domain);
     const [source, setSource] = React.useState<"brandfetch" | "favicon" | "initials">(
-      hasBrandfetch ? "brandfetch" : "favicon",
+      brandfetchUrl ? "brandfetch" : "favicon",
     );
 
     React.useEffect(() => {
-      setSource(hasBrandfetch ? "brandfetch" : "favicon");
-    }, [hasBrandfetch, shape.props.domain]);
+      setSource(brandfetchUrl ? "brandfetch" : "favicon");
+    }, [brandfetchUrl, shape.props.domain]);
 
-    const brandfetchUrl = config.brandfetchClientId
-      ? `https://cdn.brandfetch.io/domain/${shape.props.domain}/w/512/h/512/fallback/lettermark?c=${encodeURIComponent(config.brandfetchClientId)}`
-      : "";
-    const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(shape.props.domain)}&sz=128`;
-    const imageUrl = source === "brandfetch" ? brandfetchUrl : faviconUrl;
+    const faviconUrl = faviconImageUrl(shape.props.domain);
+    const imageUrl = source === "brandfetch" ? brandfetchUrl ?? faviconUrl : faviconUrl;
     const displayName = shape.props.name || shape.props.domain;
 
     return (
@@ -69,7 +66,7 @@ export class LogoShapeUtil extends BaseBoxShapeUtil<LogoShape> {
         >
           {source === "initials" ? (
             <div className="flex min-h-0 flex-1 items-center justify-center rounded-md bg-muted font-heading text-3xl text-muted-foreground">
-              {initials(displayName)}
+              {brandInitials(displayName)}
             </div>
           ) : (
             <img
