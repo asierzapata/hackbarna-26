@@ -140,8 +140,8 @@ export function draftToShapePartial(
           title: draft.title,
           events: draft.events,
           sourceNote: draft.sourceNote ?? "",
-          month: draft.month ?? initialMonth(draft.events),
-          selectedDate: null,
+          month: draft.selectedDate?.slice(0, 7) ?? draft.month ?? initialMonth(draft.events),
+          selectedDate: draft.selectedDate ?? null,
         },
       };
     case "logo":

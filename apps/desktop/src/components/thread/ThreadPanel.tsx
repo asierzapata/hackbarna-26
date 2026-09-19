@@ -1,5 +1,5 @@
 import * as React from "react";
-import { RiCloseLine, RiLink } from "@remixicon/react";
+import { RiCloseLine } from "@remixicon/react";
 import { cn } from "cn";
 
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +59,6 @@ export interface ThreadPanelProps extends ThreadActions {
   /** Client-only render state: what is unacknowledged, streaming, interim. */
   view?: ThreadViewState;
   onClose?: () => void;
-  onCopyLink?: () => void;
   composer?: Pick<
     ThreadComposerProps,
     "onSend"
@@ -86,7 +85,6 @@ export function ThreadPanel({
   toolbar,
   view,
   onClose,
-  onCopyLink,
   composer,
   className,
   ...actions
@@ -137,16 +135,6 @@ export function ThreadPanel({
               {channel}
             </span>
             <span className="ms-auto flex shrink-0 items-center gap-1">
-              {onCopyLink ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label="Copy thread link"
-                  onClick={onCopyLink}
-                >
-                  <RiLink />
-                </Button>
-              ) : null}
               {onClose ? (
                 <Button
                   variant="outline"

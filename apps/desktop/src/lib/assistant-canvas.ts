@@ -1,6 +1,8 @@
-import { createShapeId, toRichText, type Editor, type TLArrowBinding, type TLShape, type TLShapeId, type TLShapePartial } from "tldraw";
+import { createShapeId, toRichText, type TLArrowBinding, type TLShape, type TLShapeId, type TLShapePartial } from "@tldraw/tlschema";
+import type { Editor } from "tldraw";
 import { KAN_NODE_HEIGHT, KAN_NODE_WIDTH } from "@kan/nodes";
 import { MutationSchema, type Mutation } from "@kan/protocol";
+import { draftToShapePartial } from "@/nodes/draft";
 
 export function assistantCanvasRecords(editor: Editor | null) {
   if (!editor) return [];
@@ -29,13 +31,28 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       const near = operation.nearShapeId ? get(operation.nearShapeId) : undefined;
       if (near) topLevel(near);
       const viewport = editor.getViewportPageBounds();
-      const shape: TLShapePartial = { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), x: operation.x ?? (near ? near.x + Number((near.props as { w?: number }).w ?? KAN_NODE_WIDTH) + 40 : viewport.x + 80 + index * 40), y: operation.y ?? (near?.y ?? viewport.y + 80 + index * 40), props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
+      const position = { x: operation.x ?? (near ? near.x + Number((near.props as { w?: number }).w ?? KAN_NODE_WIDTH) + 40 : viewport.x + 80 + index * 40), y: operation.y ?? (near?.y ?? viewport.y + 80 + index * 40) };
+      const shape: TLShapePartial = operation.draft.type === "calendar"
+        ? { ...draftToShapePartial(operation.draft, id, position), parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
+        : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
       touched.add(id);
     } else if (operation.type === "update") {
       const shape = get(operation.shapeId);
-      if (shape.type !== "kan-node") throw new Error("Only shared Kan cards can be updated by this action");
-      puts.push({ ...shape, props: { ...shape.props, draft: operation.draft }, meta: { ...shape.meta, provenance } } as TLShapePartial);
+      if (shape.type === "kan-calendar" && operation.draft.type === "calendar") {
+        const draft = operation.draft;
+        const month = draft.selectedDate?.slice(0, 7) ?? draft.month ?? shape.props.month;
+        const selectedDate = draft.selectedDate === undefined ? shape.props.selectedDate : draft.selectedDate;
+        puts.push({ ...shape, props: { ...shape.props, title: draft.title, events: draft.events, sourceNote: draft.sourceNote ?? "", month, selectedDate: selectedDate?.startsWith(`${month}-`) ? selectedDate : null }, meta: { ...shape.meta, provenance } });
+      } else {
+        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards or rich calendars can be updated by this action");
+        puts.push({ ...shape, props: { ...shape.props, draft: operation.draft }, meta: { ...shape.meta, provenance } } as TLShapePartial);
+      }
+      touched.add(shape.id);
+    } else if (operation.type === "style") {
+      const shape = get(operation.shapeId);
+      if (shape.type !== "geo") throw new Error("Only native geometric shapes support color changes");
+      puts.push({ ...shape, props: { ...shape.props, color: operation.color }, meta: { ...shape.meta, provenance } });
       touched.add(shape.id);
     } else if (operation.type === "connect") {
       const from = get(operation.from), to = get(operation.to);

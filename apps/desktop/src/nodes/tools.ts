@@ -396,6 +396,7 @@ export function createCanvasTools(editor: Editor) {
         }
         const patch = parsed.patch;
         const props: Partial<TLGeoShape["props"]> = {
+          ...(patch.color !== undefined ? { color: patch.color } : {}),
           ...(patch.w !== undefined ? { w: patch.w } : {}),
           ...(patch.h !== undefined ? { h: patch.h } : {}),
           ...(patch.text !== undefined ? { richText: toRichText(patch.text) } : {}),

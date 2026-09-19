@@ -367,3 +367,23 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   data; following uses tldraw's native start/stop-following methods.
 - Focused media lifecycle checks: `npx tsx --test apps/desktop/test/room-media.test.ts`.
   Live multi-person media and follow-view checks still require two room clients.
+
+## Queued bug regressions
+
+- `python3 scripts/qa_queue.py repair` repairs only recognized joined CSV rows,
+  validates the entire queue first, and saves the original in a private
+  `.bugs-backup-*.csv` file. Use the command rather than hand-editing the queue.
+- Structured assistance now supports calendar drafts, including `selectedDate`,
+  and a bounded `style` mutation for native geo colors. Offline additions create
+  `kan-calendar`; shared `kan-node` calendar drafts reuse the same interactive
+  `CalendarView`. Other rich-node types still require shared-schema integration.
+- From the catalog after completing onboarding, run
+  `node scripts/qa-queue.e2e.mjs` against the Tauri driver. It mounts an isolated
+  canvas/chat fixture, tests native color changes, Ask Kan structured completions,
+  native/shared calendar controls, and the thread header. Provider replies are
+  controlled at the IPC fetch boundary, not live-provider coverage. Do not drive
+  concurrently. `TAURI_WEBDRIVER_URL` selects a separately launched QA instance.
+- Desktop node schemas remain independently constructed: the desktop and protocol
+  currently resolve different Zod versions, so composing their Zod object types
+  directly fails typechecking. Keep desktop date helpers importable by the plain
+  `node --test scripts/date-nodes.test.mjs` command as well as tsx.

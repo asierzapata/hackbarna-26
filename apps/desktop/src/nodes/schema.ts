@@ -150,6 +150,7 @@ export const calendarDraft = z.object({
   month: calendarMonth
     .optional()
     .describe("Initial month; defaults to earliest event or current month"),
+  selectedDate: dateOnly.nullable().optional().describe("Day to select; selection reveals its month"),
   sourceNote: z.string().optional().describe("Source for the calendar"),
 });
 export const geoShapeKind = z.enum([
@@ -201,8 +202,12 @@ const geometryPatch = {
   w: z.number().positive().optional(),
   h: z.number().positive().optional(),
 };
-const geoShapePatch = z.object({
+const geoShapePatch = z.strictObject({
   type: z.literal("geo").describe("A normal tldraw box or geometric shape"),
+  color: z.enum([
+    "black", "grey", "light-violet", "violet", "blue", "light-blue", "yellow",
+    "orange", "green", "light-green", "light-red", "red", "white",
+  ]).optional().describe("Native tldraw shape color"),
   text: z.string().optional().describe("Text inside the existing shape"),
   ...geometryPatch,
 });

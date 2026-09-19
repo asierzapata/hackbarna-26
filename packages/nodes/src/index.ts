@@ -11,6 +11,10 @@ export const KAN_NODE_TYPE = "kan-node";
 export const KAN_NODE_WIDTH = 320;
 export const KAN_NODE_HEIGHT = 200;
 
+export function kanNodeSize(type: NodeDraft["type"]) {
+  return type === "calendar" ? { w: 520, h: 560 } : { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT };
+}
+
 const draftValidator = new T.Validator<NodeDraft>(
   (value): NodeDraft => NodeDraftSchema.parse(value),
   undefined,

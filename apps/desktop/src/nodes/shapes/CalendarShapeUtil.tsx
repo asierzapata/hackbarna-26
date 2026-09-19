@@ -83,7 +83,15 @@ export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
   }
 
   component(shape: CalendarShape) {
-    const { title, events, sourceNote, month, selectedDate } = shape.props;
+    return <CalendarView props={shape.props} onChange={(props) => this.editor.updateShape({ id: shape.id, type: shape.type, props })} />;
+  }
+}
+
+export function CalendarView({ props, onChange: update }: {
+  props: CalendarShape["props"];
+  onChange: (props: Partial<CalendarShape["props"]>) => void;
+}) {
+    const { title, events, sourceNote, month, selectedDate } = props;
     const today = todayDate();
     const selectedEvents = selectedDate
       ? eventsOnDate(events, selectedDate)
@@ -94,9 +102,6 @@ export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
     );
     const previous = shiftMonth(month, -1);
     const next = shiftMonth(month, 1);
-    const update = (props: Partial<CalendarShape["props"]>) => {
-      this.editor.updateShape({ id: shape.id, type: shape.type, props });
-    };
     return (
       <HTMLContainer style={{ pointerEvents: "all" }}>
         <NodeCard
@@ -305,5 +310,4 @@ export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
         </NodeCard>
       </HTMLContainer>
     );
-  }
 }

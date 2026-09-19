@@ -6,7 +6,7 @@ import type { ConversationLine } from "./conversation-script";
 const descriptions: Record<keyof typeof toolSchemas, string> = {
   addNode: "Create a native tldraw geo shape or a markdown, chart, table, image, map, logo, timeline, or calendar node on the current canvas. Use draft {type: \"geo\", geo: \"rectangle\", text: \"Label\", w: 240, h: 120} for a box, or {type: \"geo\", geo: \"ellipse\", w: 160, h: 160} for a circle. Use unequal w and h for an oval. Use near to place related nodes beside an existing shape. Returns its shapeId.",
   addMermaidDiagram: "Create a Mermaid flowchart, sequence diagram, state diagram, or mindmap as native editable tldraw shapes, arrows, and groups. Pass the exact source in source; optional at is the top-left page position. Returns all created shapeIds.",
-  updateNode: "Update an existing Kan node or normal tldraw box in place using its shapeId. For normal boxes use type geo with text and/or geometry. Prefer updating to creating duplicates.",
+  updateNode: "Update an existing Kan node or normal tldraw box in place using its shapeId. For native geometric shapes (including stars) use type geo with text, color and/or geometry; e.g. patch {type: \"geo\", color: \"blue\"}. Prefer updating to creating duplicates.",
   removeNodes: "Remove explicitly requested nodes and their connections. Do not remove unrelated user work.",
   connectNodes: "Connect two existing shapes with an optional labelled arrow.",
   arrange: "Arrange the given shapes in a grid, row, or column without moving other shapes.",

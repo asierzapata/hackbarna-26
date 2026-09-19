@@ -104,6 +104,7 @@ fn save_report(dir: &Path, mut report: Value) -> Result<SavedReport, String> {
         now
     };
     if !csv.lines().any(|line| line.starts_with(&format!("{id},"))) {
+        if !csv.ends_with('\n') { csv.push('\n'); }
         csv.push_str(&format!("{id},{created_at},open,{created_at},,,{id}.json\n"));
         atomic_write(&index, csv.as_bytes())?;
     }
@@ -133,6 +134,21 @@ mod tests {
         save_report(&dir, report).unwrap();
         assert_eq!(fs::read_to_string(dir.join("bugs.csv")).unwrap().lines().count(), 2);
         assert!(!dir.join(".queue.lock").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn separates_appended_reports_when_csv_has_no_trailing_newline() {
+        let dir = std::env::temp_dir().join(format!("kan-qa-newline-test-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        let report = json!({"id":"12345678-1234-1234-1234-123456789abc", "schemaVersion":1, "context":{}, "description":"first"});
+        save_report(&dir, report).unwrap();
+        let index = dir.join("bugs.csv");
+        let original = fs::read_to_string(&index).unwrap();
+        fs::write(&index, original.trim_end_matches('\n')).unwrap();
+        save_report(&dir, json!({"id":"12345678-1234-1234-1234-123456789def", "schemaVersion":1, "context":{}, "description":"second"})).unwrap();
+        let csv = fs::read_to_string(&index).unwrap();
+        assert!(csv.starts_with(&original));
+        assert_eq!(csv.lines().count(), 3);
         fs::remove_dir_all(dir).unwrap();
     }
 

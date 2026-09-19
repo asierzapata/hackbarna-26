@@ -55,6 +55,32 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(rows[0]["owner"], "'=formula")
         self.assertTrue(rows[0]["notes"].startswith("'="))
 
+    def test_repairs_joined_rows_without_losing_ownership_or_notes(self):
+        first = operate(self.directory, "claim", owner="session-a")
+        operate(self.directory, "update", first["id"], "session-a", "finished", 'Verified "quotes", commas\nand newline')
+        expected = operate(self.directory, "list")
+        path = self.directory / "bugs.csv"
+        original = path.read_text().replace(expected[0]["report_path"] + "\n", expected[0]["report_path"])
+        path.write_text(original)
+        with self.assertRaises(RuntimeError):
+            operate(self.directory, "list")
+        self.assertEqual(operate(self.directory, "repair"), expected)
+        backups = list(self.directory.glob(".bugs-backup-*.csv"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_text(), original)
+        self.assertEqual(operate(self.directory, "repair"), expected)
+        self.assertEqual(len(list(self.directory.glob(".bugs-backup-*.csv"))), 1)
+
+    def test_repair_refuses_unrecognized_corruption(self):
+        rows = operate(self.directory, "list")
+        path = self.directory / "bugs.csv"
+        original = path.read_text().replace(rows[0]["report_path"], "unexpected.json")
+        path.write_text(original)
+        with self.assertRaises(RuntimeError):
+            operate(self.directory, "repair")
+        self.assertEqual(path.read_text(), original)
+        self.assertEqual(list(self.directory.glob(".bugs-backup-*.csv")), [])
+
     def test_truncated_row_is_not_overwritten(self):
         text = ",".join(FIELDS) + "\n12345678-1234-1234-1234-000000000001\n"
         (self.directory / "bugs.csv").write_text(text)

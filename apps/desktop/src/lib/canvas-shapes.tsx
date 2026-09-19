@@ -16,6 +16,8 @@ import {
   type KanNodeShape,
 } from "@kan/nodes";
 import type { NodeDraft } from "@kan/protocol";
+import { CalendarView } from "@/nodes/shapes/CalendarShapeUtil";
+import { initialMonth } from "@/nodes/dates";
 
 /**
  * tldraw 5 resolves `TLShape` through a global registry rather than a plain
@@ -106,8 +108,18 @@ export class KanNodeUtil extends BaseBoxShapeUtil<KanNodeShape> {
     return true;
   }
 
+  override canScroll(shape: KanNodeShape) {
+    return shape.props.draft.type === "calendar";
+  }
+
   override component(shape: KanNodeShape) {
     const { draft } = shape.props;
+    if (draft.type === "calendar") {
+      return <CalendarView
+        props={{ w: shape.props.w, h: shape.props.h, title: draft.title, events: draft.events, sourceNote: draft.sourceNote ?? "", month: draft.selectedDate?.slice(0, 7) ?? draft.month ?? initialMonth(draft.events), selectedDate: draft.selectedDate ?? null }}
+        onChange={({ month, selectedDate }) => this.editor.updateShape({ id: shape.id, type: shape.type, props: { draft: { ...draft, ...(month !== undefined ? { month } : {}), ...(selectedDate !== undefined ? { selectedDate } : {}) } } })}
+      />;
+    }
     return (
       <HTMLContainer
         className="flex flex-col gap-2 overflow-hidden border border-border bg-background p-3 font-mono text-xs"

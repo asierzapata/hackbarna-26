@@ -51,6 +51,37 @@ test("geometry uses near page, rejects cross-page connect and mixed-parent arran
   assert.deepEqual(ctx.server.engine.canvasRecords(room.id), before);
 });
 
+test("claimed runs recolor native stars in place and create validated calendar drafts", async (t) => {
+  const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
+  const user = await registerUser(ctx.base);
+  const star = {
+    ...shape("shape:star"), type: "geo",
+    props: { geo: "star", color: "black", labelColor: "black", fill: "none", dash: "draw", size: "m", font: "draw", align: "middle", verticalAlign: "middle", growY: 0, url: "", scale: 1, w: 200, h: 200, flipX: false, flipY: false, richText: { type: "doc", content: [{ type: "paragraph" }] } },
+  };
+  const room = await createRoom(user, ctx.base, { records: [page("page:page"), star, { ...star, id: "shape:locked", isLocked: true }] });
+  const events = new EventsClient(ctx.server.port(), room.id, await ticket(user, ctx.base, room.id, "events"));
+  t.after(() => events.close()); await events.ready;
+  await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "@kan make the star blue and add a calendar" }) });
+  ctx.server.engine.setExecutorReady(room.id, events.sessionId, true, "fixture");
+  const lease = ctx.server.engine.claimTrigger(user.id, room.id, ctx.server.engine.listTriggers(room.id)[0].id, { sessionId: events.sessionId, manual: true });
+  const mutate = (operations: unknown[]) => api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, { method: "POST", headers: { authorization: `Bearer ${lease.leaseToken}` }, body: JSON.stringify({ id: randomUUID(), operations }) });
+  const draft = { type: "calendar", title: "Calendar", events: [], month: "2026-09", selectedDate: "2026-09-20" };
+  const result = await mutate([{ type: "style", shapeId: star.id, color: "blue" }, { type: "add", draft }]);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  const records = ctx.server.engine.canvasRecords(room.id) as any[];
+  assert.deepEqual(records.find((record) => record.id === star.id).props, { ...star.props, color: "blue" });
+  const calendar = records.find((record) => record.id === result.body.shapeIds[1]);
+  assert.equal(calendar.type, "kan-node");
+  assert.deepEqual(calendar.props, { w: 520, h: 560, draft });
+  for (const operation of [
+    { type: "style", shapeId: star.id, color: "not-a-color" },
+    { type: "style", shapeId: "shape:locked", color: "red" },
+    { type: "style", shapeId: calendar.id, color: "red" },
+    { type: "add", draft: { ...draft, selectedDate: "2026-02-30" } },
+  ]) assert.equal((await mutate([operation])).status, 400);
+  assert.deepEqual(ctx.server.engine.canvasRecords(room.id), records);
+});
+
 test("storage and SQL rollback discard queued events; invalid publish cleans handle", async (t) => {
   const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);

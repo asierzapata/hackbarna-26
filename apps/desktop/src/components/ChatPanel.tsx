@@ -438,7 +438,6 @@ export function ChatPanel({
         </div>
       }
       onClose={onClose}
-      onCopyLink={() => navigator.clipboard?.writeText(window.location.href)}
       onJumpToNode={jumpToNode}
       resolveAnchorLabel={labelForNode}
       onAcceptSuggestion={(suggestion) => resolveSuggestion(suggestion, true)}

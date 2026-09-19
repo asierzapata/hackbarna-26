@@ -11,7 +11,7 @@ import {
 import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
-import { createKanSchema, KAN_NODE_HEIGHT, KAN_NODE_TYPE, KAN_NODE_WIDTH } from "@kan/nodes";
+import { createKanSchema, KAN_NODE_TYPE, kanNodeSize } from "@kan/nodes";
 import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
@@ -1777,7 +1777,7 @@ export class Engine {
           parentId: targetPageId,
           isLocked: false,
           opacity: 1,
-          props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: op.draft },
+          props: { ...kanNodeSize(op.draft.type), draft: op.draft },
           meta: { provenance },
         } as unknown as UnknownRecord;
         planned.set(id, shape);
@@ -1792,6 +1792,14 @@ export class Engine {
           props: { ...existing.props, draft: op.draft },
           meta: { ...existing.meta, provenance },
         } as unknown as UnknownRecord;
+        planned.set(op.shapeId, next);
+        puts.push(next);
+        shapeIds.push(op.shapeId);
+      } else if (op.type === "style") {
+        const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
+        if (!existing || existing.typeName !== "shape" || existing.type !== "geo") throw badRequest("color changes require a native geometric shape");
+        if (existing.isLocked) throw badRequest("unlock the shape before changing its color");
+        const next = { ...existing, props: { ...existing.props, color: op.color }, meta: { ...existing.meta, provenance } } as unknown as UnknownRecord;
         planned.set(op.shapeId, next);
         puts.push(next);
         shapeIds.push(op.shapeId);
@@ -2074,7 +2082,7 @@ export class Engine {
         parentId: pageId,
         isLocked: false,
         opacity: 1,
-        props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: entry.draft },
+        props: { ...kanNodeSize(entry.draft.type), draft: entry.draft },
         meta: { provenance },
       } as unknown as UnknownRecord;
       if (txn.get(shapeId)) throw conflict("suggestion shape already exists");
@@ -2237,7 +2245,7 @@ function shapeLabel(shape: UnknownRecord): string {
     const draft = props.draft as NodeDraft | undefined;
     if (draft) {
       const label =
-        draft.type === "concept" ? draft.label : draft.type === "table" || draft.type === "chart" || draft.type === "markdown" || draft.type === "decision" ? draft.title : "";
+        draft.type === "concept" ? draft.label : draft.title;
       if (label) return label.slice(0, 240);
     }
   }

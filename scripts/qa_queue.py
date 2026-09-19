@@ -46,15 +46,28 @@ def atomic_csv(directory, rows):
             os.unlink(temporary)
 
 
-def load_rows(directory):
+def load_rows(directory, repair=False):
     path = directory / "bugs.csv"
     rows = []
+    repaired = False
     if path.exists():
         with path.open(newline="", encoding="utf-8") as stream:
-            reader = csv.DictReader(stream)
-            if reader.fieldnames != FIELDS:
+            reader = csv.reader(stream)
+            if next(reader, None) != FIELDS:
                 raise RuntimeError("Unexpected CSV header; refusing to overwrite it")
-            rows = list(reader)
+            for cells in reader:
+                while repair and len(cells) > len(FIELDS):
+                    boundary = cells[6]
+                    prefix = cells[0] + ".json"
+                    next_id = boundary[len(prefix):]
+                    if not boundary.startswith(prefix) or not ID.fullmatch(next_id):
+                        raise RuntimeError("Unrecognized QA queue corruption; refusing to overwrite it")
+                    rows.append(dict(zip(FIELDS, cells[:6] + [prefix])))
+                    cells = [next_id] + cells[7:]
+                    repaired = True
+                if len(cells) != len(FIELDS):
+                    raise RuntimeError("Invalid QA queue row; refusing to overwrite it")
+                rows.append(dict(zip(FIELDS, cells)))
     seen = set()
     for row in rows:
         if (None in row or any(value is None for value in row.values())
@@ -77,7 +90,13 @@ def load_rows(directory):
         rows.append(dict(zip(FIELDS, [path.stem, created, "open", created, "", "Recovered unindexed report", path.name])))
         recovered = True
     rows.sort(key=lambda row: (int(row["created_at"]), row["id"]))
-    if recovered:
+    if repaired:
+        descriptor, _ = tempfile.mkstemp(prefix=".bugs-backup-", suffix=".csv", dir=directory)
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write((directory / "bugs.csv").read_bytes())
+            stream.flush()
+            os.fsync(stream.fileno())
+    if recovered or repaired:
         atomic_csv(directory, rows)
     return rows
 
@@ -88,8 +107,8 @@ def safe_cell(value):
 
 def operate(directory, command, bug_id=None, owner=None, status=None, notes=""):
     with queue_lock(directory):
-        rows = load_rows(directory)
-        if command == "list":
+        rows = load_rows(directory, repair=command == "repair")
+        if command in ("list", "repair"):
             return rows
         if command == "claim":
             active = next((row for row in rows if row["status"] == "solving"), None)
@@ -118,6 +137,7 @@ def main():
     parser.add_argument("--dir", type=Path, default=Path(os.environ.get("KAN_QA_DIR", Path(__file__).resolve().parents[1] / "qa_bugs")))
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list")
+    commands.add_parser("repair", help="Repair missing row separators after validation, preserving a private CSV backup")
     claim = commands.add_parser("claim")
     claim.add_argument("--owner", required=True)
     update = commands.add_parser("update")

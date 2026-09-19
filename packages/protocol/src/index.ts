@@ -85,7 +85,26 @@ const chartSpecSchema = boundedJson(10)
   .refine(checkChartSpec, "chart spec contains forbidden keys");
 const chartDataRow = z.record(z.string(), z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]));
 
+const calendarDate = z.iso.date().refine((value) => value >= "0001-01-01", "Date must be in years 0001–9999");
+const calendarEvent = z.strictObject({
+  id: z.string().min(1).max(200),
+  title: z.string().min(1).max(200),
+  start: calendarDate,
+  end: calendarDate.optional(),
+  description: z.string().max(4000).optional(),
+  sourceNote: z.string().max(500).optional(),
+}).refine((event) => !event.end || event.end >= event.start, "Event end must be on or after its start");
+export const CalendarDraftSchema = z.strictObject({
+  type: z.literal("calendar"),
+  title: z.string().min(1).max(200).describe("Calendar heading"),
+  events: z.array(calendarEvent).max(500).refine((events) => new Set(events.map(({ id }) => id)).size === events.length, "Event IDs must be unique").describe("All-day events; empty is allowed. End dates are inclusive."),
+  month: z.string().regex(/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/).optional().describe("Displayed month in YYYY-MM format"),
+  selectedDate: calendarDate.nullable().optional().describe("Day to select in YYYY-MM-DD format; selection reveals its month"),
+  sourceNote: z.string().max(500).optional().describe("Source for the calendar"),
+});
+
 export const NodeDraftSchema = z.discriminatedUnion("type", [
+  CalendarDraftSchema,
   z.strictObject({ type: z.literal("markdown"), title: z.string().min(1).max(200), body: z.string().max(50_000) }),
   z.strictObject({
     type: z.literal("decision"),
@@ -246,6 +265,11 @@ export const LeaseSchema = z.strictObject({
 });
 export type Lease = z.infer<typeof LeaseSchema>;
 
+export const GeoColorSchema = z.enum([
+  "black", "grey", "light-violet", "violet", "blue", "light-blue", "yellow",
+  "orange", "green", "light-green", "light-red", "red", "white",
+]).describe("Native tldraw shape color");
+
 export const MutationSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("add"),
@@ -267,6 +291,7 @@ export const MutationSchema = z.discriminatedUnion("type", [
     shapeIds: z.array(shapeId).min(1).max(200),
     layout: z.enum(["row", "column", "grid"]),
   }),
+  z.strictObject({ type: z.literal("style"), shapeId, color: GeoColorSchema }),
 ]);
 export type Mutation = z.infer<typeof MutationSchema>;
 

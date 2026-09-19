@@ -6,6 +6,9 @@ import { canvasThinkingTargets } from "../src/lib/agent-thinking";
 import { draftToShapePartial } from "../src/nodes/draft";
 import { createCanvasTools } from "../src/nodes/tools";
 import { geoShapeKind, nodeDraft } from "../src/nodes/schema";
+import { executeCanvasTool } from "../src/lib/canvas-agent";
+import { applyAssistantOperations } from "../src/lib/assistant-canvas";
+import { MutationSchema } from "@kan/protocol";
 
 const position = { x: 20, y: 30 };
 
@@ -146,6 +149,39 @@ test("native geo updates preserve the existing ID and style/link props", () => {
   assert.equal(mergedProps.h, 100);
   assert.equal(mergedProps.url, shape.props.url);
   assert.equal(mergedProps.color, shape.props.color);
+});
+
+test("native star color updates survive tool validation without replacing the shape", () => {
+  const shape = { id: "shape:star", type: "geo", props: { geo: "star", color: "black", fill: "none", w: 200, h: 200 } };
+  let update: { props?: object } | undefined;
+  const editor = {
+    getShape: () => shape,
+    run: (callback: () => void) => callback(),
+    updateShape: (value: typeof update) => { update = value; },
+  } as unknown as Editor;
+  const tools = createCanvasTools(editor);
+  executeCanvasTool(tools, "updateNode", { shapeId: shape.id, patch: { type: "geo", color: "blue" } });
+  assert.deepEqual(update, { id: shape.id, type: "geo", props: { color: "blue" } });
+  assert.deepEqual({ ...shape.props, ...update?.props }, { ...shape.props, color: "blue" });
+  assert.throws(() => executeCanvasTool(tools, "updateNode", { shapeId: shape.id, patch: { type: "geo", color: "not-a-color" } }));
+  assert.throws(() => executeCanvasTool(tools, "updateNode", { shapeId: shape.id, patch: { type: "geo", colour: "blue" } }));
+});
+
+test("structured color operations preserve the native star and reject non-geo targets", () => {
+  const shape = { id: "shape:star", typeName: "shape", type: "geo", props: { geo: "star", color: "black", fill: "none" }, meta: {} };
+  const updates: unknown[] = [];
+  const editor = {
+    getSnapshot: () => ({ document: { store: { [shape.id]: shape } } }),
+    run: (callback: () => void) => callback(),
+    createShapes: () => {},
+    updateShapes: (shapes: unknown[]) => updates.push(...shapes),
+    createBindings: () => {},
+  } as unknown as Editor;
+  const operation = MutationSchema.parse({ type: "style", shapeId: shape.id, color: "blue" });
+  assert.deepEqual(applyAssistantOperations(editor, [operation], { entryId: "test" }), [shape.id]);
+  assert.deepEqual(updates, [{ ...shape, props: { ...shape.props, color: "blue" }, meta: { provenance: { entryId: "test" } } }]);
+  shape.type = "kan-node";
+  assert.throws(() => applyAssistantOperations(editor, [operation], {}), /geometric/);
 });
 
 test("focusNodes validates current-page IDs before moving only the camera", () => {
