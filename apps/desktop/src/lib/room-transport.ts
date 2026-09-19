@@ -157,6 +157,7 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         reason: entry.trigger.reason,
         mode: entry.trigger.mode,
         status: entry.trigger.status,
+        anchors: entry.trigger.anchors,
         assigneeSessionId: entry.trigger.assigneeSessionId,
         attempt: entry.trigger.attempt,
       };

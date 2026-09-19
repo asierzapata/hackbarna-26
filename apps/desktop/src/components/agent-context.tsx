@@ -98,7 +98,17 @@ interface AgentApi {
   signOut: () => Promise<void>;
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
-  runStructured: (mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) => Promise<AssistantResult>;
+  /**
+   * One structured turn against a claimed trigger. `shapeIds` are the nodes
+   * the trigger anchored on, so the canvas shows what Kan is looking at for
+   * the same reason a tool-driven turn does.
+   */
+  runStructured: (
+    mode: "act" | "context" | "propose",
+    context: unknown,
+    signal: AbortSignal,
+    shapeIds?: string[]
+  ) => Promise<AssistantResult>;
   busy: boolean;
   thinkingShapeIds: string[];
   cancel: () => Promise<void>;
@@ -284,12 +294,12 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         }
       }
     },
-    runStructured: async (mode, context, signal) => {
+    runStructured: async (mode, context, signal, shapeIds) => {
       if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
       if (turnId.current) throw new Error("An agent turn is already running");
       const id = crypto.randomUUID();
       turnId.current = id;
-      setThinkingShapeIds([]);
+      setThinkingShapeIds(shapeIds ?? []);
       setBusy(true);
       let abortHandler: (() => void) | undefined;
       try {

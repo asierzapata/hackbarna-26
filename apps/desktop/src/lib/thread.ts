@@ -133,6 +133,8 @@ export interface TriggerEntry extends ThreadEntryBase {
   reason: string;
   mode: "act" | "context" | "propose";
   status: "pending" | "offered" | "running" | "needs_claim" | "done" | "failed" | "cancelled" | "expired";
+  /** Shape ids the request was about — what the canvas highlights while it runs. */
+  anchors: string[];
   assigneeSessionId: string | null;
   attempt: number;
 }
