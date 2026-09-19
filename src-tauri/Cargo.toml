@@ -17,8 +17,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[features]
+# Embeds a W3C WebDriver server (127.0.0.1:4445) inside the app so the real
+# WKWebView can be driven in tests. Off by default and never enabled for a
+# release bundle — `npm run tauri:drive` turns it on for local dev.
+webdriver = ["dep:tauri-plugin-webdriver"]
+
 [dependencies]
 tauri = { version = "2", features = [] }
+tauri-plugin-webdriver = { version = "0.2", optional = true }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

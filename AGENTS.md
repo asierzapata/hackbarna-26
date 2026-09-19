@@ -10,6 +10,8 @@ remixicon) for UI primitives.
 | --- | --- |
 | Dev server (browser) | `npm run dev` — serves on **port 1420**, `strictPort` |
 | Dev app (Tauri window) | `npm run tauri dev` |
+| Dev app + automation | `npm run tauri:drive` — adds WebDriver on :4445 |
+| Drive the running app | `node scripts/drive.mjs <cmd>` — see the `e2e` skill |
 | Typecheck | `npx tsc --noEmit` |
 | Production build | `npm run build` |
 
@@ -22,36 +24,26 @@ fixed — if it's taken, the dev server fails rather than picking another.
 app.** Typecheck and `vite build` passing is not sufficient evidence that
 anything works — they only prove the code compiles.
 
-This rule exists because it has already failed here: the tldraw integration
-type-checked and built cleanly while `npm run dev` crashed on startup with 53
-unresolved-asset errors. A build-only check reported success on a broken app.
+This has already failed here twice: the tldraw integration type-checked and
+built cleanly while `npm run dev` crashed on startup with 53 unresolved-asset
+errors; and the thread panel's accent borders and active-tab styling both
+compiled fine and both rendered wrong.
 
-The loop:
+**Read the `e2e` skill before verifying anything** (`.agents/skills/e2e/`). It
+has the exact commands, the wait-for-ready loops, and the traps that have
+already cost time. The short version:
 
-1. Start the dev server: `npm run dev` (background).
-2. **Read the server output before continuing.** Vite prints the ready banner
-   and the local URL; a crash appears here and nowhere else.
-3. Drive `http://localhost:1420` with the chrome-devtools MCP tools — navigate,
-   `take_snapshot`, interact (click / drag / type), `take_screenshot`.
-4. Check `list_console_messages` and `list_network_requests` for errors and
-   failed asset loads. A page that renders can still be quietly 404ing.
-5. Report what was actually observed. If a step was skipped or a check didn't
-   run, say so plainly rather than implying full coverage.
-
-### Browser vs Tauri webview
-
-The chrome-devtools MCP drives Chrome against the Vite dev server, not the
-Tauri webview. That covers frontend-only work. Anything touching Tauri APIs,
-IPC, window behaviour, or native plugins is **not** covered by browser testing
-and needs `npm run tauri dev` — state this limit explicitly instead of letting
-a browser pass stand in for it.
-
-### If chrome-devtools MCP won't attach
-
-It fails with "browser is already running for .../chrome-profile" when a
-leftover Chrome holds the profile lock at `~/.cache/chrome-devtools-mcp/`.
-Either quit that instance (it's a throwaway profile, not the user's browsing
-session) or run the MCP server with `--isolated`. Ask before killing processes.
+- Default to the **driver**: `npm run tauri:drive`, wait for port 4445, then
+  `node scripts/drive.mjs snapshot | eval | clickText | fill | shot`. This is
+  the real WKWebView, so Tauri IPC, native menus and window behaviour are all
+  in scope, and the output is structured enough to assert on.
+- Use the **browser** (`npm run dev` + chrome-devtools MCP against
+  `http://localhost:1420`) only for quick CSS iteration. It cannot test Tauri
+  APIs, IPC, window behaviour or native plugins — say so rather than letting a
+  browser pass stand in for full coverage.
+- **Read the server output before continuing.** A crash appears in the log and
+  nowhere else.
+- Report what was actually observed. If a step was skipped, say so plainly.
 
 ## Gotchas
 
@@ -60,3 +52,13 @@ session) or run the MCP server with `--isolated`. Ask before killing processes.
 - tldraw assets are bundled locally rather than loaded from the tldraw CDN, so
   the canvas works offline in the packaged desktop app.
 - The tldraw chunk is ~1.7 MB (530 kB gzipped). Expected for a local app.
+- `tauri-plugin-webdriver` is optional and gated behind the `webdriver` Cargo
+  feature, not `cfg(debug_assertions)` — Cargo does not evaluate
+  `debug_assertions` in `[target.'cfg(...)']`, so the README's suggested form
+  would silently fail to link the crate. `cargo tree` confirms it is absent
+  from a default build.
+- `tsconfig.json` deliberately has no `baseUrl`; TypeScript 6 rejects it. The
+  `@/*` path alias resolves relative to the tsconfig without it.
+- `ui/spinner.tsx` is typed against the remixicon component, not
+  `ComponentProps<"svg">`. Re-adding it via the shadcn CLI reintroduces a type
+  error, because remixicon icons reject `children`.
