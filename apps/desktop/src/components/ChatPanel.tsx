@@ -14,7 +14,7 @@ import { createWsTransport, type RoomTransport } from "@/lib/room-transport";
 
 import { createLocalTransport, type LocalTransport } from "@/lib/local-transport";
 import { useAgent, type AgentToolCall } from "./agent-context";
-import { runAssistantTurn, startLeaseExecution, type LeaseExecution } from "@/lib/assistant-controller";
+import { runAssistantTurn, startLeaseExecution, type LeaseExecution, type LeasePhase } from "@/lib/assistant-controller";
 import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
@@ -67,6 +67,24 @@ function withoutId(ids: ReadonlySet<string>, id: string) {
   return next;
 }
 
+/** One run that did not finish, in the terms you would need to explain why. */
+interface RunFailure {
+  at: string;
+  online: boolean;
+  mode: "act" | "context" | "propose";
+  /** `report` means the failure itself could not be handed to the room. */
+  phase: LeasePhase | "report";
+  status: "failed" | "cancelled";
+  triggerId: string;
+  attempt: number;
+  runId: string;
+  reason: string;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Binds one room to the thread panel.
  *
@@ -107,7 +125,23 @@ export function ChatPanel({
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [leaseRevision, setLeaseRevision] = React.useState(0);
   const claiming = React.useRef(false);
-  const reportError = React.useCallback((error: unknown) => setActionError(error instanceof Error ? error.message : String(error)), []);
+  const reportError = React.useCallback((error: unknown) => setActionError(describeError(error)), []);
+
+  /**
+   * The last few assistant runs that did not finish.
+   *
+   * A failed run leaves an empty agent entry in the thread and a `failed`
+   * trigger, and that is all anyone — user, QA report, driver session — has
+   * ever been able to see. Keep the phase and the server's own words here so
+   * "it just says Failed" stops being the end of the investigation. A ref, not
+   * state: this is evidence about a render, not an input to one.
+   */
+  const runFailures = React.useRef<RunFailure[]>([]);
+  const recordRunFailure = React.useCallback((failure: RunFailure) => {
+    runFailures.current = [...runFailures.current, failure].slice(-10);
+    console.error("kan: assistant run failed", failure);
+    if (import.meta.env.DEV) (window as Window & { __kanRunFailures?: RunFailure[] }).__kanRunFailures = runFailures.current;
+  }, []);
 
   const transport = React.useMemo<RoomTransport>(() => {
     if (online && roomId) return createWsTransport(roomId);
@@ -133,7 +167,7 @@ export function ChatPanel({
   );
   useQaSource("chat", () => ({
     roomId, online, entries, pendingIds: [...pendingIds], streamingIds: [...streamingIds],
-    transcript: transcript.current,
+    transcript: transcript.current, runFailures: runFailures.current,
   }));
   const models = agent.status.models?.available ?? [];
   const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
@@ -212,10 +246,24 @@ export function ChatPanel({
         if (!online) return (transport as LocalTransport).completeLocal(lease.runId, input);
         return completeServerRun(roomId!, lease.runId, input, lease.leaseToken);
       },
-      fail: async (status) => {
-        if (status === "failed") setActionError("Kan could not finish this request. You can retry from the thread.");
-        if (online) await patchServerRun(roomId!, lease.runId, lease.leaseToken, { id: crypto.randomUUID(), status });
-        else await (transport as LocalTransport).failLocal(lease.runId, status);
+      fail: async (status, failure) => {
+        const reason = describeError(failure.error);
+        if (status === "failed") setActionError(`Kan could not finish this request (${failure.phase}): ${reason}`);
+        // Record before telling the room, so a failure that itself fails to be
+        // reported still leaves a trace.
+        recordRunFailure({
+          at: new Date().toISOString(), online, mode: trigger.mode, phase: failure.phase, status,
+          triggerId: trigger.triggerId, attempt: trigger.attempt, runId: lease.runId, reason,
+        });
+        try {
+          if (online) await patchServerRun(roomId!, lease.runId, lease.leaseToken, { id: crypto.randomUUID(), status });
+          else await (transport as LocalTransport).failLocal(lease.runId, status);
+        } catch (error) {
+          recordRunFailure({
+            at: new Date().toISOString(), online, mode: trigger.mode, phase: "report", status,
+            triggerId: trigger.triggerId, attempt: trigger.attempt, runId: lease.runId, reason: describeError(error),
+          });
+        }
       },
     });
     activeLease.current = execution;
@@ -223,7 +271,7 @@ export function ChatPanel({
       if (activeLease.current === execution) activeLease.current = undefined;
       setLeaseRevision((revision) => revision + 1);
     });
-  }, [agent, online, roomId, transport]);
+  }, [agent, online, recordRunFailure, roomId, transport]);
 
   React.useEffect(() => {
     if (!roomId || !roomSnapshot.ready || !roomSnapshot.sessionId || agent.status.state !== "ready") return;

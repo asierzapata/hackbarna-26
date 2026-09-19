@@ -59,6 +59,22 @@ export function parseStructuredOutput(raw: string): AssistantResult {
   return parseAssistantResult(extractStructuredJson(raw));
 }
 
+/**
+ * Where a lease execution was when it gave up.
+ *
+ * "failed" on its own is the least useful thing a run can say: the thread ends
+ * up showing an empty agent entry and nothing anywhere records whether the
+ * context fetch 409'd, the agent returned prose instead of JSON, or the
+ * completion was rejected. The phase plus the original error is the difference
+ * between a bug report and a shrug.
+ */
+export type LeasePhase = "context" | "agent" | "complete" | "heartbeat";
+
+export interface LeaseFailure {
+  phase: LeasePhase;
+  error: unknown;
+}
+
 export interface LeaseExecutionArgs {
   triggerId: string;
   attempt: number;
@@ -69,8 +85,10 @@ export interface LeaseExecutionArgs {
   getContext: (signal: AbortSignal) => Promise<{ revision: string; value: unknown }>;
   run: (mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) => Promise<AssistantResult>;
   heartbeat: () => Promise<{ expiresAt: number }>;
+  /** Beat interval; only a test has any reason to move it. */
+  heartbeatMs?: number;
   complete: (input: { id: string; revision: string; result: AssistantResult }, signal: AbortSignal) => Promise<unknown>;
-  fail: (status: "failed" | "cancelled") => Promise<void>;
+  fail: (status: "failed" | "cancelled", failure: LeaseFailure) => Promise<void>;
 }
 
 export interface LeaseExecution {
@@ -94,22 +112,31 @@ export function startLeaseExecution(args: LeaseExecutionArgs): LeaseExecution {
     const wait = Math.max(0, deadline - Date.now());
     deadlineTimer = setTimeout(() => controller.abort(), wait);
   };
+  // A lost heartbeat aborts the turn, so without this the cause would be
+  // reported as a plain cancellation — indistinguishable from the user
+  // pressing stop.
+  let lost: LeaseFailure | undefined;
+  let phase: LeasePhase = "context";
   const promise = (async () => {
     try {
       const beat = async () => {
         if (controller.signal.aborted) return;
-        try { deadline = (await args.heartbeat()).expiresAt; schedule(); } catch { controller.abort(); }
-        heartbeatTimer = setTimeout(beat, 10_000);
+        try { deadline = (await args.heartbeat()).expiresAt; schedule(); }
+        catch (error) { lost = { phase: "heartbeat", error }; controller.abort(); }
+        heartbeatTimer = setTimeout(beat, args.heartbeatMs ?? 10_000);
       };
       schedule();
-      heartbeatTimer = setTimeout(beat, 10_000);
+      heartbeatTimer = setTimeout(beat, args.heartbeatMs ?? 10_000);
       const context = await args.getContext(controller.signal);
       if (controller.signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
+      phase = "agent";
       const result = await args.run(args.mode, context.value, controller.signal);
       if (controller.signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
+      phase = "complete";
       await args.complete({ id: completionId, revision: context.revision, result }, controller.signal);
     } catch (error) {
-      await args.fail(error instanceof DOMException && error.name === "AbortError" ? "cancelled" : "failed");
+      const cancelled = error instanceof DOMException && error.name === "AbortError";
+      await args.fail(cancelled && !lost ? "cancelled" : "failed", lost ?? { phase, error });
     } finally {
       if (heartbeatTimer) clearTimeout(heartbeatTimer);
       if (deadlineTimer) clearTimeout(deadlineTimer);

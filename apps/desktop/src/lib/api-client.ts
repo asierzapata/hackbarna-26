@@ -287,24 +287,45 @@ export async function resolveServerSuggestion(
   if (!res.ok) throw new Error(`Failed to resolve suggestion: ${res.status}`);
 }
 
+/**
+ * The run endpoints are the one place a failure has nowhere else to surface:
+ * the lease execution catches it, marks the run failed, and the thread is left
+ * showing an empty agent entry. A bare `409` cannot tell you whether the room
+ * drifted under the turn or the evidence was rejected, and the server already
+ * says which — `{error, message}` — so carry its words instead of the number
+ * alone.
+ */
+async function runError(action: string, res: Response): Promise<Error> {
+  let detail = "";
+  try {
+    const body = (await res.json()) as { error?: unknown; message?: unknown };
+    detail = [body?.error, body?.message]
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join(": ");
+  } catch {
+    // A non-JSON body (a proxy's HTML error page, say) still has a status.
+  }
+  return new Error(`${action} (${res.status})${detail ? `: ${detail}` : ""}`);
+}
+
 export async function claimServerTrigger(roomId: string, triggerId: string, sessionId: string, manual = true): Promise<{ lease: import("@kan/protocol").Lease }> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, manual }) });
-  if (!res.ok) throw new Error(`Failed to claim trigger: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to claim trigger", res);
   return res.json() as Promise<{ lease: import("@kan/protocol").Lease }>;
 }
 
 export async function retryServerTrigger(roomId: string, triggerId: string, requestId: string): Promise<{ trigger: import("@kan/protocol").Trigger }> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: requestId }) });
-  if (!res.ok) throw new Error(`Failed to retry trigger: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to retry trigger", res);
   return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger }>;
 }
 
 export async function cancelServerTrigger(roomId: string, triggerId: string): Promise<{ trigger: import("@kan/protocol").Trigger }> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
-  if (!res.ok) throw new Error(`Failed to cancel trigger: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to cancel trigger", res);
   return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger }>;
 }
 
@@ -317,26 +338,26 @@ export async function resolveServerOffer(roomId: string, entryId: string, accept
 
 export async function heartbeatServerRun(roomId: string, runId: string, leaseToken: string): Promise<{ expiresAt: number }> {
   const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/heartbeat`, { method: "POST", headers: { Authorization: `Bearer ${leaseToken}` } });
-  if (!res.ok) throw new Error(`Run lease expired: ${res.status}`);
+  if (!res.ok) throw await runError("Run lease expired", res);
   return res.json() as Promise<{ expiresAt: number }>;
 }
 
 export async function patchServerRun(roomId: string, runId: string, leaseToken: string, input: { id: string; status: "failed" | "cancelled" }): Promise<{ entry: Entry }> {
   const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${leaseToken}` }, body: JSON.stringify(input) });
-  if (!res.ok) throw new Error(`Failed to mark run: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to mark run", res);
   return res.json() as Promise<{ entry: Entry }>;
 }
 
 export async function getServerRunContext(roomId: string, runId: string, leaseToken: string): Promise<{ trigger: import("@kan/protocol").Trigger; causeEntries: Entry[]; recentEntries: Entry[]; canvas: unknown; revision: string }> {
   const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/context`, { headers: { Authorization: `Bearer ${leaseToken}` } });
-  if (!res.ok) throw new Error(`Failed to fetch run context: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to fetch run context", res);
   return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger; causeEntries: Entry[]; recentEntries: Entry[]; canvas: unknown; revision: string }>;
 }
 
 export async function completeServerRun(roomId: string, runId: string, input: { id: string; revision: string; result: AssistantResult }, leaseToken?: string): Promise<{ entry: Entry; outcomeEntry?: Entry }> {
   await ensureBackendIdentity();
   const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/complete`, { method: "POST", headers: { "content-type": "application/json", ...(leaseToken ? { Authorization: `Bearer ${leaseToken}` } : {}) }, body: JSON.stringify(input) });
-  if (!res.ok) throw new Error(`Failed to complete run: ${res.status}`);
+  if (!res.ok) throw await runError("Failed to complete run", res);
   return res.json() as Promise<{ entry: Entry; outcomeEntry?: Entry }>;
 }
 
