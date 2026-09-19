@@ -339,3 +339,63 @@ test("data/query requires a live lease and calls demo data verbatim", async () =
   ev.close();
   await ctx.cleanup();
 });
+
+// An explicit request is answered by a real agent, which takes tens of seconds.
+// A room that stayed perfectly still for all of them is the rare case, not the
+// common one, so act-mode completion has to say which results survive drift:
+// a reply writes nothing and does, anything touching the canvas does not.
+test("act mode: a reply survives room drift, a mutation still conflicts", async (t) => {
+  const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base);
+  const room = await createRoom(u, ctx.base);
+  const ev = new EventsClient(ctx.server.port(), room.id, await ticket(u, ctx.base, room.id, "events"));
+  await ev.ready;
+  ev.executorReady();
+  ctx.server.engine.tick();
+
+  const claimed = async (triggerId: string) => {
+    const claim = await api(u, ctx.base, `/rooms/${room.id}/triggers/${triggerId}/claim`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId: ev.sessionId, manual: true }),
+    });
+    assert.equal(claim.status, 200, JSON.stringify(claim.body));
+    const auth = { authorization: `Bearer ${claim.body.lease.leaseToken}` };
+    const context = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/context`, { headers: auth });
+    assert.equal(context.status, 200, JSON.stringify(context.body));
+    return { runId: claim.body.lease.runId, auth, revision: context.body.revision };
+  };
+  const drift = () =>
+    api(u, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "meanwhile, someone else talks" }) });
+  const complete = (run: { runId: string; auth: Record<string, string>; revision: string }, result: unknown) =>
+    api(null, ctx.base, `/rooms/${room.id}/runs/${run.runId}/complete`, {
+      method: "POST",
+      headers: run.auth,
+      body: JSON.stringify({ id: randomUUID(), revision: run.revision, result }),
+    });
+
+  const first = await explicitTrigger(ctx, u, room.id);
+  assert.equal(first.mode, "act");
+  const reply = await claimed(first.id);
+  await drift();
+  await ctx.server.engine.classifierIdle(room.id);
+  const replied = await complete(reply, { kind: "reply", text: "Tomorrow is a Tuesday.", sources: [{ kind: "entry", id: first.causeEntryIds[0] }] });
+  assert.equal(replied.status, 200, JSON.stringify(replied.body));
+  assert.equal(replied.body.entry.text, "Tomorrow is a Tuesday.");
+  assert.equal(ctx.server.engine.listTriggers(room.id).find((t: any) => t.id === first.id)!.status, "done");
+
+  const second = await explicitTrigger(ctx, u, room.id);
+  const acting = await claimed(second.id);
+  await drift();
+  await ctx.server.engine.classifierIdle(room.id);
+  const acted = await complete(acting, {
+    kind: "act",
+    text: "Captured it",
+    sources: [{ kind: "entry", id: second.causeEntryIds[0] }],
+    operations: [{ type: "add", draft: { type: "concept", label: "too late" } }],
+  });
+  assert.equal(acted.status, 409, JSON.stringify(acted.body));
+  assert.ok(!ctx.server.engine.canvasRecords(room.id).some((r: any) => r.typeName === "shape"));
+
+  ev.close();
+});

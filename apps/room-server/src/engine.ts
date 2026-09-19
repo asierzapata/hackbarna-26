@@ -1566,7 +1566,13 @@ export class Engine {
     this.validateEvidenceSources(roomId, sources, { entryIds: new Set(storedContext.entryIds ?? []), shapeIds: new Set(storedContext.shapeIds ?? []) });
     if ((trigger.mode === "context" || trigger.mode === "propose") && parsed.data.kind !== "silent" && sources.length < 1) throw badRequest("contextual results require a source");
     const currentRevision = this.currentRevision(roomId);
-    if (trigger.mode === "act" && input.revision !== currentRevision) throw conflict("run context is stale");
+    // Drift since the context was captured only matters for a result that
+    // depends on that context still holding. A reply writes nothing, so a
+    // second message or a shape someone nudged during the turn cannot make it
+    // wrong — and in a live room that drift is the normal case, not the
+    // exception. The offline path has always allowed this; holding the room
+    // server to a stricter rule failed explicit requests that were fine.
+    if (trigger.mode === "act" && input.revision !== currentRevision && parsed.data.kind !== "reply") throw conflict("run context is stale");
     const staleContext = (trigger.mode === "context" || trigger.mode === "propose") && (input.revision !== currentRevision || storedContext?.revision !== input.revision);
     const assistantResult: AssistantResult = staleContext ? { kind: "silent" } : parsed.data;
     if (trigger.mode === "act" && input.revision && storedContext?.revision && input.revision !== storedContext.revision) throw conflict("run context is stale");
