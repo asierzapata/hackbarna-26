@@ -429,7 +429,7 @@ Three small gaps, each of which costs more the later it is closed:
 
 Blocking, do these before the room server exists:
 
-- [ ] Workspace layout, with `scripts/drive.mjs` and `tauri.conf.json` paths fixed in the same commit (migration 1)
+- [x] Workspace layout, with `scripts/drive.mjs` and `tauri.conf.json` paths fixed in the same commit (migration 1)
 - [ ] `packages/protocol` with the wire schemas, and the view-only flags moved out of `ThreadEntry` (migration 2)
 - [ ] `RoomTransport` interface with the fixtures as its first implementation (migration 3)
 - [ ] `/room/$roomId` route and a landing route that creates one (migration 4)

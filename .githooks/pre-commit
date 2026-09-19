@@ -1,0 +1,59 @@
+#!/bin/sh
+# Typechecks the workspaces this commit touches.
+#
+# Deliberately fast: typecheck only, scoped to changed workspaces, so the
+# commit loop stays in the single-digit seconds. The heavy pass (tests, build,
+# everything) is in pre-push.
+#
+# Escape hatch: `git commit --no-verify`, or KAN_SKIP_HOOKS=1.
+#
+# NOTE: this checks the working tree, not the staged snapshot. Stashing unstaged
+# work would be more correct, but more than one agent writes in this repo at a
+# time and a stash mid-write is how you lose someone else's uncommitted work.
+# The trade is that a partially-staged commit can pass here and fail in CI.
+
+set -e
+
+if [ -n "$KAN_SKIP_HOOKS" ]; then
+  echo "pre-commit: skipped (KAN_SKIP_HOOKS)"
+  exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+. .githooks/_scope.sh <<SCOPE
+$staged
+SCOPE
+
+if [ "$CHECK_DESKTOP" = 0 ] && [ "$CHECK_BACKEND" = 0 ]; then
+  echo "pre-commit: no checked workspace touched, skipping"
+  exit 0
+fi
+
+failed=""
+
+if [ "$CHECK_DESKTOP" = 1 ]; then
+  echo "pre-commit: typechecking @kan/desktop"
+  npx turbo run typecheck --filter=@kan/desktop --output-logs=errors-only \
+    || failed="$failed @kan/desktop"
+fi
+
+if [ "$CHECK_BACKEND" = 1 ]; then
+  echo "pre-commit: typechecking backend"
+  npm run typecheck:backend --silent || failed="$failed backend"
+fi
+
+if [ -n "$failed" ]; then
+  echo
+  echo "pre-commit: typecheck failed for:$failed"
+  echo "  fix it, or commit anyway with:  git commit --no-verify"
+  exit 1
+fi
+
+echo "pre-commit: ok"
