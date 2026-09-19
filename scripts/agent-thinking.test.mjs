@@ -12,6 +12,7 @@ test("focuses only the nodes addressed by canvas operations", () => {
 test("new nodes replace the placement reference and removed nodes clear focus", () => {
   assert.deepEqual(canvasThinkingTargets("addNode", { near: { shapeId: "shape:a" } }), ["shape:a"]);
   assert.deepEqual(canvasThinkingTargets("addNode", {}, { shapeId: "shape:new" }), ["shape:new"]);
+  assert.deepEqual(canvasThinkingTargets("addMermaidDiagram", {}, { shapeIds: ["shape:group", "shape:group"] }), ["shape:group"]);
   assert.deepEqual(canvasThinkingTargets("removeNodes", { shapeIds: ["shape:a"] }), []);
 });
 

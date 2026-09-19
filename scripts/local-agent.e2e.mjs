@@ -52,7 +52,7 @@ try {
   assert.match(evaluate("document.querySelector('[data-testid=agent-status]').textContent"), /Devin.*connected/);
   console.log("PASS real local Devin connected through the app");
 
-  run(`const slider = document.querySelector('[role=slider]'); slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true})); return true;`);
+  run(`const slider = document.querySelector('[data-slot=slider-thumb]'); if (slider) { slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true})); } return true;`);
   drive("clickText", "Simulate conversation");
   await waitFor("window.__kan.tools.getCanvas().nodes.some(node => node.type === 'calendar')", 240000);
   console.log("PASS Devin created a calendar from the simulated transcript");
@@ -75,6 +75,9 @@ try {
     assert.equal(marker.lng, expected.lng);
   }
   for (const sponsor of [/vonage/i, /cognition/i, /nebius/i, /preply/i]) assert.match(JSON.stringify(table.props.rows), sponsor);
+  assert.ok(shapes.some(({ type }) => type === "group"), "Mermaid example should create a grouped diagram");
+  assert.ok(shapes.some(({ text }) => /HackBarna 26/i.test(text ?? "")), "Mermaid example should create a labelled native shape");
+  assert.ok(evaluate("window.__kan.tools.getCanvas().connections.length >= 5"), "Mermaid example should create arrows");
   assert.equal(shapes.filter(({ type }) => type === "calendar").length, 1);
   assert.equal(shapes.filter(({ type }) => type === "map").length, 1);
   for (const shape of [calendar, map, table]) assert.equal(shape.meta.provenance.agentId, "assistant");
@@ -82,7 +85,7 @@ try {
   assert.equal(evaluate("document.querySelector('[data-testid=conversation-simulator] [role=alert]')?.textContent ?? ''"), "");
   run("window.__kan.editor.zoomToFit(); return true;");
   await pause(500);
-  console.log("PASS two calendar days, both map pins, four sponsors, provenance, no duplicate calendar/map, and no runtime errors");
+  console.log("PASS two calendar days, both map pins, four sponsors, Mermaid boxes/arrows, provenance, no duplicate calendar/map, and no runtime errors");
   console.log(JSON.stringify({ canvasId, nodes: shapes.map(({ id, type, title }) => ({ id, type, title })) }, null, 2));
   if (keep) console.log("Verification canvas retained for inspection");
 } catch (error) {

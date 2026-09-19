@@ -67,6 +67,11 @@
       "text": "true, kan, add a sponsors table beside the map listing Vonage, Cognition, Nebius and Preply, with the contributions we just discussed",
       "trigger": { "label": "node:sponsors", "confidence": 0.85 }
     },
+    {
+      "speaker": "enric",
+      "text": "Kan, capture the plan as editable canvas shapes:\n```mermaid\nflowchart TD\n  Plan[\"HackBarna 26\"] --> Dates[\"19–20 September\"]\n  Dates --> Venue[\"Norrsken House Barcelona\"]\n  Venue --> Build[\"Build weekend\"]\n  Sponsors[\"Vonage · Cognition · Nebius · Preply\"] --> Build\n  Mentors[\"Mentors\"] --> Demo[\"Demos + judging\"]\n  Build --> Demo\n```",
+      "trigger": { "label": "node:mermaid", "confidence": 0.98 }
+    },
     { "speaker": "enric", "text": "solid lineup, i think we have a good start" },
     { "speaker": "juanjo", "text": "yeah let's sync again tomorrow" },
     { "speaker": "enric", "text": "sounds good, talk later" },

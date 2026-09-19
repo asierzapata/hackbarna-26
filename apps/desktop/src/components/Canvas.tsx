@@ -32,6 +32,7 @@ import {
   uploadServerAsset,
 } from "@/lib/api-client";
 import { createKanShapeUtils } from "@/nodes/shapes";
+import { MermaidPasteHandler } from "./MermaidPasteHandler";
 import {
   createCanvasTools,
   isGroupedFrame,
@@ -186,7 +187,9 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           components={canvasComponents}
           overrides={canvasOverrides}
           onMount={onMount}
-        />
+        >
+          <MermaidPasteHandler />
+        </Tldraw>
       </div>
     </section>
   );
@@ -239,7 +242,9 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
           components={canvasComponents}
           overrides={canvasOverrides}
           onMount={onMount}
-        />
+        >
+          <MermaidPasteHandler />
+        </Tldraw>
       </div>
     </section>
   );

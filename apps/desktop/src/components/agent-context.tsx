@@ -67,7 +67,7 @@ export interface PromptHandlers {
   /** A chunk of the agent's reply. Append, don't replace. */
   onText?: (text: string) => void;
   onTool?: (call: AgentToolCall) => void;
-  canvas?: { id: string; shapeIds?: string[]; execute: (name: string, input: unknown) => unknown };
+  canvas?: { id: string; shapeIds?: string[]; execute: (name: string, input: unknown) => unknown | Promise<unknown> };
 }
 
 interface CanvasToolRequest {
@@ -168,14 +168,14 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       }
     });
 
-    const canvas = listen<CanvasToolRequest>("canvas:tool", ({ payload }) => {
+    const canvas = listen<CanvasToolRequest>("canvas:tool", async ({ payload }) => {
       const active = handlers.current?.canvas;
       if (!mounted || !active || payload.turnId !== turnId.current || payload.canvasId !== active.id) return;
       let result: unknown = null;
       let error: string | undefined;
       try {
         if (Date.now() >= payload.expiresAt) throw new Error("Canvas tool request expired");
-        result = active.execute(payload.name, payload.arguments);
+        result = await active.execute(payload.name, payload.arguments);
         const targets = canvasThinkingTargets(payload.name, payload.arguments, result);
         if (targets) setThinkingShapeIds(targets);
       } catch (cause) {

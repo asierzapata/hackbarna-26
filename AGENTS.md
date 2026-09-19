@@ -177,9 +177,9 @@ The agent never touches tldraw directly; it goes through the tool layer.
   `kan-table`, `kan-image`, `kan-map`, and `kan-logo`, registered via
   `createKanShapeUtils()`. Interactive state that must be shared (hidden series,
   sort, selected rows, focusX, map view and selected marker) lives in shape props.
-- `tools.ts` — `createCanvasTools(editor)` → `addNode`, `updateNode`,
-  `removeNodes`, `connectNodes`, `arrange`, `getCanvas`. Every input is
-  zod-parsed first.
+- `tools.ts` — `createCanvasTools(editor)` → `addNode`, `addMermaidDiagram`,
+  `updateNode`, `removeNodes`, `connectNodes`, `arrange`, `focusNodes`,
+  `groupNodes`, `getCanvas`. Every input is zod-parsed first.
 - In dev, `window.__kan = { editor, tools }` and `window.__kanErrors` exist.
   There is no node demo palette, node scenario runner, or automatic canvas
   seeding; nodes remain available through the tool layer. Existing room data
