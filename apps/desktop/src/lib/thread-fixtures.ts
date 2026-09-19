@@ -15,6 +15,9 @@ export const demoParticipants: Participant[] = [
   { id: "jon", name: "jon", kind: "human" },
   { id: "assistant", name: "assistant", kind: "agent", operatorId: "asier" },
   { id: "marta-agent", name: "assistant", kind: "agent", operatorId: "marta" },
+  // Speakers in `conversation-script.ts`'s scripted conversations.
+  { id: "juanjo", name: "Juanjo", kind: "human" },
+  { id: "enric", name: "Enric", kind: "human" },
 ];
 
 export const demoAnchors: CanvasAnchor[] = [

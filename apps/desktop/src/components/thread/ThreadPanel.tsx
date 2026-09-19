@@ -53,6 +53,8 @@ export interface ThreadPanelProps extends ThreadActions {
   canvasNodeCount?: number;
   /** Register renderers for entry kinds beyond the built-in ones. */
   renderers?: ThreadRenderers;
+  /** Extra controls rendered between the header and the entry list, e.g. dev tools. */
+  toolbar?: React.ReactNode;
   /** Client-only render state: what is unacknowledged, streaming, interim. */
   view?: ThreadViewState;
   onClose?: () => void;
@@ -72,6 +74,7 @@ export function ThreadPanel({
   anchors = [],
   canvasNodeCount,
   renderers,
+  toolbar,
   view,
   onClose,
   onCopyLink,
@@ -167,6 +170,8 @@ export function ThreadPanel({
             </TabsList>
           </Tabs>
         </header>
+
+        {toolbar}
 
         <MessageScrollerProvider autoScroll>
           <MessageScroller className="flex-1 border-b border-border">

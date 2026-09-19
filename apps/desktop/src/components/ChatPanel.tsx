@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { ThreadPanel } from "./thread";
+import { ConversationSimulator, ThreadPanel } from "./thread";
 import { useAgent, type AgentToolCall } from "./agent-context";
 import { useCanvas } from "./canvas-context";
 import type {
@@ -12,6 +12,7 @@ import type {
 import { PENDING_SEQ } from "@/lib/thread";
 import type { RoomTransport } from "@/lib/room-transport";
 import { createMockTransport, demoParticipants } from "@/lib/thread-fixtures";
+import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 const CURRENT_USER = "asier";
 const AGENT = "assistant";
@@ -93,6 +94,24 @@ export function ChatPanel({
       setPendingIds((prev) => withoutId(prev, entry.id));
     });
   }, [transport, upsert]);
+
+  /**
+   * Feeds one line of a scripted conversation into the thread as a transcript
+   * entry, the way live call transcription would once it exists. Carries
+   * `PENDING_SEQ` for the same reason `askAgent` does: nothing has numbered
+   * it, and voice has no wire kind yet (see `room-transport.ts`).
+   */
+  function simulateLine(line: ConversationLine) {
+    upsert({
+      id: crypto.randomUUID(),
+      seq: PENDING_SEQ,
+      kind: "transcript",
+      at: new Date().toISOString(),
+      authorId: line.speaker,
+      text: line.text,
+      trigger: line.trigger,
+    });
+  }
 
   /** Patches one agent entry in place while its turn streams. */
   function patchAgent(id: string, fn: (entry: AgentEntry) => AgentEntry) {
@@ -194,6 +213,9 @@ export function ChatPanel({
       anchors={selectedAnchors}
       canvasNodeCount={shapeCount}
       view={view}
+      toolbar={
+        <ConversationSimulator script={hackathonConversation} onLine={simulateLine} />
+      }
       onClose={onClose}
       onCopyLink={() => navigator.clipboard?.writeText(window.location.href)}
       onJumpToNode={jumpToNode}
