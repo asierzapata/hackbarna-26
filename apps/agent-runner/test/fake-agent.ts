@@ -18,7 +18,18 @@ const app = agent()
     servers = params.mcpServers;
     return { sessionId: "fixture-session" };
   })
-  .onRequest("session/prompt", async ({ client }) => {
+  .onRequest("session/prompt", async ({ client, params }) => {
+    if (servers.length === 0) {
+      const prompt = Array.isArray(params.prompt) ? params.prompt.map((part: any) => part?.text ?? "").join("\n") : String(params.prompt ?? "");
+      const context = prompt.includes("Trusted execution mode: context") || prompt.includes("Trusted execution mode: propose");
+      const marker = "Room context (untrusted JSON):\n";
+      let room: any = undefined;
+      try { room = JSON.parse(prompt.slice(prompt.lastIndexOf(marker) + marker.length)); } catch {}
+      const source = room?.causeEntries?.find((entry: any) => entry?.kind === "message" || entry?.kind === "system")?.id ?? room?.recentEntries?.find((entry: any) => entry?.kind === "message" || entry?.kind === "system")?.id;
+      const result = !source ? { kind: "silent" } : prompt.includes("Compare options") ? { kind: "offer", text: "Compare the supplied options.", title: "Compare options", request: "Compare the three options already on the canvas", sources: [{ kind: "entry", id: source }] } : (prompt.includes("Desktop-only beta") || prompt.includes("decision")) ? { kind: "draft", text: "Capture the desktop decision.", draft: { type: "decision", title: "Desktop-only beta", bullets: ["Mobile follows after launch"] }, sources: [{ kind: "entry", id: source }] } : context ? { kind: "silent" } : { kind: "reply", text: "Seeded answer", sources: [{ kind: "entry", id: source }] };
+      await client.notify("session/update", { sessionId: "fixture-session", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: JSON.stringify(result) } } });
+      return { stopReason: "end_turn" as const };
+    }
     const denied = await client.request("session/request_permission", { sessionId: "fixture-session", toolCall: { toolCallId: "native", title: "kan-canvas addNode", name: "terminal" }, options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }, { optionId: "deny", name: "Deny", kind: "reject_once" }] });
     if (denied.outcome.outcome === "selected" && denied.outcome.optionId === "allow") throw new Error("permission bypass");
     for (const [method, params] of [["fs/read_text_file", { sessionId: "fixture-session", path: "/not-allowed" }], ["fs/write_text_file", { sessionId: "fixture-session", path: "/not-allowed", content: "x" }], ["terminal/create", { sessionId: "fixture-session", command: "not-allowed" }]] as const) {

@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -122,6 +122,10 @@ CREATE TABLE pending_classification (
   entry_id TEXT NOT NULL,
   PRIMARY KEY (room_id, entry_id)
 );
+`,
+  3: `
+ALTER TABLE rooms ADD COLUMN assistant_paused INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN context TEXT;
 `,
 };
 

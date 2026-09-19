@@ -14,7 +14,7 @@ import { useThread } from "./thread-context";
  * accepts or dismisses it, so the decision itself is part of the log.
  */
 export function SuggestionCard({ entry }: { entry: SuggestionEntry }) {
-  const { onAcceptSuggestion, onDismissSuggestion, onJumpToEntry } = useThread();
+  const { onAcceptSuggestion, onDismissSuggestion, onJumpToEntry, onReply } = useThread();
 
   return (
     <Message align="start">
@@ -60,20 +60,15 @@ export function SuggestionCard({ entry }: { entry: SuggestionEntry }) {
                 <span className="font-medium">{entry.proposal.type}</span>·
                 <span>{entry.proposal.label}</span>
               </Badge>
+              {entry.status && entry.status !== "open" ? <Badge variant="outline">{entry.status}</Badge> : null}
             </div>
+            {entry.draft ? <pre className="max-h-32 overflow-auto bg-background px-2 py-1 text-[10px] text-muted-foreground">{JSON.stringify(entry.draft, null, 2)}</pre> : null}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => onAcceptSuggestion?.(entry)}>
-                Add to canvas
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDismissSuggestion?.(entry)}
-              >
-                Dismiss
-              </Button>
-            </div>
+            <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>
+            {entry.status === "open" || !entry.status ? <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" onClick={() => onAcceptSuggestion?.(entry)}>Add to canvas</Button>
+              <Button variant="outline" size="sm" onClick={() => onDismissSuggestion?.(entry)}>Dismiss</Button>
+            </div> : null}
           </BubbleContent>
         </Bubble>
       </MessageContent>

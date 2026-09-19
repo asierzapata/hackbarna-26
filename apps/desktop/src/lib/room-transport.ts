@@ -12,13 +12,16 @@
  * here may widen it — `toViewEntry` is the only place the two vocabularies
  * meet.
  */
-import type { Entry, NodeDraft } from "@kan/protocol";
+import type { Entry, ExecutorPresence, Lease, NodeDraft, Room, User } from "@kan/protocol";
 import { EventsServerMessage } from "@kan/protocol";
 import {
+  cancelServerTrigger,
+  claimServerTrigger,
   createSocketTicket,
-  getServerEvents,
   getRoomWebSocketUrl,
   postServerMessage,
+  retryServerTrigger,
+  resolveServerOffer,
   resolveServerSuggestion,
   uploadServerAsset,
 } from "./api-client";
@@ -36,14 +39,32 @@ export interface SendInput {
   /** Shape ids of the current canvas selection. */
   anchors: string[];
   files: File[];
+  source?: "typed" | "transcript";
+  replyToEntryId?: string;
+}
+
+export interface RoomSnapshot {
+  connected: boolean;
+  ready: boolean;
+  sessionId: string | null;
+  room?: Room;
+  members: User[];
+  executors: ExecutorPresence[];
+  triggers: import("@kan/protocol").Trigger[];
+  error?: string;
 }
 
 export interface RoomTransport {
-  /** Fires on every append and on the `since=<seq>` replay after a reconnect. */
-  subscribe(onEntry: (entry: ThreadEntry) => void): () => void;
+  /** Fires on every authoritative websocket event and ready snapshot. */
+  subscribe(onEntry: (entry: ThreadEntry) => void, onSnapshot?: (snapshot: RoomSnapshot) => void): () => void;
   send(input: SendInput): Promise<void>;
   resolveSuggestion(entryId: string, accepted: boolean): Promise<void>;
-  claimTrigger(triggerId: string): Promise<boolean>;
+  resolveOffer(entryId: string, accepted: boolean): Promise<void>;
+  cancelTrigger(triggerId: string): Promise<void>;
+  retryTrigger(triggerId: string): Promise<void>;
+  claimTrigger(triggerId: string): Promise<Lease | null>;
+  setExecutorReady(ready: boolean, agentId: string, scope: "own" | "room" | "manual", background: boolean): void;
+  snapshot(): RoomSnapshot;
 }
 
 /* ----------------------------------------------------------- wire -> view */
@@ -93,6 +114,8 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         authorId: entry.authorId,
         text: entry.text,
         anchors: toAnchors(entry.anchors),
+        source: entry.source,
+        replyToEntryId: entry.replyToEntryId,
       };
 
     case "system":
@@ -105,6 +128,9 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         authorId: entry.agentId,
         text: entry.text,
         steps: toSteps(entry.steps),
+        sources: entry.sources,
+        status: entry.status,
+        hidden: entry.hidden,
       };
 
     case "suggestion":
@@ -113,12 +139,45 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         kind: "suggestion",
         authorId: entry.runId,
         sourceLabel: `from trigger ${entry.triggerId.slice(0, 8)}`,
-        quote: draftLabel(entry.draft),
+        quote: entry.text ?? draftLabel(entry.draft),
         proposal: { type: entry.draft.type, label: draftLabel(entry.draft) },
+        text: entry.text,
+        draft: entry.draft,
+        sources: entry.sources,
+        targetShapeId: entry.targetShapeId,
+        status: entry.status,
+        resolvedBy: entry.resolvedBy,
       };
 
     case "trigger":
-      return null;
+      return {
+        ...base,
+        kind: "trigger",
+        authorId: entry.trigger.requestedBy,
+        triggerId: entry.trigger.id,
+        requestedBy: entry.trigger.requestedBy,
+        reason: entry.trigger.reason,
+        mode: entry.trigger.mode,
+        status: entry.trigger.status,
+        assigneeSessionId: entry.trigger.assigneeSessionId,
+        attempt: entry.trigger.attempt,
+      };
+
+    case "offer":
+      return {
+        ...base,
+        kind: "offer",
+        authorId: entry.runId,
+        triggerId: entry.triggerId,
+        runId: entry.runId,
+        title: entry.title,
+        request: entry.request,
+        text: entry.text,
+        sources: entry.sources,
+        status: entry.status,
+        resolvedBy: entry.resolvedBy,
+        resultTriggerId: entry.resultTriggerId,
+      };
   }
 }
 
@@ -131,25 +190,38 @@ export function toViewEntries(entries: Entry[]): ThreadEntry[] {
 
 export function createWsTransport(roomId: string): RoomTransport {
   const listeners = new Set<(entry: ThreadEntry) => void>();
+  const snapshotListeners = new Set<(snapshot: RoomSnapshot) => void>();
   let socket: WebSocket | null = null;
   let cursor = 0;
+  let sessionId: string | null = null;
+  let ready = false;
+  let epoch = 0;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let currentSnapshot: RoomSnapshot = { connected: false, ready: false, sessionId: null, members: [], executors: [], triggers: [] };
+  const preReady: Entry[] = [];
+  let readiness: { ready: boolean; agentId: string; scope: "own" | "room" | "manual"; background: boolean } | null = null;
   let stopped = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let pollTimer: ReturnType<typeof setInterval> | null = null;
-  let replaying = false;
 
   const emit = (entry: Entry) => {
     const view = toViewEntry(entry);
     if (view) for (const listener of listeners) listener(view);
   };
 
+  const publishSnapshot = (snapshot: RoomSnapshot) => { currentSnapshot = snapshot; for (const listener of snapshotListeners) listener(snapshot); };
+  const sendReady = (ws: WebSocket) => {
+    if (readiness && ready && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "executor.ready", ...readiness }));
+  };
+
   const connect = async () => {
     if (stopped || socket) return;
+    const connectEpoch = ++epoch;
     try {
       const { ticket } = await createSocketTicket(roomId, "events");
-      if (stopped) return;
+      if (stopped || connectEpoch !== epoch) return;
       const ws = new WebSocket(getRoomWebSocketUrl(roomId, "events", ticket, cursor));
       socket = ws;
+      ws.onopen = () => sendReady(ws);
       ws.onmessage = (event) => {
         let raw: unknown;
         try {
@@ -161,13 +233,31 @@ export function createWsTransport(roomId: string): RoomTransport {
         if (!parsed.success) return;
         if (parsed.data.type === "event") {
           cursor = Math.max(cursor, parsed.data.event.cursor);
-          emit(parsed.data.event.entry);
+          if (parsed.data.event.entry.kind === "trigger") {
+            const next = parsed.data.event.entry.trigger;
+            publishSnapshot({ ...currentSnapshot, triggers: [...currentSnapshot.triggers.filter((trigger) => trigger.id !== next.id), next] });
+          }
+          if (ready) emit(parsed.data.event.entry); else preReady.push(parsed.data.event.entry);
         } else if (parsed.data.type === "ready") {
           cursor = Math.max(cursor, parsed.data.cursor);
+          sessionId = parsed.data.sessionId;
+          ready = true;
+          publishSnapshot({ connected: true, ready: true, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: parsed.data.triggers });
+          sendReady(ws);
+          heartbeatTimer = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "heartbeat" })); }, 10_000);
+          for (const entry of preReady.splice(0)) emit(entry);
+        } else if (parsed.data.type === "presence") {
+          publishSnapshot({ connected: true, ready, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: currentSnapshot.triggers });
         }
       };
       ws.onclose = () => {
-        if (socket === ws) socket = null;
+        if (socket !== ws) return;
+        socket = null;
+        sessionId = null;
+        ready = false;
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+        publishSnapshot({ connected: false, ready: false, sessionId: null, members: [], executors: [], triggers: [] });
         if (!stopped) retryTimer = setTimeout(() => void connect(), 1000);
       };
       ws.onerror = () => ws.close();
@@ -176,57 +266,57 @@ export function createWsTransport(roomId: string): RoomTransport {
     }
   };
 
-  const replay = async () => {
-    if (stopped || replaying) return;
-    replaying = true;
-    try {
-      let page;
-      do {
-        page = await getServerEvents(roomId, cursor);
-        for (const event of page.events) {
-          cursor = Math.max(cursor, event.cursor);
-          emit(event.entry);
-        }
-      } while (!stopped && page.hasMore);
-    } catch {
-      // The websocket may still be healthy; the next poll retries replay.
-    } finally {
-      replaying = false;
-    }
-  };
-
   return {
-    subscribe(onEntry) {
+    subscribe(onEntry, onSnapshot) {
       stopped = false;
       listeners.add(onEntry);
-      void replay();
+      if (onSnapshot) snapshotListeners.add(onSnapshot);
       void connect();
-      if (!pollTimer) pollTimer = setInterval(() => void replay(), 2000);
       return () => {
         listeners.delete(onEntry);
+        if (onSnapshot) snapshotListeners.delete(onSnapshot);
         if (listeners.size === 0) {
           stopped = true;
+          epoch += 1;
           if (retryTimer) clearTimeout(retryTimer);
-          if (pollTimer) clearInterval(pollTimer);
-          pollTimer = null;
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
           socket?.close();
           socket = null;
+          sessionId = null;
+          ready = false;
         }
       };
     },
-    async send({ id, text, anchors, files }) {
+    async send({ id, text, anchors, files, source, replyToEntryId }) {
       const attachments: string[] = [];
       for (const file of files) {
         const uploaded = await uploadServerAsset(file, file.type || "application/octet-stream");
         attachments.push(uploaded.id);
       }
-      await postServerMessage(roomId, { id, text, anchors, attachments });
+      await postServerMessage(roomId, { id, text, anchors, attachments, source, replyToEntryId });
     },
     async resolveSuggestion(entryId, accepted) {
       await resolveServerSuggestion(roomId, entryId, accepted);
     },
-    async claimTrigger() {
-      return false;
+    async resolveOffer(entryId, accepted) {
+      await resolveServerOffer(roomId, entryId, accepted);
     },
+    async cancelTrigger(triggerId) {
+      await cancelServerTrigger(roomId, triggerId);
+    },
+    async retryTrigger(triggerId) {
+      await retryServerTrigger(roomId, triggerId, crypto.randomUUID());
+    },
+    async claimTrigger(triggerId) {
+      if (!sessionId) return null;
+      const { lease } = await claimServerTrigger(roomId, triggerId, sessionId, true);
+      return lease;
+    },
+    setExecutorReady(ready, agentId, scope, background) {
+      readiness = { ready, agentId, scope, background };
+      if (socket) sendReady(socket);
+    },
+    snapshot() { return currentSnapshot; },
   };
 }

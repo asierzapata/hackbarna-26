@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import WebSocket from "ws";
 import { z } from "zod";
-import { EventsServerMessage, LeaseSchema, RegisterInput, TriggerSchema, type Trigger, type Lease } from "@kan/protocol";
+import { AssistantResultSchema, EventsServerMessage, LeaseSchema, RegisterInput, TriggerSchema, buildAssistantPrompt, type Trigger, type Lease } from "@kan/protocol";
 import { openAgentSession, type AgentCommand } from "./acp-session";
 import { HttpError, requestJson, RunClient, validateServerUrl } from "./run-client";
 import { buildRunnerPrompt } from "./prompt";
@@ -27,7 +27,7 @@ export interface RoomExecutor { claim(triggerId: string): Promise<void>; close()
 const require = createRequire(import.meta.url);
 const loader = require.resolve("tsx");
 const mcpEntry = fileURLToPath(new URL("./mcp-main.ts", import.meta.url));
-const contextSchema = z.object({ trigger: TriggerSchema, causeEntries: z.array(z.unknown()), recentEntries: z.array(z.unknown()), canvas: z.unknown() });
+const contextSchema = z.object({ trigger: TriggerSchema, causeEntries: z.array(z.unknown()), recentEntries: z.array(z.unknown()), canvas: z.unknown(), revision: z.string().max(128) });
 
 export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomExecutor> {
   if (typeof options.autoClaim !== "boolean") throw new Error("invalid_auto_claim");
@@ -54,7 +54,7 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
   const seen = new Set<string>();
   const emit = (event: ExecutorEvent) => { try { options.onEvent?.(event); } catch {} };
   const readiness = (ready: boolean) => {
-    if (connected && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "executor.ready", ready, agentId: "local-acp" }));
+    if (connected && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "executor.ready", ready, agentId: "local-acp", scope: options.autoClaim ? "room" : "manual", background: options.autoClaim }));
     emit({ type: "ready", ready });
   };
   async function preflight(signal = lifetime.signal) {
@@ -88,15 +88,16 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
     emit({ type: "run.started", runId: lease.runId });
     try {
       const context = contextSchema.parse(await run.request("/context"));
+      const contextual = context.trigger.mode !== "act";
       const tools: CanvasToolName[] = context.trigger.mode === "act" ? ["getCanvas", "queryData", "addNode", "updateNode", "connectNodes", "arrange"] : ["getCanvas", "queryData", "proposeNode"];
       agent = await openAgentSession(options.agent, {
         signal,
-        allowedTools: tools,
-        mcpServers: [{ name: "kan-canvas", command: process.execPath, args: ["--import", loader, mcpEntry], env: [
+        allowedTools: contextual ? [] : tools,
+        mcpServers: contextual ? [] : [{ name: "kan-canvas", command: process.execPath, args: ["--import", loader, mcpEntry], env: [
           { name: "KAN_RUN_SERVER_URL", value: base }, { name: "KAN_RUN_ROOM_ID", value: options.roomId }, { name: "KAN_RUN_RUN_ID", value: lease.runId }, { name: "KAN_RUN_LEASE_TOKEN", value: lease.leaseToken },
         ] }],
         onUpdate: ({ update }) => {
-          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") { text = (text + update.content.text).slice(0, 50_000); dirty = true; }
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") { text = (text + update.content.text).slice(0, 50_000); dirty = !contextual; }
           if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
             const rawId = update.toolCallId;
             const id = /^[A-Za-z0-9_.:-]{1,128}$/.test(rawId) && !/^call_[0-9a-f]{64}$/.test(rawId)
@@ -113,14 +114,22 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
           }
         },
       });
-      const response = await agent.prompt(buildRunnerPrompt(context));
+      const response = await agent.prompt(contextual ? buildAssistantPrompt("context", context) : buildRunnerPrompt(context));
       signal.throwIfAborted();
       clearInterval(stream); await writing;
       signal.throwIfAborted();
-      terminal = true;
-      const status = response.stopReason === "end_turn" ? "done" : "failed";
-      await run.request("", "PATCH", { id: randomUUID(), text, steps, status });
-      emit({ type: status === "done" ? "run.done" : "run.failed", runId: lease.runId });
+      if (contextual) {
+        if (response.stopReason !== "end_turn") throw new Error("agent_turn_incomplete");
+        const result = AssistantResultSchema.parse(JSON.parse(text));
+        await run.request("/complete", "POST", { id: randomUUID(), revision: context.revision, result });
+        terminal = true;
+        emit({ type: "run.done", runId: lease.runId });
+      } else {
+        const status = response.stopReason === "end_turn" ? "done" : "failed";
+        await run.request("", "PATCH", { id: randomUUID(), text, steps, status });
+        terminal = true;
+        emit({ type: status === "done" ? "run.done" : "run.failed", runId: lease.runId });
+      }
     } catch {
       if (!agent) { capable = false; readiness(false); }
       if (!terminal && !stopWrites) {

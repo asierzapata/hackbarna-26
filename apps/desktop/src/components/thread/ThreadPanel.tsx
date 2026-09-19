@@ -67,6 +67,8 @@ export interface ThreadPanelProps extends ThreadActions {
     | "models"
     | "modelDisabled"
     | "onModelSelectionChange"
+    | "replyTo"
+    | "onClearReply"
   >;
   className?: string;
 }
@@ -88,6 +90,7 @@ export function ThreadPanel({
   ...actions
 }: ThreadPanelProps) {
   const [filter, setFilter] = React.useState<ThreadFilter>("everything");
+  const [replyTo, setReplyTo] = React.useState<{ id: string; label: string } | undefined>();
 
   const participantMap = React.useMemo(
     () => toParticipantMap(participants),
@@ -99,7 +102,7 @@ export function ThreadPanel({
   );
 
   const contextValue = React.useMemo(
-    () => ({ participants: participantMap, currentUserId, ...actions }),
+    () => ({ participants: participantMap, currentUserId, ...actions, onReply: (entry: ThreadEntry) => setReplyTo({ id: entry.id, label: entry.kind }) }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [participantMap, currentUserId, ...Object.values(actions)]
   );
@@ -218,7 +221,7 @@ export function ThreadPanel({
         </MessageScrollerProvider>
 
         <div className="flex flex-col gap-2 p-3">
-          <ThreadComposer anchors={anchors} {...composer} />
+          <ThreadComposer anchors={anchors} {...composer} replyTo={replyTo} onClearReply={() => setReplyTo(undefined)} />
           <div className="flex items-center justify-between text-muted-foreground">
             <span>Thread is append-only · {entries.length} entries</span>
             {canvasNodeCount !== undefined ? (

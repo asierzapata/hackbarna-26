@@ -1,10 +1,11 @@
 import { cn } from "cn";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import type { AgentEntry } from "@/lib/thread";
 
-import { useAuthor } from "./thread-context";
+import { useAuthor, useThread } from "./thread-context";
 
 /**
  * One agent turn, rendered as a compact conversation message so the agent
@@ -20,6 +21,7 @@ export function AgentEntryCard({
 }) {
   const agent = useAuthor(entry.authorId);
   const summary = entry.text.replace(/\s+/g, " ").trim();
+  const { onJumpToEntry, onJumpToNode, onReply } = useThread();
 
   return (
     <Message align="start">
@@ -41,6 +43,9 @@ export function AgentEntryCard({
             >
               {summary}
             </p>
+            {entry.sources?.length ? <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">{entry.sources.map((source) => source.kind === "entry" ? <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToEntry?.(source.id)}>Source {source.id.slice(0, 8)}</Button> : <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToNode?.({ nodeId: source.id, label: source.id })}>Canvas {source.id.slice(0, 16)}</Button>)}</div> : null}
+
+            <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>
           </BubbleContent>
         </Bubble>
       </MessageContent>

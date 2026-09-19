@@ -2,6 +2,7 @@ import * as React from "react";
 import { RiCornerDownLeftLine } from "@remixicon/react";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   InputGroup,
   InputGroupAddon,
@@ -19,9 +20,11 @@ export interface ThreadComposerProps {
   /** Canvas nodes currently selected — the message will be anchored to them. */
   anchors?: CanvasAnchor[];
   placeholder?: string;
+  replyTo?: { id: string; label: string };
+  onClearReply?: () => void;
   disabled?: boolean;
   /** `files` remains part of the transport draft for compatibility; the composer no longer uploads files. */
-  onSend?: (draft: { text: string; files: File[] }) => void;
+  onSend?: (draft: { text: string; files: File[]; replyToEntryId?: string }) => void;
   models?: AiModel[];
   modelDisabled?: boolean;
   modelSelection?: AiModelSelection;
@@ -30,7 +33,9 @@ export interface ThreadComposerProps {
 
 export function ThreadComposer({
   anchors = [],
-  placeholder = "Message, or @assistant to ask…  (select nodes to anchor)",
+  placeholder = "Message the room · @kan to ask Kan",
+  replyTo,
+  onClearReply,
   disabled,
   onSend,
   modelSelection,
@@ -43,13 +48,15 @@ export function ThreadComposer({
 
   function send() {
     if (!canSend) return;
-    onSend?.({ text: text.trim(), files: [] });
+    onSend?.({ text: text.trim(), files: [], replyToEntryId: replyTo?.id });
+    onClearReply?.();
     setText("");
   }
 
   return (
     <InputGroup className="bg-muted">
       <InputGroupAddon align="block-start" className="justify-between">
+        {replyTo ? <Button variant="outline" size="xs" onClick={onClearReply}>Replying to {replyTo.label}</Button> : null}
         {anchors.length ? (
           <span className="flex min-w-0 flex-wrap items-center gap-1">
             <Badge variant="outline" className="border-agent text-agent">

@@ -1,6 +1,6 @@
 import { Hono, type Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import { ZodError, type z } from "zod";
+import { ZodError, z } from "zod";
 import {
   ALLOWED_ASSET_TYPES,
   CanvasReadInput,
@@ -14,8 +14,10 @@ import {
   PatchRoomInput,
   PostMessageInput,
   RegisterInput,
+  ResolveOfferInput,
   ResolveSuggestionInput,
   RetryInput,
+  RunCompleteInput,
   RunPatchInput,
   SocketTicketInput,
   SuggestionInput,
@@ -184,7 +186,7 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
 
   app.patch("/rooms/:id", auth, async (c) => {
     const input = await boundedJson(c, PatchRoomInput);
-    return c.json(engine.renameRoom(c.get("user"), c.req.param("id")!, input.name));
+    return c.json(engine.patchRoom(c.get("user"), c.req.param("id")!, input));
   });
 
   app.post("/rooms/:id/open", auth, (c) => c.json(engine.openRoom(c.get("user").id, c.req.param("id")!)));
@@ -262,6 +264,16 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
     return c.json(engine.retryTrigger(c.get("user").id, c.req.param("id")!, c.req.param("triggerId")!, input.id));
   });
 
+  app.post("/rooms/:id/triggers/:triggerId/cancel", auth, async (c) => {
+    await boundedJson(c, z.strictObject({}), 16 * 1024);
+    return c.json(engine.cancelTrigger(c.get("user").id, c.req.param("id")!, c.req.param("triggerId")!));
+  });
+
+  app.post("/rooms/:id/offers/:entryId/resolve", auth, async (c) => {
+    const input = await boundedJson(c, ResolveOfferInput, 16 * 1024);
+    return c.json(engine.resolveOffer(c.get("user").id, c.req.param("id")!, c.req.param("entryId")!, input.resolution));
+  });
+
   app.post("/rooms/:id/suggestions/:entryId/resolve", auth, async (c) => {
     const input = await boundedJson(c, ResolveSuggestionInput, 16 * 1024);
     return c.json(engine.resolveSuggestion(c.get("user").id, c.req.param("id")!, c.req.param("entryId")!, input.resolution));
@@ -284,6 +296,11 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
     const input = CanvasReadInput.safeParse({ scope: c.req.query("scope") ?? "summary", shapeIds: c.req.queries("shapeIds") });
     if (!input.success) throw badRequest("invalid canvas query");
     return c.json(engine.runCanvas(c.req.param("id")!, c.req.param("runId")!, c.req.header("authorization"), input.data));
+  });
+
+  app.post("/rooms/:id/runs/:runId/complete", async (c) => {
+    const input = await boundedJson(c, RunCompleteInput);
+    return c.json(engine.completeRun(c.req.param("id")!, c.req.param("runId")!, c.req.header("authorization"), input));
   });
 
   app.patch("/rooms/:id/runs/:runId", async (c) => {

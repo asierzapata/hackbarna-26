@@ -77,6 +77,8 @@ export interface MessageEntry extends ThreadEntryBase {
   mentions?: string[];
   attachments?: ThreadAttachment[];
   anchors?: CanvasAnchor[];
+  source?: "typed" | "transcript";
+  replyToEntryId?: string;
 }
 
 /**
@@ -100,6 +102,9 @@ export interface AgentEntry extends ThreadEntryBase {
   model?: string;
   durationMs?: number;
   steps?: AgentStep[];
+  sources?: { kind: "entry" | "shape"; id: string }[];
+  status?: "running" | "done" | "failed" | "cancelled";
+  hidden?: boolean;
 }
 
 /** An agent proposing a canvas change, awaiting accept / dismiss. */
@@ -111,8 +116,38 @@ export interface SuggestionEntry extends ThreadEntryBase {
   sourceLabel: string;
   quote: string;
   proposal: { type: string; label: string };
+  text?: string;
+  draft?: unknown;
+  sources?: { kind: "entry" | "shape"; id: string }[];
+  targetShapeId?: string;
+  status?: "open" | "accepted" | "dismissed" | "outdated";
+  resolvedBy?: string | null;
   /** Keyboard hint shown in the header, e.g. "⌘↵". */
   shortcut?: string;
+}
+
+export interface TriggerEntry extends ThreadEntryBase {
+  kind: "trigger";
+  triggerId: string;
+  requestedBy: string;
+  reason: string;
+  mode: "act" | "context" | "propose";
+  status: "pending" | "offered" | "running" | "needs_claim" | "done" | "failed" | "cancelled" | "expired";
+  assigneeSessionId: string | null;
+  attempt: number;
+}
+
+export interface OfferEntry extends ThreadEntryBase {
+  kind: "offer";
+  triggerId: string;
+  runId: string;
+  title: string;
+  request: string;
+  text: string;
+  sources: { kind: "entry" | "shape"; id: string }[];
+  status: "open" | "accepted" | "dismissed" | "outdated";
+  resolvedBy: string | null;
+  resultTriggerId: string | null;
 }
 
 /** Room narration: canvas moves, joins, renames. */
@@ -126,6 +161,8 @@ export type ThreadEntry =
   | MessageEntry
   | AgentEntry
   | SuggestionEntry
+  | TriggerEntry
+  | OfferEntry
   | SystemEntry;
 
 export type ThreadEntryKind = ThreadEntry["kind"];
@@ -137,7 +174,7 @@ export type ThreadFilter = "everything" | "messages" | "agent";
 const filterKinds: Record<ThreadFilter, ThreadEntryKind[] | null> = {
   everything: null,
   messages: ["transcript", "message"],
-  agent: ["agent", "suggestion"],
+  agent: ["agent", "suggestion", "trigger", "offer"],
 };
 
 export function matchesFilter(entry: ThreadEntry, filter: ThreadFilter) {
@@ -221,6 +258,8 @@ export function buildThreadRows(
   });
 
   for (const entry of ordered) {
+    if (entry.kind === "agent" && (entry.hidden || (entry.status === "running" && !entry.text))) continue;
+    if (entry.kind === "trigger" && filter === "everything" && (entry.mode === "context" || entry.mode === "propose")) continue;
     if (!matchesFilter(entry, filter)) continue;
 
     if (entry.kind === "transcript") {

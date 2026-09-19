@@ -92,6 +92,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
           createdBy: "",
           createdAt: entry.createdAt,
           updatedAt: entry.updatedAt,
+          assistantPaused: false,
         },
         created: false,
       };
@@ -115,6 +116,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
           createdBy: "",
           createdAt: entry.createdAt,
           updatedAt: new Date().toISOString(),
+          assistantPaused: false,
         },
         created: false,
       };
@@ -139,6 +141,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
             createdBy: match.createdBy,
             createdAt: match.createdAt,
             updatedAt: match.updatedAt,
+            assistantPaused: match.assistantPaused ?? false,
           },
           created: false,
         };
@@ -255,6 +258,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
             createdBy: match.createdBy,
             createdAt: match.createdAt,
             updatedAt: match.updatedAt,
+            assistantPaused: match.assistantPaused ?? false,
           },
           created: false,
         };

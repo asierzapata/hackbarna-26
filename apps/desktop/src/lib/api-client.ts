@@ -1,4 +1,4 @@
-import type { Room, RoomEvent, User } from "@kan/protocol";
+import type { AssistantResult, Entry, Room, RoomEvent, User } from "@kan/protocol";
 import { getInstallationProfile, type InstallationProfile } from "./installation-profile";
 
 export interface ServerRoomSummary {
@@ -9,6 +9,7 @@ export interface ServerRoomSummary {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  assistantPaused?: boolean;
   lastOpenedAt?: string | null;
 }
 
@@ -153,7 +154,7 @@ export async function publishServerRoom(payload: {
   localCanvasId: string;
   name: string;
   records?: unknown[];
-  messages?: { id: string; text: string; at: string; anchors?: string[]; attachments?: string[] }[];
+  messages?: { id: string; text: string; at: string; anchors?: string[]; attachments?: string[]; source?: "typed" | "transcript"; replyToEntryId?: string }[];
   assetIds?: string[];
 }): Promise<PublishResult> {
   await ensureBackendIdentity();
@@ -167,6 +168,13 @@ export async function publishServerRoom(payload: {
     throw new Error(`Failed to publish room: ${res.status} ${text}`);
   }
   return res.json() as Promise<PublishResult>;
+}
+
+export async function patchServerRoom(roomId: string, input: { name?: string; assistantPaused?: boolean }): Promise<RoomDetailResponse> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+  if (!res.ok) throw new Error(`Failed to patch room: ${res.status}`);
+  return res.json() as Promise<RoomDetailResponse>;
 }
 
 export async function getServerRoomCanvas(roomId: string): Promise<{ records: unknown[] }> {
@@ -236,7 +244,7 @@ export function getRoomWebSocketUrl(
 
 export async function postServerMessage(
   roomId: string,
-  input: { id: string; text: string; anchors?: string[]; attachments?: string[] }
+  input: { id: string; text: string; anchors?: string[]; attachments?: string[]; source?: "typed" | "transcript"; replyToEntryId?: string }
 ): Promise<void> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}/messages`, {
@@ -259,6 +267,59 @@ export async function resolveServerSuggestion(
     body: JSON.stringify({ resolution: accepted ? "accepted" : "dismissed" }),
   });
   if (!res.ok) throw new Error(`Failed to resolve suggestion: ${res.status}`);
+}
+
+export async function claimServerTrigger(roomId: string, triggerId: string, sessionId: string, manual = true): Promise<{ lease: import("@kan/protocol").Lease }> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sessionId, manual }) });
+  if (!res.ok) throw new Error(`Failed to claim trigger: ${res.status}`);
+  return res.json() as Promise<{ lease: import("@kan/protocol").Lease }>;
+}
+
+export async function retryServerTrigger(roomId: string, triggerId: string, requestId: string): Promise<{ trigger: import("@kan/protocol").Trigger }> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/retry`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: requestId }) });
+  if (!res.ok) throw new Error(`Failed to retry trigger: ${res.status}`);
+  return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger }>;
+}
+
+export async function cancelServerTrigger(roomId: string, triggerId: string): Promise<{ trigger: import("@kan/protocol").Trigger }> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/triggers/${triggerId}/cancel`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  if (!res.ok) throw new Error(`Failed to cancel trigger: ${res.status}`);
+  return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger }>;
+}
+
+export async function resolveServerOffer(roomId: string, entryId: string, accepted: boolean): Promise<{ entry: Entry; trigger?: import("@kan/protocol").Trigger }> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/offers/${entryId}/resolve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ resolution: accepted ? "accepted" : "dismissed" }) });
+  if (!res.ok) throw new Error(`Failed to resolve offer: ${res.status}`);
+  return res.json() as Promise<{ entry: Entry; trigger?: import("@kan/protocol").Trigger }>;
+}
+
+export async function heartbeatServerRun(roomId: string, runId: string, leaseToken: string): Promise<{ expiresAt: number }> {
+  const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/heartbeat`, { method: "POST", headers: { Authorization: `Bearer ${leaseToken}` } });
+  if (!res.ok) throw new Error(`Run lease expired: ${res.status}`);
+  return res.json() as Promise<{ expiresAt: number }>;
+}
+
+export async function patchServerRun(roomId: string, runId: string, leaseToken: string, input: { id: string; status: "failed" | "cancelled" }): Promise<{ entry: Entry }> {
+  const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}`, { method: "PATCH", headers: { "content-type": "application/json", Authorization: `Bearer ${leaseToken}` }, body: JSON.stringify(input) });
+  if (!res.ok) throw new Error(`Failed to mark run: ${res.status}`);
+  return res.json() as Promise<{ entry: Entry }>;
+}
+
+export async function getServerRunContext(roomId: string, runId: string, leaseToken: string): Promise<{ trigger: import("@kan/protocol").Trigger; causeEntries: Entry[]; recentEntries: Entry[]; canvas: unknown; revision: string }> {
+  const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/context`, { headers: { Authorization: `Bearer ${leaseToken}` } });
+  if (!res.ok) throw new Error(`Failed to fetch run context: ${res.status}`);
+  return res.json() as Promise<{ trigger: import("@kan/protocol").Trigger; causeEntries: Entry[]; recentEntries: Entry[]; canvas: unknown; revision: string }>;
+}
+
+export async function completeServerRun(roomId: string, runId: string, input: { id: string; revision: string; result: AssistantResult }, leaseToken?: string): Promise<{ entry: Entry; outcomeEntry?: Entry }> {
+  await ensureBackendIdentity();
+  const res = await fetch(`${getBackendBaseUrl()}/rooms/${roomId}/runs/${runId}/complete`, { method: "POST", headers: { "content-type": "application/json", ...(leaseToken ? { Authorization: `Bearer ${leaseToken}` } : {}) }, body: JSON.stringify(input) });
+  if (!res.ok) throw new Error(`Failed to complete run: ${res.status}`);
+  return res.json() as Promise<{ entry: Entry; outcomeEntry?: Entry }>;
 }
 
 export async function getServerEvents(

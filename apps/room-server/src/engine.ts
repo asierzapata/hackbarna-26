@@ -12,7 +12,7 @@ import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
 import { createKanSchema, KAN_NODE_HEIGHT, KAN_NODE_TYPE, KAN_NODE_WIDTH } from "@kan/nodes";
-import { RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
@@ -58,6 +58,8 @@ export interface SessionInfo {
   ready: boolean;
   agentId: string;
   busy: boolean;
+  scope: "own" | "room" | "manual";
+  background: boolean;
   lastSeen: number;
 }
 
@@ -103,6 +105,7 @@ export class Engine {
   private readonly schema = createKanSchema();
   private readonly rooms = new Map<string, RoomHandle>();
   private readonly classifierChains = new Map<string, Promise<void>>();
+  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; previous: Promise<void> }>();
   private readonly lastAssigned = new Map<string, number>();
   private interval: ReturnType<typeof setInterval> | null = null;
   private broadcastQueue: RoomEvent[] = [];
@@ -235,6 +238,7 @@ export class Engine {
       createdBy: row.created_by as string,
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
+      assistantPaused: Boolean(row.assistant_paused),
     };
   }
 
@@ -323,6 +327,8 @@ export class Engine {
       ready: s.ready,
       agentId: s.agentId,
       busy: s.busy,
+      scope: s.scope,
+      background: s.background,
     }));
     for (const s of handle.sessions.values()) {
       if (s.ws) this.sendSafe(s.ws, { type: "presence", ...this.roomDetail(roomId), executors });
@@ -369,7 +375,7 @@ export class Engine {
       localCanvasId: string;
       name: string;
       records?: unknown[];
-      messages?: { id: string; text: string; at: string; anchors?: string[]; attachments?: string[] }[];
+      messages?: { id: string; text: string; at: string; anchors?: string[]; attachments?: string[]; source?: "typed" | "transcript"; replyToEntryId?: string }[];
       assetIds?: string[];
     },
   ): { room: Room; created: boolean } {
@@ -413,6 +419,7 @@ export class Engine {
       createdBy: user.id,
       createdAt: at,
       updatedAt: at,
+      assistantPaused: false,
     };
 
     try {
@@ -453,6 +460,8 @@ export class Engine {
           text: m.text,
           anchors: m.anchors ?? [],
           attachments: m.attachments ?? [],
+          ...(m.source ? { source: m.source } : {}),
+          ...(m.replyToEntryId ? { replyToEntryId: m.replyToEntryId } : {}),
         };
         this.insertEntry(roomId, entry);
       }
@@ -595,11 +604,14 @@ export class Engine {
     return rows.map((r) => ({ ...this.rowToRoom(r), lastOpenedAt: r.lastOpenedAt }));
   }
 
-  renameRoom(user: { id: string; name: string }, roomId: string, name: string) {
+  patchRoom(user: { id: string; name: string }, roomId: string, input: { name?: string; assistantPaused?: boolean }) {
     this.requireMember(roomId, user.id);
     const at = nowIso(this.now());
+    const current = this.getRoomRow(roomId);
+    const name = input.name ?? (current.name as string);
+    const assistantPaused = input.assistantPaused ?? Boolean(current.assistant_paused);
     this.transaction( () => {
-      this.db.prepare("UPDATE rooms SET name=?, updated_at=? WHERE id=?").run(name, at, roomId);
+      this.db.prepare("UPDATE rooms SET name=?, assistant_paused=?, updated_at=? WHERE id=?").run(name, assistantPaused ? 1 : 0, at, roomId);
       const entry: Entry = {
         id: uuid(),
         roomId,
@@ -612,9 +624,40 @@ export class Engine {
       };
       this.insertEntry(roomId, entry);
     });
+    if (assistantPaused) this.cancelBackgroundWork(roomId);
     this.flushBroadcasts();
     this.broadcastPresence(roomId);
     return { room: this.rowToRoom(this.getRoomRow(roomId)) };
+  }
+
+  renameRoom(user: { id: string; name: string }, roomId: string, name: string) {
+    return this.patchRoom(user, roomId, { name });
+  }
+
+  private cancelBackgroundWork(roomId: string) {
+    const rows = this.db.prepare("SELECT id,data,entry_id,offered_ids FROM triggers WHERE room_id=? AND status IN ('pending','offered','running','needs_claim')").all(roomId) as { id: string; data: string; entry_id: string; offered_ids: string }[];
+    for (const row of rows) {
+      const trigger = JSON.parse(row.data) as Trigger;
+      if (trigger.mode === "act") continue;
+      let runningSessionId: string | null = null;
+      this.transaction(() => {
+        const run = trigger.runId ? this.db.prepare("SELECT session_id,run_id,entry_id FROM runs WHERE run_id=? AND status='running'").get(trigger.runId) as { session_id: string; run_id: string; entry_id: string } | undefined : undefined;
+        runningSessionId = run?.session_id ?? null;
+        if (run) this.db.prepare("UPDATE runs SET status='superseded' WHERE run_id=?").run(run.run_id);
+        trigger.status = "cancelled";
+        trigger.assigneeSessionId = null;
+        trigger.offerExpiresAt = null;
+        this.saveTriggerInTx(trigger, row);
+        const entry = this.getEntry(roomId, run?.entry_id ?? row.entry_id);
+        if (entry?.kind === "agent_turn" && entry.status === "running") {
+          entry.status = "cancelled";
+          entry.hidden = true;
+          entry.at = nowIso(this.now());
+          this.updateEntry(entry);
+        }
+      });
+      if (runningSessionId) this.setBusy(roomId, runningSessionId, false);
+    }
   }
 
   openRoom(userId: string, roomId: string) {
@@ -646,10 +689,17 @@ export class Engine {
 
   // ---------- messages ----------
 
+  private isExplicitMessage(roomId: string, input: { text: string; source?: "typed" | "transcript"; replyToEntryId?: string }) {
+    if (explicitMention(input.text, input.source ?? "typed")) return true;
+    if (!input.replyToEntryId) return false;
+    const target = this.getEntry(roomId, input.replyToEntryId);
+    return target?.kind === "agent_turn" || target?.kind === "suggestion" || target?.kind === "offer";
+  }
+
   postMessage(
     user: { id: string; name: string },
     roomId: string,
-    input: { id: string; text: string; anchors?: string[]; attachments?: string[] },
+    input: { id: string; text: string; anchors?: string[]; attachments?: string[]; source?: "typed" | "transcript"; replyToEntryId?: string },
   ) {
     this.requireMember(roomId, user.id);
     const prior = this.db.prepare("SELECT data FROM entries WHERE room_id=? AND id=?").get(roomId, input.id) as
@@ -662,7 +712,9 @@ export class Engine {
         e.authorId === user.id &&
         e.text === input.text &&
         JSON.stringify(e.anchors) === JSON.stringify(input.anchors ?? []) &&
-        JSON.stringify(e.attachments) === JSON.stringify(input.attachments ?? []);
+        JSON.stringify(e.attachments) === JSON.stringify(input.attachments ?? []) &&
+        e.source === input.source &&
+        e.replyToEntryId === input.replyToEntryId;
       if (!same) throw conflict("message id already used with a different payload");
       return { entry: e, created: false };
     }
@@ -680,17 +732,26 @@ export class Engine {
       text: input.text,
       anchors: input.anchors ?? [],
       attachments: input.attachments ?? [],
+      ...(input.source ? { source: input.source } : {}),
+      ...(input.replyToEntryId ? { replyToEntryId: input.replyToEntryId } : {}),
     };
+    const explicit = this.isExplicitMessage(roomId, input);
     this.transaction( () => {
       entry.seq = this.nextSeq(roomId);
       for (const assetId of input.attachments ?? []) {
         this.db.prepare("INSERT OR IGNORE INTO asset_rooms (room_id,asset_id) VALUES (?,?)").run(roomId, assetId);
       }
       this.insertEntry(roomId, entry);
-      this.db.prepare("INSERT OR IGNORE INTO pending_classification (room_id,entry_id) VALUES (?,?)").run(roomId, entry.id);
+      if (explicit) {
+        const trigger = this.createTrigger(roomId, entry, EXPLICIT_TRIGGER, causeAnchors(entry));
+        this.recordDecision(roomId, entry, sha256(JSON.stringify(this.buildClassificationState(roomId, entry))), "explicit", null, trigger.id);
+      } else {
+        this.db.prepare("INSERT OR IGNORE INTO pending_classification (room_id,entry_id) VALUES (?,?)").run(roomId, entry.id);
+      }
     });
     this.flushBroadcasts();
-    this.enqueueClassification(roomId, entry);
+    if (explicit) this.tick();
+    else this.enqueueClassification(roomId, entry);
     return { entry, created: true };
   }
 
@@ -881,10 +942,22 @@ export class Engine {
   // ---------- classification ----------
 
   enqueueClassification(roomId: string, cause: Entry) {
-    const prev = this.classifierChains.get(roomId) ?? Promise.resolve();
-    const next = prev.then(() => this.processCause(roomId, cause));
-    void next.catch(() => console.error("room-server classification_persistence_error"));
-    this.classifierChains.set(roomId, next);
+    const pending = this.pendingClassification.get(roomId);
+    if (pending) { pending.cause = cause; clearTimeout(pending.timer); pending.timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs); return; }
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => { resolve = done; });
+    const previous = this.classifierChains.get(roomId) ?? Promise.resolve();
+    const timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs);
+    this.pendingClassification.set(roomId, { cause, timer, promise, resolve, previous });
+    this.classifierChains.set(roomId, promise);
+    void promise.catch(() => console.error("room-server classification_persistence_error"));
+  }
+
+  private flushClassification(roomId: string) {
+    const pending = this.pendingClassification.get(roomId);
+    if (!pending) return;
+    this.pendingClassification.delete(roomId);
+    void pending.previous.then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.resolve);
   }
 
   classifierIdle(roomId: string): Promise<void> {
@@ -896,7 +969,7 @@ export class Engine {
     if (!this.db.prepare("SELECT 1 FROM pending_classification WHERE room_id=? AND entry_id=?").get(roomId, cause.id)) return;
     const state = this.buildClassificationState(roomId, cause);
     const stateHash = sha256(JSON.stringify(state));
-    const explicit = cause.kind === "message" && explicitMention(cause.text);
+    const explicit = cause.kind === "message" && explicitMention(cause.text, cause.source ?? "typed");
     let output: unknown = null;
     let status = explicit ? "explicit" : this.classifier ? "evaluated" : "skipped";
     let plan = explicit ? EXPLICIT_TRIGGER : null as ReturnType<typeof triggerDecision>;
@@ -911,13 +984,19 @@ export class Engine {
         status = "failed";
         output = { error: "classifier_unavailable" };
       }
+      const latest = this.db.prepare("SELECT MAX(seq) AS seq FROM entries WHERE room_id=? AND seq>? AND kind IN ('message','system')").get(roomId, cause.seq) as { seq: number | null };
+      if (latest.seq !== null) {
+        plan = null;
+        status = "stale";
+      }
     }
     if (this.stopping) return;
     this.transaction(() => {
       let triggerId: string | null = null;
-      if (plan && !(plan.mode === "propose" && this.inCooldown(roomId))) {
+      const paused = Boolean(this.getRoomRow(roomId).assistant_paused);
+      if (plan && !(plan.mode !== "act" && (this.inCooldown(roomId) || paused))) {
         triggerId = this.createTrigger(roomId, cause, plan, anchors.slice(0, 64)).id;
-        if (plan.mode === "propose") this.db.prepare("UPDATE rooms SET last_propose_at=? WHERE id=?").run(this.now(), roomId);
+        if (plan.mode !== "act") this.db.prepare("UPDATE rooms SET last_propose_at=? WHERE id=?").run(this.now(), roomId);
       }
       this.recordDecision(roomId, cause, stateHash, status, output, triggerId);
       this.db.prepare("DELETE FROM pending_classification WHERE room_id=? AND entry_id=?").run(roomId, cause.id);
@@ -944,12 +1023,13 @@ export class Engine {
       .all(roomId) as { data: string }[];
     const recentEntries = recent.map((r) => JSON.parse(r.data)).reverse();
     const summary = this.canvasSummary(roomId);
-    const shapes = summary.shapes.slice(0, 50).map((s) => ({ id: s.id, label: (s.label ?? "").slice(0, 240) }));
+    const records = this.canvasRecords(roomId);
+    const shapeById = new Map(records.filter((r) => (r as { typeName?: string }).typeName === "shape").map((r) => [(r as { id: string }).id, r]));
+    const shapes = summary.shapes.slice(0, 50).map((s) => ({ id: s.id, label: (s.label ?? "").slice(0, 240), type: s.type, props: boundedContextProps((shapeById.get(s.id) as { props?: unknown } | undefined)?.props) }));
     const openSuggestions = this.db
-      .prepare("SELECT data FROM entries WHERE room_id=? AND kind='suggestion' AND json_extract(data,'$.status')='open' ORDER BY seq DESC LIMIT 20")
+      .prepare("SELECT data FROM entries WHERE room_id=? AND kind IN ('suggestion','offer') ORDER BY seq DESC LIMIT 20")
       .all(roomId)
-      .map((r) => JSON.parse((r as { data: string }).data))
-      .filter((e: Entry) => e.kind === "suggestion" && e.status === "open");
+      .map((r) => JSON.parse((r as { data: string }).data));
     const state: ClassificationState = {
       cause: {
         id: cause.id,
@@ -967,15 +1047,19 @@ export class Engine {
   private createTrigger(
     roomId: string,
     cause: Entry,
-    plan: { mode: "act" | "propose"; intent: "answer" | "capture" | "update" | "lookup"; confidence: number; reason: string },
+    plan: { mode: "act" | "propose" | "context"; intent: "answer" | "capture" | "update" | "lookup" | "evidence" | "align"; confidence: number; reason: string },
     anchors?: string[],
+    source: "explicit" | "context" | "accepted" = plan.mode === "act" ? "explicit" : "context",
+    requestedBy?: string,
+    approval?: { causeEntryIds?: string[]; approvedRequest?: string; acceptedOfferId?: string },
+    deferBroadcast = false,
   ): Trigger {
     const at = nowIso(this.now());
     const trigger: Trigger = {
       id: uuid(),
-      causeEntryIds: [cause.id],
-      requestedBy: entryAuthorId(cause) ?? "",
-      reason: plan.reason,
+      causeEntryIds: approval?.causeEntryIds ?? [cause.id],
+      requestedBy: requestedBy ?? entryAuthorId(cause) ?? "",
+      reason: plan.reason.slice(0, 1000),
       intent: plan.intent,
       mode: plan.mode,
       anchors: anchors ?? causeAnchors(cause),
@@ -985,6 +1069,10 @@ export class Engine {
       offerExpiresAt: null,
       attempt: 0,
       runId: null,
+      source,
+      createdAt: this.now(),
+      ...(approval?.approvedRequest ? { approvedRequest: approval.approvedRequest } : {}),
+      ...(approval?.acceptedOfferId ? { acceptedOfferId: approval.acceptedOfferId } : {}),
     };
     const entry: Entry = { id: uuid(), roomId, seq: 0, at, kind: "trigger", trigger };
     this.transaction( () => {
@@ -994,8 +1082,10 @@ export class Engine {
         .prepare("INSERT INTO triggers (id,room_id,entry_id,status,data,offered_ids,created_at) VALUES (?,?,?,?,?,?,?)")
         .run(trigger.id, roomId, entry.id, "pending", JSON.stringify(trigger), "[]", at);
     });
-    this.flushBroadcasts();
-    if (!this.transactionDepth) this.tick();
+    if (!deferBroadcast) {
+      this.flushBroadcasts();
+      if (!this.transactionDepth) this.tick();
+    }
     return trigger;
   }
 
@@ -1025,6 +1115,8 @@ export class Engine {
       ready: false,
       agentId: "",
       busy: false,
+      scope: "own",
+      background: false,
       lastSeen: this.now(),
     };
     handle.sessions.set(session.sessionId, session);
@@ -1050,13 +1142,21 @@ export class Engine {
     this.broadcastPresence(roomId);
   }
 
-  setExecutorReady(roomId: string, sessionId: string, ready: boolean, agentId: string) {
+  setExecutorReady(roomId: string, sessionId: string, ready: boolean, agentId: string, scope: "own" | "room" | "manual" = "own", background = false) {
     const handle = this.rooms.get(roomId);
     const session = handle?.sessions.get(sessionId);
     if (!session) return;
     session.ready = ready;
+    session.scope = scope;
+    session.background = background;
     if (agentId) session.agentId = agentId;
     session.lastSeen = this.now();
+    const offers = this.db.prepare("SELECT id,data,entry_id,offered_ids FROM triggers WHERE room_id=? AND status='offered' AND json_extract(data,'$.assigneeSessionId')=?").all(roomId, sessionId) as { id: string; data: string; entry_id: string; offered_ids: string }[];
+    for (const offer of offers) {
+      const trigger = JSON.parse(offer.data) as Trigger;
+      const compatible = trigger.mode === "act" ? scope !== "manual" && (scope === "room" || trigger.requestedBy === session.userId) : (trigger.mode === "context" || trigger.mode === "propose") && scope === "room" && background;
+      if (!ready || !compatible) this.reofferOrEscalate(roomId, trigger, offer, sessionId);
+    }
     this.broadcastPresence(roomId);
   }
 
@@ -1098,10 +1198,10 @@ export class Engine {
       .all(now) as { run_id: string; room_id: string; trigger_id: string; entry_id: string; session_id: string }[];
     for (const run of staleRuns) {
       this.transaction( () => {
-        this.db.prepare("UPDATE runs SET status='failed' WHERE run_id=?").run(run.run_id);
+        this.db.prepare("UPDATE runs SET status='expired' WHERE run_id=?").run(run.run_id);
         const { trigger, row } = this.loadTrigger(run.trigger_id);
         if (trigger.runId === run.run_id) {
-          trigger.status = "failed";
+          trigger.status = "expired";
           this.saveTriggerInTx(trigger, row);
         }
         const entry = this.getEntry(run.room_id, run.entry_id);
@@ -1129,7 +1229,7 @@ export class Engine {
 
     // offer pending / needs_claim triggers
     const pendingRows = this.db
-      .prepare("SELECT id,room_id,entry_id,data,offered_ids FROM triggers WHERE status IN ('pending','needs_claim') ORDER BY created_at")
+      .prepare("SELECT id,room_id,entry_id,data,offered_ids FROM triggers WHERE status IN ('pending','needs_claim') ORDER BY CASE json_extract(data,'$.mode') WHEN 'act' THEN 0 ELSE 1 END, created_at")
       .all() as { id: string; room_id: string; entry_id: string; data: string; offered_ids: string }[];
     const runningRooms = new Set(
       (this.db.prepare("SELECT room_id FROM triggers WHERE status='running'").all() as { room_id: string }[]).map(
@@ -1145,7 +1245,14 @@ export class Engine {
       if (runningRooms.has(row.room_id) || offeredRooms.has(row.room_id)) continue;
       const t = JSON.parse(row.data) as Trigger;
       const offeredIds = JSON.parse(row.offered_ids) as string[];
-      const candidate = this.pickCandidate(row.room_id, t.requestedBy, offeredIds);
+      const roomRow = this.getRoomRow(row.room_id);
+      if ((t.mode === "context" || t.mode === "propose") && Boolean(roomRow.assistant_paused)) continue;
+      if ((t.mode === "context" || t.mode === "propose") && t.createdAt !== undefined && now - t.createdAt > CONTEXT_MAX_AGE_MS) {
+        t.status = "expired";
+        this.saveTriggerAndBroadcast(t, row, offeredIds);
+        continue;
+      }
+      const candidate = this.pickCandidate(row.room_id, t, offeredIds);
       if (candidate) {
         t.status = "offered";
         t.assigneeSessionId = candidate.sessionId;
@@ -1181,16 +1288,19 @@ export class Engine {
     this.flushBroadcasts();
   }
 
-  private pickCandidate(roomId: string, requestedBy: string, exclude: string[]): SessionInfo | null {
+  private pickCandidate(roomId: string, trigger: Trigger, exclude: string[]): SessionInfo | null {
     const handle = this.rooms.get(roomId);
     if (!handle) return null;
-    const candidates = [...handle.sessions.values()].filter(
-      (s) => s.ready && !s.busy && !exclude.includes(s.sessionId) && this.now() - s.lastSeen < this.timings.presenceTtlMs,
-    );
+    const candidates = [...handle.sessions.values()].filter((s) => {
+      if (!s.ready || s.busy || exclude.includes(s.sessionId) || this.now() - s.lastSeen >= this.timings.presenceTtlMs) return false;
+      if (trigger.mode === "act") return s.scope !== "manual" && (s.scope === "room" || s.userId === trigger.requestedBy);
+      if (trigger.mode === "context" || trigger.mode === "propose") return s.scope === "room" && s.background;
+      return false;
+    });
     if (!candidates.length) return null;
     candidates.sort((a, b) => {
-      const aReq = a.userId === requestedBy ? 0 : 1;
-      const bReq = b.userId === requestedBy ? 0 : 1;
+      const aReq = a.userId === trigger.requestedBy ? 0 : 1;
+      const bReq = b.userId === trigger.requestedBy ? 0 : 1;
       if (aReq !== bReq) return aReq - bReq;
       return (this.lastAssigned.get(a.sessionId) ?? 0) - (this.lastAssigned.get(b.sessionId) ?? 0);
     });
@@ -1200,7 +1310,7 @@ export class Engine {
   private reofferOrEscalate(roomId: string, t: Trigger, row: { entry_id: string; offered_ids: string }, lostSessionId: string | null) {
     const offeredIds = JSON.parse(row.offered_ids) as string[];
     if (lostSessionId && !offeredIds.includes(lostSessionId)) offeredIds.push(lostSessionId);
-    const candidate = this.pickCandidate(roomId, t.requestedBy, offeredIds);
+    const candidate = this.pickCandidate(roomId, t, offeredIds);
     if (candidate) {
       t.status = "offered";
       t.assigneeSessionId = candidate.sessionId;
@@ -1237,6 +1347,7 @@ export class Engine {
     if (row.room_id !== roomId) throw notFound("trigger not found");
     const offeredIds = JSON.parse(row.offered_ids) as string[];
     const now = this.now();
+    if ((trigger.mode === "context" || trigger.mode === "propose") && Boolean(this.getRoomRow(roomId).assistant_paused)) throw forbidden("contextual assistance is paused");
     const allowed =
       (trigger.status === "offered" &&
         trigger.assigneeSessionId === session.sessionId &&
@@ -1277,9 +1388,9 @@ export class Engine {
       this.insertEntry(roomId, agentEntry);
       this.db
         .prepare(
-          "INSERT INTO runs (run_id,room_id,trigger_id,attempt,lease_hash,lease_expires_at,entry_id,session_id,user_id,agent_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          "INSERT INTO runs (run_id,room_id,trigger_id,attempt,lease_hash,lease_expires_at,entry_id,session_id,user_id,agent_id,status,created_at,context) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         )
-        .run(runId, roomId, triggerId, attempt, sha256(leaseToken), expiresAt, agentEntry.id, session.sessionId, userId, session.agentId, "running", nowIso(now));
+        .run(runId, roomId, triggerId, attempt, sha256(leaseToken), expiresAt, agentEntry.id, session.sessionId, userId, session.agentId, "running", nowIso(now), null);
       trigger.status = "running";
       trigger.assigneeSessionId = session.sessionId;
       trigger.offerExpiresAt = null;
@@ -1292,14 +1403,43 @@ export class Engine {
     return { runId, triggerId, attempt, leaseToken, expiresAt, entryId: agentEntry.id };
   }
 
+  cancelTrigger(userId: string, roomId: string, triggerId: string) {
+    this.requireMember(roomId, userId);
+    const { trigger, row } = this.loadTrigger(triggerId);
+    if (row.room_id !== roomId) throw notFound("trigger not found");
+    if (["cancelled", "expired"].includes(trigger.status)) return { trigger };
+    if (trigger.status === "done") throw conflict("trigger is already complete");
+    const sessionId = trigger.assigneeSessionId;
+    this.transaction(() => {
+      if (trigger.runId) this.db.prepare("UPDATE runs SET status='superseded' WHERE run_id=? AND status='running'").run(trigger.runId);
+      trigger.status = "cancelled";
+      trigger.assigneeSessionId = null;
+      trigger.offerExpiresAt = null;
+      this.saveTriggerInTx(trigger, row);
+      if (trigger.runId) {
+        const run = this.db.prepare("SELECT entry_id FROM runs WHERE run_id=?").get(trigger.runId) as { entry_id: string } | undefined;
+        const entry = run ? this.getEntry(roomId, run.entry_id) : null;
+        if (entry?.kind === "agent_turn") {
+          entry.status = "cancelled";
+          entry.at = nowIso(this.now());
+          if (trigger.mode !== "act") entry.hidden = true;
+          this.updateEntry(entry);
+        }
+      }
+    });
+    this.flushBroadcasts();
+    if (sessionId) this.setBusy(roomId, sessionId, false);
+    return { trigger };
+  }
+
   retryTrigger(userId: string, roomId: string, triggerId: string, requestId: string) {
     this.requireMember(roomId, userId);
     const idem = this.getIdem<{ trigger: Trigger }>(roomId, "retry", requestId);
     if (idem) return idem;
     const { trigger, row } = this.loadTrigger(triggerId);
     if (row.room_id !== roomId) throw notFound("trigger not found");
-    if (trigger.status === "running" || trigger.status === "offered" || trigger.status === "pending") {
-      throw conflict("trigger is already active");
+    if (!["failed", "cancelled", "expired"].includes(trigger.status)) {
+      throw conflict("trigger is not retryable");
     }
     const result = this.transaction( () => {
       // block any late previous run
@@ -1334,6 +1474,7 @@ export class Engine {
           user_id: string;
           agent_id: string;
           status: string;
+          context: string | null;
         }
       | undefined;
     if (!run || run.lease_hash !== sha256(token)) throw unauthorized("invalid lease");
@@ -1357,19 +1498,41 @@ export class Engine {
   }
 
   runContext(roomId: string, runId: string, header: string | undefined) {
-    const { trigger } = this.activeLease(roomId, runId, header);
+    const { run, trigger } = this.activeLease(roomId, runId, header);
     const causeEntries = trigger.causeEntryIds
       .map((id) => this.getEntry(roomId, id))
       .filter(Boolean);
     const recent = this.db
-      .prepare("SELECT data FROM entries WHERE room_id=? ORDER BY seq DESC LIMIT 20")
+      .prepare("SELECT data FROM entries WHERE room_id=? ORDER BY seq DESC LIMIT 40")
       .all(roomId) as { data: string }[];
-    return {
-      trigger,
-      causeEntries,
-      recentEntries: recent.map((r) => JSON.parse(r.data)).reverse(),
-      canvas: this.canvasSummary(roomId),
-    };
+    const recentEntries = recent.map((r) => JSON.parse(r.data)).reverse();
+    const canvas = this.contextCanvas(roomId);
+    const revision = this.currentRevision(roomId);
+    const context = { trigger, causeEntries, recentEntries, canvas, revision };
+    this.db.prepare("UPDATE runs SET context=? WHERE run_id=?").run(JSON.stringify({ revision, entryIds: [...new Set([...causeEntries, ...recentEntries].map((entry) => entry?.id).filter(Boolean))], shapeIds: canvas.shapes.map((shape) => shape.id), shapes: canvas.shapes }), run.run_id);
+    return context;
+  }
+
+  private contextCanvas(roomId: string) {
+    const records = this.canvasRecords(roomId);
+    const shapes = records
+      .filter((r) => (r as { typeName?: string }).typeName === "shape")
+      .sort((a, b) => String((a as { id: string }).id).localeCompare(String((b as { id: string }).id)))
+      .slice(0, 50)
+      .map((shape) => {
+        const s = shape as TLBaseShape<string, Record<string, unknown>>;
+        return { id: s.id, type: s.type, x: s.x, y: s.y, label: shapeLabel(s), props: boundedContextProps(s.props) };
+      });
+    const shapeCount = records.filter((r) => (r as { typeName?: string }).typeName === "shape").length;
+    return { shapes, truncated: shapeCount > shapes.length, counts: { shapes: shapeCount, records: records.length } };
+  }
+
+  private currentRevision(roomId: string) {
+    const latest = this.db.prepare("SELECT COALESCE(MAX(seq),0) AS seq FROM entries WHERE room_id=? AND kind IN ('message','system')").get(roomId) as { seq: number };
+    const room = this.getRoomRow(roomId);
+    const records = this.canvasRecords(roomId).sort((a, b) => String((a as { id?: string }).id).localeCompare(String((b as { id?: string }).id)));
+    const resolutions = this.db.prepare("SELECT id,data FROM entries WHERE room_id=? AND kind IN ('suggestion','offer') AND json_extract(data,'$.status')!='open' ORDER BY id").all(roomId) as { id: string; data: string }[];
+    return sha256(JSON.stringify({ seq: latest.seq, records, paused: Boolean(room.assistant_paused), resolutions: resolutions.map((r) => [r.id, JSON.parse(r.data).status]) }));
   }
 
   runCanvas(roomId: string, runId: string, header: string | undefined, input: { scope: "summary" | "selection" | "full"; shapeIds?: string[] }) {
@@ -1381,13 +1544,124 @@ export class Engine {
     return { records: selected };
   }
 
+  completeRun(roomId: string, runId: string, header: string | undefined, input: { id: string; revision: string; result: AssistantResult }) {
+    const authenticated = this.leaseAuth(roomId, runId, header);
+    const idem = this.getIdem<{ entry: Entry; outcomeEntry?: Entry }>(roomId, `run-complete:${runId}`, input.id);
+    if (idem) return idem;
+    const parsed = AssistantResultSchema.safeParse(input.result);
+    if (!parsed.success) throw badRequest("invalid assistant result");
+    const { run, trigger } = this.activeLease(roomId, runId, header);
+    if ((trigger.mode === "context" || trigger.mode === "propose") && parsed.data.kind === "act") throw forbidden("contextual runs cannot mutate");
+    if (trigger.mode === "act" && parsed.data.kind === "silent") throw badRequest("explicit runs cannot be silent");
+    const sources = parsed.data.kind === "silent" ? [] : parsed.data.sources;
+    const storedContext = run.context ? JSON.parse(run.context) as { revision?: string; entryIds?: string[]; shapeIds?: string[]; shapes?: unknown[] } : null;
+    if (!storedContext?.revision) throw badRequest("run context was not captured");
+    if (input.revision !== storedContext.revision) {
+      if (trigger.mode === "context" || trigger.mode === "propose") {
+        this.finishStaleContext(roomId, run, trigger);
+        return { entry: this.getEntry(roomId, run.entry_id)! };
+      }
+      throw conflict("run context is stale");
+    }
+    this.validateEvidenceSources(roomId, sources, { entryIds: new Set(storedContext.entryIds ?? []), shapeIds: new Set(storedContext.shapeIds ?? []) });
+    if ((trigger.mode === "context" || trigger.mode === "propose") && parsed.data.kind !== "silent" && sources.length < 1) throw badRequest("contextual results require a source");
+    const currentRevision = this.currentRevision(roomId);
+    if (trigger.mode === "act" && input.revision !== currentRevision) throw conflict("run context is stale");
+    const staleContext = (trigger.mode === "context" || trigger.mode === "propose") && (input.revision !== currentRevision || storedContext?.revision !== input.revision);
+    const assistantResult: AssistantResult = staleContext ? { kind: "silent" } : parsed.data;
+    if (trigger.mode === "act" && input.revision && storedContext?.revision && input.revision !== storedContext.revision) throw conflict("run context is stale");
+
+    const handle = this.getRoomHandle(roomId);
+    const entry = this.getEntry(roomId, run.entry_id);
+    if (!entry || entry.kind !== "agent_turn") throw notFound("agent entry missing");
+    let outcomeEntry: Entry | undefined;
+    const committed = handle.storage.transaction((txn) => {
+      const at = nowIso(this.now());
+      if (assistantResult.kind === "act") {
+        handle.lastPushUserId = null;
+        const shapeIds: string[] = [];
+        const provenance = { entryId: entry.id, runId, agentId: run.agent_id, byUserId: run.user_id };
+        const puts = this.planMutations(roomId, `${runId}:${input.id}`, assistantResult.operations, provenance, shapeIds);
+        for (const record of puts) txn.set((record as { id: string }).id, record as UnknownRecord);
+        entry.touchedShapeIds = [...new Set([...entry.touchedShapeIds, ...shapeIds])];
+      }
+      if (assistantResult.kind === "silent") {
+        entry.text = "";
+        entry.hidden = true;
+      } else {
+        entry.text = assistantResult.text;
+        entry.sources = assistantResult.sources;
+        entry.hidden = assistantResult.kind === "offer" || assistantResult.kind === "draft";
+      }
+      entry.status = "done";
+      entry.at = at;
+      this.updateEntry(entry);
+      trigger.status = "done";
+      trigger.assigneeSessionId = null;
+      trigger.offerExpiresAt = null;
+      const triggerRow = this.db.prepare("SELECT entry_id,offered_ids FROM triggers WHERE id=?").get(trigger.id) as { entry_id: string; offered_ids: string };
+      this.saveTriggerInTx(trigger, triggerRow);
+      this.db.prepare("UPDATE runs SET status='done' WHERE run_id=?").run(runId);
+      if (assistantResult.kind === "offer") {
+        outcomeEntry = { id: uuid(), roomId, seq: this.nextSeq(roomId), at, kind: "offer", triggerId: trigger.id, runId, title: assistantResult.title, request: assistantResult.request, text: assistantResult.text, sources: assistantResult.sources, status: "open", resolvedBy: null, resultTriggerId: null, revision: input.revision };
+        this.insertEntry(roomId, outcomeEntry);
+      } else if (assistantResult.kind === "draft") {
+        const expectedDraft = assistantResult.targetShapeId ? ((storedContext.shapes ?? []).find((shape) => (shape as { id?: string }).id === assistantResult.targetShapeId) as { props?: { draft?: NodeDraft } } | undefined)?.props?.draft : undefined;
+        if (assistantResult.targetShapeId && !expectedDraft) throw badRequest("draft target was not in supplied context");
+        outcomeEntry = { id: uuid(), roomId, seq: this.nextSeq(roomId), at, kind: "suggestion", triggerId: trigger.id, runId, draft: assistantResult.draft, status: "open", shapeId: null, text: assistantResult.text, sources: assistantResult.sources, ...(assistantResult.targetShapeId ? { targetShapeId: assistantResult.targetShapeId, expectedDraft } : {}), revision: input.revision, resolvedBy: null };
+        this.insertEntry(roomId, outcomeEntry);
+      }
+      const result = { entry, ...(outcomeEntry ? { outcomeEntry } : {}) };
+      this.putIdem(roomId, `run-complete:${runId}`, input.id, result);
+      return result;
+    });
+    const result = (committed as { result?: { entry: Entry; outcomeEntry?: Entry } }).result ?? committed as unknown as { entry: Entry; outcomeEntry?: Entry };
+    this.flushBroadcasts();
+    this.setBusy(roomId, authenticated.session_id, false);
+    this.tick();
+    return result;
+  }
+
+  private finishStaleContext(roomId: string, run: { run_id: string; session_id: string; entry_id: string }, trigger: Trigger) {
+    const entry = this.getEntry(roomId, run.entry_id);
+    this.transaction(() => {
+      if (entry?.kind === "agent_turn") { entry.status = "done"; entry.hidden = true; entry.text = ""; entry.at = nowIso(this.now()); this.updateEntry(entry); }
+      trigger.status = "done"; trigger.assigneeSessionId = null; trigger.offerExpiresAt = null;
+      const row = this.db.prepare("SELECT entry_id,offered_ids FROM triggers WHERE id=?").get(trigger.id) as { entry_id: string; offered_ids: string };
+      this.saveTriggerInTx(trigger, row);
+      this.db.prepare("UPDATE runs SET status='done' WHERE run_id=?").run(run.run_id);
+    });
+    this.flushBroadcasts();
+    this.setBusy(roomId, run.session_id, false);
+  }
+
+  private validateEvidenceSources(roomId: string, sources: unknown[], supplied: { entryIds: Set<string>; shapeIds: Set<string> }) {
+    const parsed = EvidenceSourcesSchema.safeParse(sources);
+    if (!parsed.success) throw badRequest("invalid evidence sources");
+    const records = new Set(this.canvasRecords(roomId).map((record) => (record as { id?: string }).id));
+    for (const source of parsed.data) {
+      if (source.kind === "entry") {
+        const entry = this.getEntry(roomId, source.id);
+        if (!entry || entry.kind === "agent_turn" || entry.kind === "trigger" || !supplied.entryIds.has(source.id)) throw badRequest("evidence entry is not available");
+      } else if (!records.has(source.id) || !supplied.shapeIds.has(source.id)) throw badRequest("evidence shape is not in this room");
+    }
+  }
+
+  private currentDraft(roomId: string, targetShapeId: string): NodeDraft | undefined {
+    const record = this.canvasRecords(roomId).find((candidate) => (candidate as { id?: string }).id === targetShapeId) as { typeName?: string; type?: string; props?: { draft?: NodeDraft } } | undefined;
+    if (!record || record.typeName !== "shape" || record.type !== KAN_NODE_TYPE || !record.props?.draft) throw badRequest("draft target is not a shared kan-node");
+    return record.props.draft;
+  }
+
   patchRun(
     roomId: string,
     runId: string,
     header: string | undefined,
-    input: { id: string; text?: string; steps?: unknown[]; status?: "done" | "failed" },
+    input: { id: string; text?: string; steps?: unknown[]; status?: "done" | "failed" | "cancelled" },
   ) {
     const run = this.leaseAuth(roomId, runId, header);
+    const currentTrigger = this.loadTrigger(run.trigger_id).trigger;
+    if ((currentTrigger.mode === "context" || currentTrigger.mode === "propose") && (input.text !== undefined || input.steps !== undefined || input.status === "done")) throw forbidden("contextual output must use complete");
     const idem = this.getIdem<{ entry: Entry }>(roomId, `run-patch:${runId}`, input.id);
     if (idem) return idem;
     const { trigger } = this.activeLease(roomId, runId, header);
@@ -1398,13 +1672,13 @@ export class Engine {
       if (input.steps !== undefined) entry.steps = input.steps;
       if (input.status !== undefined) {
         entry.status = input.status;
-        trigger.status = input.status === "done" ? "done" : "failed";
+        trigger.status = input.status === "done" ? "done" : input.status === "cancelled" ? "cancelled" : "failed";
         const row = this.db.prepare("SELECT entry_id, offered_ids FROM triggers WHERE id=?").get(trigger.id) as {
           entry_id: string;
           offered_ids: string;
         };
         this.saveTriggerInTx(trigger, row);
-        this.db.prepare("UPDATE runs SET status=? WHERE run_id=?").run(input.status === "done" ? "done" : "failed", runId);
+        this.db.prepare("UPDATE runs SET status=? WHERE run_id=?").run(input.status === "done" ? "done" : input.status === "cancelled" ? "superseded" : "failed", runId);
       }
       entry.at = nowIso(this.now());
       this.updateEntry(entry);
@@ -1652,6 +1926,52 @@ export class Engine {
     return { entry };
   }
 
+  resolveOffer(userId: string, roomId: string, entryId: string, resolution: "accepted" | "dismissed") {
+    this.requireMember(roomId, userId);
+    const offer = this.getEntry(roomId, entryId);
+    if (!offer || offer.kind !== "offer") throw notFound("offer not found");
+    if (offer.status !== "open") {
+      if (offer.status === resolution) return { entry: offer, trigger: offer.resultTriggerId ? this.loadTrigger(offer.resultTriggerId).trigger : undefined };
+      throw conflict(`offer already ${offer.status}`);
+    }
+    if (resolution === "dismissed") {
+      this.transaction(() => {
+        offer.status = "dismissed";
+        offer.resolvedBy = userId;
+        offer.at = nowIso(this.now());
+        this.updateEntry(offer);
+      });
+      this.flushBroadcasts();
+      return { entry: offer };
+    }
+    if (offer.revision !== this.currentRevision(roomId)) {
+      this.transaction(() => {
+        offer.status = "outdated";
+        offer.resolvedBy = userId;
+        offer.at = nowIso(this.now());
+        this.updateEntry(offer);
+      });
+      this.flushBroadcasts();
+      throw conflict("offer is outdated");
+    }
+    const supporting = this.loadTrigger(offer.triggerId).trigger.causeEntryIds.filter((id) => {
+      const entry = this.getEntry(roomId, id);
+      return entry?.kind === "message" || entry?.kind === "system";
+    });
+    let trigger!: Trigger;
+    this.transaction(() => {
+      trigger = this.createTrigger(roomId, offer, { mode: "act", intent: "lookup", confidence: 1, reason: offer.request }, [], "accepted", userId, { causeEntryIds: [entryId, ...supporting], approvedRequest: offer.request, acceptedOfferId: entryId }, true);
+      offer.status = "accepted";
+      offer.resolvedBy = userId;
+      offer.resultTriggerId = trigger.id;
+      offer.at = nowIso(this.now());
+      this.updateEntry(offer);
+    });
+    this.flushBroadcasts();
+    this.tick();
+    return { entry: offer, trigger };
+  }
+
   resolveSuggestion(userId: string, roomId: string, entryId: string, resolution: "accepted" | "dismissed") {
     this.requireMember(roomId, userId);
     const entry = this.getEntry(roomId, entryId);
@@ -1661,10 +1981,16 @@ export class Engine {
       throw conflict(`suggestion already ${entry.status}`);
     }
     const at = nowIso(this.now());
+    if (resolution === "accepted" && entry.revision && entry.revision !== this.currentRevision(roomId)) {
+      this.transaction(() => { entry.status = "outdated"; entry.resolvedBy = userId; entry.at = at; this.updateEntry(entry); });
+      this.flushBroadcasts();
+      throw conflict("suggestion is outdated");
+    }
     if (resolution === "dismissed") {
       this.transaction( () => {
         entry.status = "dismissed";
         entry.acceptedBy = null;
+        entry.resolvedBy = userId;
         entry.at = at;
         this.updateEntry(entry);
       });
@@ -1684,6 +2010,45 @@ export class Engine {
     };
     const handle = this.getRoomHandle(roomId);
     handle.lastPushUserId = null;
+    if (entry.targetShapeId) {
+      const targetShapeId = entry.targetShapeId;
+      let currentDraft: NodeDraft | undefined;
+      try { currentDraft = this.currentDraft(roomId, targetShapeId); } catch {
+        this.transaction(() => { entry.status = "outdated"; entry.resolvedBy = userId; entry.at = at; this.updateEntry(entry); });
+        this.flushBroadcasts();
+        throw conflict("suggestion target is outdated");
+      }
+      if (!entry.expectedDraft || !isDeepStrictEqual(currentDraft, entry.expectedDraft)) {
+        this.transaction(() => {
+          entry.status = "outdated";
+          entry.resolvedBy = userId;
+          entry.at = at;
+          this.updateEntry(entry);
+        });
+        this.flushBroadcasts();
+        throw conflict("suggestion target changed");
+      }
+      handle.storage.transaction((txn) => {
+        const records = new Map(Array.from(txn.entries()).map(([id, record]) => [id, record]));
+        const target = records.get(targetShapeId) as { props?: Record<string, unknown>; meta?: Record<string, unknown> } | undefined;
+        if (!target) throw conflict("suggestion target is outdated");
+        const originEntry = run ? this.getEntry(roomId, run.entry_id) : null;
+        if (originEntry?.kind === "agent_turn") {
+          originEntry.touchedShapeIds = [...new Set([...originEntry.touchedShapeIds, targetShapeId])];
+          originEntry.at = at;
+          this.updateEntry(originEntry);
+        }
+        txn.set(targetShapeId, { ...target, props: { ...(target.props ?? {}), draft: entry.draft }, meta: { ...(target.meta ?? {}), provenance: { entryId, runId: entry.runId, byUserId: userId } } } as unknown as UnknownRecord);
+        entry.status = "accepted";
+        entry.shapeId = targetShapeId;
+        entry.acceptedBy = userId;
+        entry.resolvedBy = userId;
+        entry.at = at;
+        this.updateEntry(entry);
+      });
+      this.flushBroadcasts();
+      return { entry, shapeId: entry.targetShapeId! };
+    }
     let shapeId = "";
     handle.storage.transaction((txn) => {
       const pageId = [...txn.entries()].find(([, r]) => (r as { typeName?: string }).typeName === "page")?.[0] as
@@ -1726,6 +2091,7 @@ export class Engine {
       entry.status = "accepted";
       entry.shapeId = shapeId;
       entry.acceptedBy = userId;
+      entry.resolvedBy = userId;
       entry.at = at;
       this.updateEntry(entry);
     });
@@ -1742,6 +2108,8 @@ export class Engine {
       .prepare("SELECT * FROM runs WHERE room_id=? AND lease_hash=? AND status='running' AND lease_expires_at>?")
       .get(roomId, sha256(token), this.now());
     if (!run) throw unauthorized("no active lease for this room");
+    const trigger = this.loadTrigger((run as { trigger_id: string }).trigger_id).trigger;
+    if (trigger.mode === "context" || trigger.mode === "propose") throw forbidden("contextual runs cannot query data");
     return queryDemoData(input);
   }
 
@@ -1853,6 +2221,13 @@ function extractRichText(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+function boundedContextProps(props: unknown): unknown {
+  if (!props || typeof props !== "object") return {};
+  const text = JSON.stringify(props);
+  if (text.length <= 12_000) return props;
+  return { truncated: true, preview: text.slice(0, 11_800) };
 }
 
 function shapeLabel(shape: UnknownRecord): string {
