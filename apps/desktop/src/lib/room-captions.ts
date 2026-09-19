@@ -17,7 +17,7 @@ export function subscribeToOwnCaptions(
     id = undefined;
     send(null);
   };
-  const subscriber = session.subscribe(stream, document.createElement("div"), {
+  const subscriber = session.subscribe(stream, undefined, {
     subscribeToAudio: false,
     subscribeToVideo: false,
     subscribeToCaptions: true,

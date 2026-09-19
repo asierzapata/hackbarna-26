@@ -423,3 +423,8 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   apps/desktop/test/transcription.test.ts apps/room-server/test/transcription.test.ts`.
   These cover controlled SDK events, rendering, real HTTP/WebSocket transport,
   replay, attribution, and room isolation, not live-provider speech recognition.
+- A captions-only subscriber with `insertDefaultUI: false` must pass `undefined`
+  as the target element. Supplying even a detached div is rejected by OpenTok.js
+  before subscription (`OT_INVALID_PARAMETER`, code 1011). Keep the SDK option
+  compatibility assertion in the transcription test; an unconstrained mock missed
+  this integration failure.

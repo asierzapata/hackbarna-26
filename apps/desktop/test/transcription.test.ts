@@ -54,7 +54,11 @@ test("own-stream captions revise one line, finalize it, and clean up without pla
   const updates: (TranscriptInput | null)[] = [];
   const subscriber = { on: (_: string, callback: typeof receive) => { receive = callback; }, off: () => { detached = true; } };
   const session = {
-    subscribe: (_stream: unknown, _target: unknown, props: OT.SubscriberProperties) => { options = props; return subscriber; },
+    subscribe: (_stream: unknown, target: unknown, props: OT.SubscriberProperties) => {
+      assert.ok(!(target && props.insertDefaultUI === false), "Vonage rejects a target element when insertDefaultUI is false");
+      options = props;
+      return subscriber;
+    },
     unsubscribe: () => { unsubscribed = true; },
   } as unknown as OT.Session;
   const stop = subscribeToOwnCaptions(session, { streamId: "own" } as OT.Stream, (caption) => updates.push(caption), () => assert.fail("unexpected caption error"));
