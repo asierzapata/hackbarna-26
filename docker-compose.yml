@@ -1,0 +1,36 @@
+services:
+  room-server:
+    build: .
+    restart: unless-stopped
+    environment:
+      KAN_DATA_DIR: /data
+      PORT: 8787
+      # The desktop client's origins. Overriding this without keeping the
+      # tauri:// entries would lock the app out of its own server.
+      KAN_ALLOWED_ORIGINS: "tauri://localhost,http://tauri.localhost,http://localhost:1420"
+      AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
+      VONAGE_APPLICATION_ID: ${VONAGE_APPLICATION_ID:-}
+      VONAGE_PRIVATE_KEY: ${VONAGE_PRIVATE_KEY:-}
+    volumes:
+      - kan-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in /srv/kan.env}
+    depends_on:
+      room-server:
+        condition: service_healthy
+
+volumes:
+  kan-data:
