@@ -123,6 +123,12 @@ const geometryPatch = {
   w: z.number().positive().optional(),
   h: z.number().positive().optional(),
 };
+const geoShapePatch = z.object({
+  type: z.literal("geo").describe("A normal tldraw box or geometric shape"),
+  text: z.string().optional().describe("Text inside the existing shape"),
+  ...geometryPatch,
+});
+
 export const nodePatch = z.discriminatedUnion("type", [
   markdownDraft.partial().required({ type: true }).extend(geometryPatch),
   chartDraft.partial().required({ type: true }).extend({
@@ -153,6 +159,7 @@ export const nodePatch = z.discriminatedUnion("type", [
     ...geometryPatch,
     selectedDate: dateOnly.nullable().optional().describe("Day to inspect; null clears selection. Selecting a day also reveals its month."),
   }),
+  geoShapePatch,
 ]);
 export type NodePatch = z.infer<typeof nodePatch>;
 

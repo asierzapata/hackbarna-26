@@ -76,10 +76,12 @@ export function ChatPanel({
   roomId,
   online = false,
   onClose,
+  className,
 }: {
   roomId?: string;
   online?: boolean;
   onClose?: () => void;
+  className?: string;
 }) {
   const agent = useAgent();
   const { editor, jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
@@ -95,18 +97,22 @@ export function ChatPanel({
   );
 
   const [entries, setEntries] = React.useState<ThreadEntry[]>([]);
+  const entryOrderRef = React.useRef(new Map<string, number>());
+  const nextEntryOrderRef = React.useRef(0);
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
   const [streamingIds, setStreamingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
-  const [micActive, setMicActive] = React.useState(false);
   const models = agent.status.models?.available ?? [];
   const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
 
   /** Upsert by id: a replay and a live append are the same operation. */
   const upsert = React.useCallback((entry: ThreadEntry) => {
+    if (!entryOrderRef.current.has(entry.id)) {
+      entryOrderRef.current.set(entry.id, nextEntryOrderRef.current++);
+    }
     setEntries((prev) => {
       const index = prev.findIndex((existing) => existing.id === entry.id);
       if (index === -1) return [...prev, entry];
@@ -271,12 +277,17 @@ export function ChatPanel({
   }, [userId, userName]);
 
   const view = React.useMemo(
-    () => ({ pendingIds, streamingIds }),
+    () => ({
+      pendingIds,
+      streamingIds,
+      entryOrder: entryOrderRef.current,
+    }),
     [pendingIds, streamingIds]
   );
 
   return (
     <ThreadPanel
+      className={className}
       channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={entries}
       participants={participants}
@@ -300,8 +311,6 @@ export function ChatPanel({
       onDismissSuggestion={(suggestion) => resolveSuggestion(suggestion, false)}
       composer={{
         onSend: handleSend,
-        micActive,
-        onToggleMic: () => setMicActive((on) => !on),
         disabled: agent.busy,
         modelSelection: models.length ? modelSelection : undefined,
         models,

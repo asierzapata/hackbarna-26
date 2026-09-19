@@ -62,9 +62,6 @@ export interface ThreadPanelProps extends ThreadActions {
   composer?: Pick<
     ThreadComposerProps,
     "onSend"
-    | "onAttach"
-    | "onToggleMic"
-    | "micActive"
     | "disabled"
     | "modelSelection"
     | "models"
@@ -183,11 +180,6 @@ export function ThreadPanel({
                     <MessageScrollerItem
                       key={row.id}
                       messageId={row.id}
-                      scrollAnchor={
-                        row.type === "entry" &&
-                        row.entry.kind === "message" &&
-                        row.entry.authorId === currentUserId
-                      }
                     >
                       {row.type === "transcript-run" ? (
                         <TranscriptRun
