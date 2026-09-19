@@ -83,6 +83,21 @@ interface RoomHandle {
 }
 
 const DOC_TYPE_NAMES = new Set(["document", "page", "shape", "binding", "asset"]);
+
+/**
+ * The records `validateGraph` is responsible for.
+ *
+ * tldraw's document scope is wider than the shape graph. `user` records are
+ * document-scoped too, so once a room has collaborators in it — an online room
+ * mints one per participant — the stored snapshot holds records the graph
+ * rules know nothing about. The sync write path has always filtered them out
+ * before validating; anything else that hands the stored snapshot to
+ * `validateGraph` has to filter the same way, or every mutation in a shared
+ * room is rejected as an "invalid record" that the room itself put there.
+ */
+function graphRecords(records: unknown[]): unknown[] {
+  return records.filter((record) => DOC_TYPE_NAMES.has((record as { typeName?: string } | null)?.typeName ?? ""));
+}
 const ASSET_SRC_RE = /^\/assets\/([0-9a-f-]{36})$/;
 const MAX_SEND_BUFFER = 8 * 1024 * 1024;
 
@@ -105,7 +120,7 @@ export class Engine {
   private readonly schema = createKanSchema();
   private readonly rooms = new Map<string, RoomHandle>();
   private readonly classifierChains = new Map<string, Promise<void>>();
-  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; reject: (reason: unknown) => void; previous: Promise<void> }>();
+  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; reject: (error: unknown) => void; previous: Promise<void> }>();
   private readonly lastAssigned = new Map<string, number>();
   private interval: ReturnType<typeof setInterval> | null = null;
   private broadcastQueue: RoomEvent[] = [];
@@ -842,9 +857,7 @@ export class Engine {
     const storageTransaction = storage.transaction.bind(storage);
     storage.transaction = (fn, options) => this.atomic(() => storageTransaction((txn) => {
       const result = fn(txn);
-      const records = [...txn.entries()]
-        .map(([, record]) => record)
-        .filter((record) => DOC_TYPE_NAMES.has((record as unknown as { typeName?: string }).typeName ?? ""));
+      const records = graphRecords([...txn.entries()].map(([, record]) => record));
       if (records.length || this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) this.validateGraph(records);
       return result;
     }, options));
@@ -945,9 +958,9 @@ export class Engine {
     const pending = this.pendingClassification.get(roomId);
     if (pending) { pending.cause = cause; clearTimeout(pending.timer); pending.timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs); return; }
     let resolve!: () => void;
-    let reject!: (reason: unknown) => void;
+    let reject!: (error: unknown) => void;
     const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
-    const previous = this.classifierChains.get(roomId)?.catch(() => {}) ?? Promise.resolve();
+    const previous = this.classifierChains.get(roomId) ?? Promise.resolve();
     const timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs);
     this.pendingClassification.set(roomId, { cause, timer, promise, resolve, reject, previous });
     this.classifierChains.set(roomId, promise);
@@ -958,7 +971,10 @@ export class Engine {
     const pending = this.pendingClassification.get(roomId);
     if (!pending) return;
     this.pendingClassification.delete(roomId);
-    void pending.previous.then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.reject);
+    // A persistence failure has to reach whoever is awaiting this room's
+    // classification, but it must not poison the chain: the next cause still
+    // runs, which is what lets a restart drain the durable pending queue.
+    void pending.previous.catch(() => {}).then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.reject);
   }
 
   classifierIdle(roomId: string): Promise<void> {
@@ -1908,7 +1924,7 @@ export class Engine {
       try { this.schema.types[rec.typeName as keyof typeof this.schema.types].validator.validate(rec); } catch { throw badRequest("planned record failed schema validation"); }
     }
     for (const rec of puts) current.set(rec.id, rec);
-    this.validateGraph([...current.values()]);
+    this.validateGraph(graphRecords([...current.values()]));
     return puts;
   }
 
@@ -2098,7 +2114,7 @@ export class Engine {
         meta: { provenance },
       } as unknown as UnknownRecord;
       if (txn.get(shapeId)) throw conflict("suggestion shape already exists");
-      this.validateGraph([...txn.entries()].map(([, r]) => r).concat(shape));
+      this.validateGraph(graphRecords([...txn.entries()].map(([, r]) => r).concat(shape)));
       const originEntry = run ? this.getEntry(roomId, run.entry_id) : null;
       if (originEntry?.kind === "agent_turn") {
         const touched = new Set([...originEntry.touchedShapeIds, shapeId]);
