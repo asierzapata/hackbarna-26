@@ -12,7 +12,7 @@ import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
 import { createKanSchema, KAN_NODE_TYPE, kanNodeSize } from "@kan/nodes";
-import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { type LiveTranscript, type TranscriptInput, AssistantResultSchema, CONTEXT_MAX_AGE_MS, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
@@ -61,6 +61,8 @@ export interface SessionInfo {
   scope: "own" | "room" | "manual";
   background: boolean;
   lastSeen: number;
+  transcript?: LiveTranscript;
+  transcriptUpdatedAt?: number;
 }
 
 interface PendingEdit {
@@ -79,6 +81,8 @@ interface RoomHandle {
   lastPushUserId: string | null;
   pendingEdits: Map<string, PendingEdit>;
   videoSessionPromise: Promise<string> | null;
+  captionsPromise?: Promise<void>;
+  captionsCheckedAt?: number;
   lastActivity: number;
 }
 
@@ -156,7 +160,7 @@ export class Engine {
 
   async stop() {
     this.stopping = true;
-    await Promise.allSettled([...this.classifierChains.values(), ...[...this.rooms.values()].flatMap((h) => h.videoSessionPromise ? [h.videoSessionPromise] : [])]);
+    await Promise.allSettled([...this.classifierChains.values(), ...[...this.rooms.values()].flatMap((h) => [h.videoSessionPromise, h.captionsPromise].filter((promise) => promise != null))]);
     if (this.interval) clearInterval(this.interval);
     this.interval = null;
     for (const h of this.rooms.values()) {
@@ -1134,6 +1138,7 @@ export class Engine {
     if (!handle) return;
     const session = handle.sessions.get(sessionId);
     if (!session) return;
+    this.clearTranscript(roomId, sessionId);
     handle.sessions.delete(sessionId);
     session.ws?.close(1001, "session ended");
     // release any non-expired offer held by this session
@@ -1166,6 +1171,31 @@ export class Engine {
     this.broadcastPresence(roomId);
   }
 
+  clearTranscript(roomId: string, sessionId: string) {
+    const handle = this.rooms.get(roomId), session = handle?.sessions.get(sessionId);
+    if (!handle || !session?.transcript) return;
+    session.transcript = undefined;
+    for (const peer of handle.sessions.values()) if (peer.ws) this.sendSafe(peer.ws, { type: "transcript", sessionId, caption: null });
+  }
+
+  receiveTranscript(roomId: string, sessionId: string, input: TranscriptInput) {
+    const handle = this.rooms.get(roomId), session = handle?.sessions.get(sessionId);
+    if (!handle || !session?.ws) return;
+    if ([...handle.sessions.values()].some((peer) => peer !== session && peer.transcript?.id === input.id)) throw conflict("caption id already used");
+    if (input.isFinal) {
+      this.postMessage({ id: session.userId, name: "" }, roomId, { id: input.id, text: input.text, source: "transcript" });
+      if (session.transcript?.id === input.id) this.clearTranscript(roomId, sessionId);
+      this.sendSafe(session.ws, { type: "transcript.ack", id: input.id });
+      return;
+    }
+    if (this.getEntry(roomId, input.id)) return;
+    if (session.transcriptUpdatedAt !== undefined && this.now() - session.transcriptUpdatedAt < 50) return;
+    const caption = { id: input.id, text: input.text, authorId: session.userId, at: session.transcript?.id === input.id ? session.transcript.at : nowIso(this.now()), sessionId };
+    session.transcript = caption;
+    session.transcriptUpdatedAt = this.now();
+    for (const peer of handle.sessions.values()) if (peer.ws) this.sendSafe(peer.ws, { type: "transcript", sessionId, caption });
+  }
+
   heartbeatSession(roomId: string, sessionId: string) {
     const session = this.rooms.get(roomId)?.sessions.get(sessionId);
     if (session) session.lastSeen = this.now();
@@ -1190,7 +1220,10 @@ export class Engine {
       this.flushPendingEdits(roomId);
       const clients =
         handle.sessions.size + ((handle.socketRoom as unknown as { getNumActiveSessions?: () => number }).getNumActiveSessions?.() ?? 0);
-      if (clients === 0 && !handle.videoSessionPromise && now - handle.lastActivity > this.timings.roomIdleMs) {
+      for (const session of handle.sessions.values()) {
+        if (session.transcript && now - (session.transcriptUpdatedAt ?? 0) > 15_000) this.clearTranscript(roomId, session.sessionId);
+      }
+      if (clients === 0 && !handle.videoSessionPromise && !handle.captionsPromise && now - handle.lastActivity > this.timings.roomIdleMs) {
         try {
           handle.socketRoom.close();
         } catch {}
@@ -2131,6 +2164,27 @@ export class Engine {
     const trigger = this.loadTrigger((run as { trigger_id: string }).trigger_id).trigger;
     if (trigger.mode === "context" || trigger.mode === "propose") throw forbidden("contextual runs cannot query data");
     return queryDemoData(input);
+  }
+
+  async startCaptions(userId: string, roomId: string) {
+    this.requireMember(roomId, userId);
+    if (!this.video?.startCaptions) throw unavailable("live transcription is not configured");
+    const handle = this.getRoomHandle(roomId);
+    if (handle.captionsCheckedAt !== undefined && this.now() - handle.captionsCheckedAt < 10_000) return;
+    if (!handle.captionsPromise) {
+      handle.captionsPromise = (async () => {
+        try {
+          const { sessionId } = await this.videoToken(userId, roomId);
+          const token = this.video!.generateClientToken(sessionId, {
+            role: "moderator", expireTime: Math.floor(this.now() / 1000) + 300, data: "kan-captions",
+          });
+          await this.video!.startCaptions!(sessionId, token);
+          handle.captionsCheckedAt = this.now();
+        } catch { throw badGateway("live transcription could not start"); }
+        finally { handle.captionsPromise = undefined; }
+      })();
+    }
+    await handle.captionsPromise;
   }
 
   async videoToken(userId: string, roomId: string) {

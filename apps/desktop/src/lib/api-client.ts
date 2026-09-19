@@ -211,6 +211,12 @@ export async function fetchServerAsset(assetId: string): Promise<Blob> {
   return res.blob();
 }
 
+export async function startRoomCaptions(roomId: string, signal?: AbortSignal): Promise<void> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/captions`, { method: "POST", signal });
+  if (!res.ok) throw new Error("Live transcription is unavailable. You can still use the call and chat.");
+}
+
 export async function getRoomVideoToken(roomId: string, signal?: AbortSignal): Promise<{
   applicationId: string;
   sessionId: string;

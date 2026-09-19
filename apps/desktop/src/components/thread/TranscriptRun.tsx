@@ -27,6 +27,7 @@ function TranscriptLine({
   return (
     <div
       data-flagged={flagged || undefined}
+      data-interim={interim || undefined}
       className={cn(
         "flex items-start gap-2 px-2 py-1 text-xs leading-relaxed",
         flagged && "border-s-2 border-agent bg-agent-subtle"
@@ -69,12 +70,16 @@ function TranscriptLine({
 export function TranscriptRun({
   entries,
   interimIds,
-  collapseAfter = 40,
+  collapseAfter = 0,
+  open,
+  onOpenChange,
 }: {
   entries: TranscriptEntry[];
   /** Lines the STT engine may still revise, so they render unsettled. */
   interimIds?: ReadonlySet<string>;
   collapseAfter?: number;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { onJumpToEntry } = useThread();
   const flaggedCount = entries.filter((entry) => entry.trigger).length;
@@ -82,6 +87,8 @@ export function TranscriptRun({
   return (
     <Collapsible
       defaultOpen={entries.length <= collapseAfter}
+      open={open}
+      onOpenChange={onOpenChange}
       className="flex flex-col gap-1"
     >
       <Marker
@@ -91,7 +98,8 @@ export function TranscriptRun({
         }
       >
         <MarkerContent className="flex items-center gap-1.5">
-          {entries.length} {entries.length === 1 ? "line" : "lines"} of conversation
+          Call transcript · {entries.length} {entries.length === 1 ? "line" : "lines"}
+          {entries.some((entry) => interimIds?.has(entry.id)) && <Badge variant="secondary">Live</Badge>}
           {flaggedCount > 0 ? (
             <Badge variant="outline" className="border-agent text-agent">
               {flaggedCount} flagged

@@ -90,6 +90,7 @@ export function ThreadPanel({
   ...actions
 }: ThreadPanelProps) {
   const [filter, setFilter] = React.useState<ThreadFilter>("everything");
+  const [expandedTranscriptIds, setExpandedTranscriptIds] = React.useState<ReadonlySet<string>>(new Set());
   const [replyTo, setReplyTo] = React.useState<
     { id: string; label: string } | undefined
   >();
@@ -187,6 +188,12 @@ export function ThreadPanel({
                         <TranscriptRun
                           entries={row.entries}
                           interimIds={row.interimIds}
+                          open={row.entries.some((entry) => expandedTranscriptIds.has(entry.id))}
+                          onOpenChange={(open) => setExpandedTranscriptIds((previous) => {
+                            const next = new Set(previous);
+                            for (const entry of row.entries) { if (open) next.add(entry.id); else next.delete(entry.id); }
+                            return next;
+                          })}
                         />
                       ) : (
                         <div id={`thread-entry-${row.entry.id}`}>

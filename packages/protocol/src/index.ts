@@ -372,7 +372,14 @@ export const RunPatchInput = z.strictObject({
   steps: z.array(boundedJson(8)).max(200).optional(),
   status: z.enum(["done", "failed", "cancelled"]).optional(),
 });
+export const TranscriptInput = z.strictObject({ id: uuid, text: z.string().trim().min(1).max(8000), isFinal: z.boolean() });
+export type TranscriptInput = z.infer<typeof TranscriptInput>;
+export const LiveTranscriptSchema = z.strictObject({ id: uuid, text: z.string().max(8000), authorId: uuid, at: isoDate, sessionId: z.string() });
+export type LiveTranscript = z.infer<typeof LiveTranscriptSchema>;
+
 export const EventsClientMessage = z.discriminatedUnion("type", [
+  TranscriptInput.extend({ type: z.literal("transcript") }),
+  z.strictObject({ type: z.literal("transcript.clear") }),
   z.strictObject({
     type: z.literal("executor.ready"),
     ready: z.boolean(),
@@ -385,7 +392,10 @@ export const EventsClientMessage = z.discriminatedUnion("type", [
 
 export const EventsServerMessage = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("event"), event: RoomEventSchema }),
-  z.strictObject({ type: z.literal("ready"), cursor: z.number().int().nonnegative(), sessionId: z.string(), room: RoomSchema, members: z.array(UserSchema), executors: z.array(ExecutorPresenceSchema), triggers: z.array(TriggerSchema) }),
+  z.strictObject({ type: z.literal("transcript"), sessionId: z.string(), caption: LiveTranscriptSchema.nullable() }),
+  z.strictObject({ type: z.literal("transcript.ack"), id: uuid }),
+  z.strictObject({ type: z.literal("transcript.error"), id: uuid, error: z.string() }),
+  z.strictObject({ type: z.literal("ready"), cursor: z.number().int().nonnegative(), sessionId: z.string(), room: RoomSchema, members: z.array(UserSchema), executors: z.array(ExecutorPresenceSchema), triggers: z.array(TriggerSchema), transcripts: z.array(LiveTranscriptSchema).optional().default([]) }),
   z.strictObject({ type: z.literal("presence"), room: RoomSchema, members: z.array(UserSchema), executors: z.array(ExecutorPresenceSchema) }),
   z.strictObject({ type: z.literal("error"), error: z.string() }),
 ]);

@@ -97,6 +97,7 @@ export function RoomPrejoin({ title, name, controls, onJoin, onCancel }: {
           <h1 id="prejoin-title" className="text-3xl font-medium tracking-tight">Ready to join?</h1>
           <p className="truncate text-lg" title={title}>{title}</p>
           <p className="text-sm text-muted-foreground">Check your camera and sound. Make yourself at home.</p>
+          <p className="text-xs text-muted-foreground">When your microphone is on, Vonage transcribes your speech. The transcript is saved in the room chat, collapsed by default. Join muted to listen without being transcribed.</p>
         </div>
         <FieldGroup>
           {(["video", "audio"] as const).map((kind) => <Field key={kind}>
