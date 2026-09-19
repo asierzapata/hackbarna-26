@@ -14,7 +14,7 @@ export interface OnboardingResult {
 
 export async function isOnboardingComplete(): Promise<boolean> {
   const profile = await getInstallationProfile();
-  return Boolean(profile && profile.onboardingCompletedAt && profile.name);
+  return Boolean(profile && profile.onboardingCompletedAt && profile.name && profile.onboardingVersion >= 2);
 }
 
 export async function completeOnboarding(displayName: string): Promise<OnboardingResult> {
@@ -45,6 +45,7 @@ export async function completeOnboarding(displayName: string): Promise<Onboardin
 
   // Mark onboarding complete only after document catalog entry exists
   profile.onboardingCompletedAt = new Date().toISOString();
+  profile.onboardingVersion = 2;
   await saveInstallationProfile(profile);
 
   return {

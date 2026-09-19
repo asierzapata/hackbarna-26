@@ -67,6 +67,8 @@ export interface ThreadPanelProps extends ThreadActions {
     | "micActive"
     | "disabled"
     | "modelSelection"
+    | "models"
+    | "modelDisabled"
     | "onModelSelectionChange"
   >;
   className?: string;

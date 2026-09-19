@@ -46,6 +46,7 @@ export function SignInButton() {
     const provider = status.providerLabel ?? "Agent";
     return (
       <div className="inline-flex items-center gap-0.5">
+        {status.message && <span role="alert" className="max-w-64 truncate text-xs text-destructive" title={status.message}>{status.message}</span>}
         <span
           className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-muted-foreground"
           data-testid="agent-status"
@@ -84,7 +85,7 @@ export function SignInButton() {
 
   return (
     <div className="inline-flex items-center gap-2">
-      {failed && (
+      {status.message && (
         <span
           className="max-w-64 truncate text-xs text-destructive"
           title={status.message ?? undefined}
@@ -170,8 +171,8 @@ function ApiKeyDialog({
           <DialogTitle>Sign in to {label}</DialogTitle>
           <DialogDescription>
             {provider === "openai"
-              ? "Used for this session only. Kan passes it to the agent process and never stores it, though the Codex adapter caches it in its own config until you sign out."
-              : "Used for this session only. It is passed to the agent process and not stored."}
+              ? "Saved in macOS Keychain so Kan can reconnect after a restart. The Codex adapter also caches the key in its own config. Sign out removes both copies."
+              : "Saved securely in macOS Keychain so Kan can reconnect after a restart. Sign out removes the saved key."}
           </DialogDescription>
         </DialogHeader>
         <form

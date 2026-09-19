@@ -16,11 +16,7 @@ import { createMockTransport, demoParticipants } from "@/lib/thread-fixtures";
 import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
-import {
-  DEFAULT_AI_MODELS,
-  defaultSelectionFor,
-  type AiModelSelection,
-} from "@/components/ui/ai-model-select";
+import { type AiModelSelection } from "@/components/ui/ai-model-select";
 import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
 import { createCanvasTools } from "@/nodes/tools";
 
@@ -106,9 +102,8 @@ export function ChatPanel({
     new Set()
   );
   const [micActive, setMicActive] = React.useState(false);
-  const [modelSelection, setModelSelection] = React.useState<AiModelSelection>(() =>
-    defaultSelectionFor(DEFAULT_AI_MODELS[0])
-  );
+  const models = agent.status.models?.available ?? [];
+  const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
 
   /** Upsert by id: a replay and a live append are the same operation. */
   const upsert = React.useCallback((entry: ThreadEntry) => {
@@ -175,7 +170,7 @@ export function ChatPanel({
   ) {
     const id = `agent-${crypto.randomUUID()}`;
     const startedAt = Date.now();
-    const model = DEFAULT_AI_MODELS.find((item) => item.id === selectedModel.id);
+    const model = models.find((item) => item.id === selectedModel.id);
 
     upsert({
       id,
@@ -306,8 +301,10 @@ export function ChatPanel({
         micActive,
         onToggleMic: () => setMicActive((on) => !on),
         disabled: agent.busy,
-        modelSelection,
-        onModelSelectionChange: setModelSelection,
+        modelSelection: models.length ? modelSelection : undefined,
+        models,
+        modelDisabled: agent.busy || agent.status.state !== "ready",
+        onModelSelectionChange: (selection) => { void agent.setModel(selection.id); },
       }}
     />
   );

@@ -33,6 +33,15 @@ export interface AgentStatus {
   providerLabel?: string | null;
   agent?: string | null;
   message?: string | null;
+  mode?: AuthMode | null;
+  models?: { available: { id: string; label: string }[]; current: string | null };
+}
+
+export interface AgentPreferences {
+  provider: Provider | null;
+  mode: AuthMode | null;
+  modelId: string | null;
+  autoConnect: boolean;
 }
 
 /** The subset of ACP session updates the thread renders. */
@@ -70,6 +79,8 @@ interface CanvasToolRequest {
 
 interface AgentApi {
   status: AgentStatus;
+  preferences: AgentPreferences | null;
+  setModel: (modelId: string) => Promise<void>;
   /**
    * Start a provider and open a session with the chosen credentials. The key is
    * only read for `api_key` mode and is never persisted — on either side.
@@ -97,6 +108,8 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         { state: "unavailable", message: "Only available in the desktop app" }
   );
   const [busy, setBusy] = React.useState(false);
+  const [preferences, setPreferences] = React.useState<AgentPreferences | null>(null);
+  const generation = React.useRef(0);
 
   // One listener for the whole app; the in-flight prompt claims it.
   const handlers = React.useRef<PromptHandlers | null>(null);
@@ -106,9 +119,15 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   React.useEffect(() => {
     if (!isTauri()) return;
     let mounted = true;
-    setStatus({ state: "idle" });
-    void invoke<AgentStatus>("agent_status", { canvasId }).then((remote) => {
-      if (mounted) setStatus((current) => current.state === "idle" ? remote : current);
+    const request = ++generation.current;
+    setStatus({ state: "connecting" });
+    void invoke<AgentPreferences>("agent_preferences").then((saved) => {
+      if (mounted) setPreferences(saved);
+    }).catch(() => {});
+    void invoke<AgentStatus>("agent_restore", { canvasId, tools: canvasToolDefinitions }).then((remote) => {
+      if (mounted && request === generation.current) setStatus(remote);
+    }).catch((error) => {
+      if (mounted && request === generation.current) setStatus({ state: "idle", message: String(error) });
     });
 
     const updates = listen<{ turnId: string; update: SessionUpdate }>("agent:update", ({ payload: envelope }) => {
@@ -169,6 +188,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     listenersReady.current = Promise.all([updates, closed, canvas]);
     return () => {
       mounted = false;
+      ++generation.current;
       const activeId = turnId.current;
       turnId.current = null;
       handlers.current = null;
@@ -182,19 +202,42 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const api: AgentApi = {
     status,
     busy,
+    preferences,
+    setModel: async (modelId) => {
+      setBusy(true);
+      try {
+        setStatus(await invoke<AgentStatus>("agent_set_model", { modelId }));
+        setPreferences(await invoke<AgentPreferences>("agent_preferences"));
+      } catch (error) {
+        const remote = await invoke<AgentStatus>("agent_status", { canvasId }).catch(() => status);
+        setStatus({ ...remote, message: String(error) });
+      } finally {
+        setBusy(false);
+      }
+    },
     signIn: async (provider, mode, apiKey) => {
+      const request = ++generation.current;
       setStatus({ state: "connecting", provider, providerLabel: providerLabels[provider] });
       try {
-        setStatus(
-          await invoke<AgentStatus>("agent_sign_in", { provider, mode, apiKey, tools: canvasToolDefinitions, canvasId })
-        );
+        const remote = await invoke<AgentStatus>("agent_sign_in", { provider, mode, apiKey, tools: canvasToolDefinitions, canvasId });
+        if (request === generation.current) {
+          setStatus(remote);
+          setPreferences(await invoke<AgentPreferences>("agent_preferences"));
+        }
       } catch (error) {
-        setStatus({ state: "unavailable", provider, message: String(error) });
+        if (request === generation.current) setStatus({ state: "unavailable", provider, message: String(error) });
       }
     },
     signOut: async () => {
-      setStatus({ state: "idle" });
-      await invoke("agent_sign_out");
+      ++generation.current;
+      setStatus({ state: "connecting" });
+      try {
+        await invoke("agent_sign_out");
+        setStatus({ state: "idle" });
+        setPreferences(await invoke<AgentPreferences>("agent_preferences"));
+      } catch (error) {
+        setStatus({ state: "idle", message: String(error) });
+      }
     },
     cancel: async () => {
       const activeId = turnId.current;

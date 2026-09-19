@@ -16,6 +16,7 @@ import { Kbd } from "@/components/ui/kbd";
 import {
   ModelSelectorKit,
   type AiModelSelection,
+  type AiModel,
 } from "@/components/ui/ai-model-select";
 import type { CanvasAnchor } from "@/lib/thread";
 
@@ -30,6 +31,8 @@ export interface ThreadComposerProps {
   /** Toggle local mic capture; transcription lands back as transcript entries. */
   onToggleMic?: () => void;
   micActive?: boolean;
+  models?: AiModel[];
+  modelDisabled?: boolean;
   modelSelection?: AiModelSelection;
   onModelSelectionChange?: (selection: AiModelSelection) => void;
 }
@@ -43,6 +46,8 @@ export function ThreadComposer({
   onToggleMic,
   micActive,
   modelSelection,
+  models,
+  modelDisabled,
   onModelSelectionChange,
 }: ThreadComposerProps) {
   const [text, setText] = React.useState("");
@@ -130,6 +135,8 @@ export function ThreadComposer({
 
         {modelSelection ? (
           <ModelSelectorKit
+            models={models ?? []}
+            disabled={modelDisabled}
             value={modelSelection}
             onValueChange={onModelSelectionChange}
             className="min-w-0"

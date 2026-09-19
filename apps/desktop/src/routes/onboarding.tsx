@@ -1,141 +1,113 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { RiSparklingLine, RiAlertLine } from "@remixicon/react";
+import { RiSparklingLine } from "@remixicon/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  completeOnboarding,
-  isOnboardingComplete,
-} from "@/lib/onboarding";
-import { validateDisplayName } from "@/lib/installation-profile";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { completeOnboarding } from "@/lib/onboarding";
+import { getInstallationProfile, saveInstallationProfile, validateDisplayName, type InstallationProfile } from "@/lib/installation-profile";
+import { AgentProvider, useAgent } from "@/components/agent-context";
+import { AgentSetup } from "@/components/AgentSetup";
 
 export const Route = createFileRoute("/onboarding")({
-  component: OnboardingPage,
+  component: () => <AgentProvider><OnboardingPage /></AgentProvider>,
 });
 
 function OnboardingPage() {
   const navigate = useNavigate();
+  const agent = useAgent();
   const [name, setName] = React.useState("");
+  const [profile, setProfile] = React.useState<InstallationProfile | null>(null);
+  const [step, setStep] = React.useState<"name" | "ai">("name");
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [isChecking, setIsChecking] = React.useState(true);
+  const pending = isSubmitting || agent.busy || agent.status.state === "connecting";
 
   React.useEffect(() => {
-    void isOnboardingComplete().then((complete) => {
-      if (complete) {
-        void navigate({ to: "/", replace: true });
-      } else {
-        setIsChecking(false);
+    void getInstallationProfile().then((existing) => {
+      if (existing?.onboardingCompletedAt && existing.name) {
+        if (existing.onboardingVersion >= 2) {
+          void navigate({ to: "/", replace: true });
+          return;
+        }
+        setProfile(existing);
+        setName(existing.name);
+        setStep("ai");
       }
-    });
+      setIsChecking(false);
+    }).catch((cause) => { setError(String(cause)); setIsChecking(false); });
   }, [navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const validation = validateDisplayName(name);
-    if (!validation.valid) {
-      setError(validation.error ?? "Please enter a valid display name");
-      return;
-    }
-
+  const finish = async () => {
     setIsSubmitting(true);
     setError(null);
-
     try {
-      const result = await completeOnboarding(validation.normalized);
-      void navigate({
-        to: "/canvas/$canvasId",
-        params: { canvasId: result.firstCanvasId },
-        replace: true,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to initialize installation profile");
+      if (profile?.onboardingCompletedAt) {
+        await saveInstallationProfile({ ...profile, onboardingVersion: 2 });
+        void navigate({ to: "/", replace: true });
+      } else {
+        const result = await completeOnboarding(name);
+        void navigate({ to: "/canvas/$canvasId", params: { canvasId: result.firstCanvasId }, replace: true });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
       setIsSubmitting(false);
     }
   };
 
   if (isChecking) {
-    return (
-      <div className="flex h-full w-full items-center justify-center bg-background">
-        <Spinner className="size-6 text-muted-foreground" />
-      </div>
-    );
+    return <div className="flex h-full w-full items-center justify-center"><Spinner /></div>;
   }
 
   return (
     <main className="flex min-h-full w-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-md space-y-8">
-        <div className="space-y-2 text-center">
-          <div className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-primary/80 uppercase tracking-widest">
-            <RiSparklingLine className="size-3.5" />
-            <span>Kan Canvas</span>
-          </div>
-          <h1 className="font-heading text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Welcome to Kan
-          </h1>
-          <p className="text-xs text-muted-foreground font-sans">
-            Your infinite collaborative canvas for teams and AI agents.
-          </p>
+      <div className="flex w-full max-w-md flex-col gap-6">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <RiSparklingLine className="size-6 text-primary" />
+          <h1 className="font-heading text-2xl font-bold tracking-tight">{profile ? "Your AI, ready when you are" : "Welcome to Kan"}</h1>
+          <p className="text-sm text-muted-foreground">Your infinite collaborative canvas for teams and AI agents.</p>
         </div>
-
-        <div className="border border-border bg-card p-6 shadow-sm">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <label
-                htmlFor="display-name-input"
-                className="block font-heading text-xs font-medium text-foreground"
-              >
-                What should we call you?
-              </label>
-              <Input
-                id="display-name-input"
-                type="text"
-                autoFocus
-                placeholder="Your display name"
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (error) setError(null);
-                }}
-                disabled={isSubmitting}
-                className="text-sm"
-                autoComplete="name"
-                maxLength={80}
-              />
-              <p className="text-[11px] text-muted-foreground leading-normal">
-                Your name is shown to others when you collaborate.
-              </p>
-            </div>
-
-            {error ? (
-              <div
-                role="alert"
-                className="flex items-start gap-2 border border-destructive/30 bg-destructive/10 p-2.5 text-xs text-destructive"
-              >
-                <RiAlertLine className="size-4 shrink-0 mt-0.5" />
-                <span className="leading-snug">{error}</span>
-              </div>
-            ) : null}
-
-            <Button
-              type="submit"
-              size="default"
-              variant="default"
-              disabled={isSubmitting || !name.trim()}
-              className="w-full text-xs font-medium tracking-wide"
-            >
-              {isSubmitting ? (
-                <>
-                  <Spinner className="size-3.5 mr-1.5" />
-                  Starting...
-                </>
-              ) : (
-                "Start creating"
-              )}
-            </Button>
-          </form>
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>{step === "name" ? "Make yourself at home" : "Choose your AI"}</CardTitle>
+            <CardDescription>{step === "name" ? "First, tell us what to call you." : "Connect once. Keep your account and default model across restarts."}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {step === "name" ? (
+              <form id="onboarding-name" onSubmit={(event) => {
+                event.preventDefault();
+                const validation = validateDisplayName(name);
+                if (!validation.valid) { setError(validation.error ?? "Please enter a valid name"); return; }
+                setName(validation.normalized);
+                setError(null);
+                setStep("ai");
+              }}>
+                <FieldGroup>
+                  <Field data-invalid={!!error}>
+                    <FieldLabel htmlFor="display-name-input">What should we call you?</FieldLabel>
+                    <Input id="display-name-input" autoFocus autoComplete="name" placeholder="Your display name" value={name} onChange={(event) => { setName(event.target.value); setError(null); }} maxLength={80} aria-invalid={!!error} />
+                    <FieldDescription>Your name is shown to others when you collaborate.</FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </form>
+            ) : <AgentSetup />}
+            {error && <FieldError>{error}</FieldError>}
+          </CardContent>
+          <CardFooter className="flex-col gap-2">
+            {step === "name" ? (
+              <Button form="onboarding-name" type="submit" className="w-full" disabled={!name.trim()}>Continue</Button>
+            ) : (
+              <>
+                {agent.status.state === "ready" && <Button className="w-full" disabled={pending} onClick={() => { void finish(); }}>{isSubmitting ? <Spinner data-icon="inline-start" /> : null}Start creating</Button>}
+                {agent.status.state !== "ready" && <Button variant="ghost" className="w-full" disabled={pending} onClick={() => { void finish(); }}>Set up later</Button>}
+                {!profile && <Button variant="ghost" disabled={pending} onClick={() => { setStep("name"); setError(null); }}>Back</Button>}
+              </>
+            )}
+          </CardFooter>
+        </Card>
       </div>
     </main>
   );
