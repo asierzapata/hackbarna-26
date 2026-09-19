@@ -43,8 +43,8 @@ try {
   const header = evaluate("document.querySelector('.header-bar').textContent");
   assert.doesNotMatch(header, /Run scenario|Read canvas|Arrange grid|Remove last|Timeline|Calendar/);
   assert.ok(evaluate("!!document.querySelector('.header-bar button')"));
-  assert.deepEqual(evaluate("Object.keys(window.__kan.tools).sort()"), ["addNode", "arrange", "connectNodes", "getCanvas", "removeNodes", "updateNode"]);
-  console.log("PASS fresh offline canvas is empty, demo controls absent, sign-in and all six tools retained");
+  assert.deepEqual(evaluate("Object.keys(window.__kan.tools).sort()"), ["addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "removeNodes", "updateNode"]);
+  console.log("PASS fresh offline canvas is empty, demo controls absent, sign-in and all seven tools retained");
 
   for (const [type, draft] of Object.entries(demoFixtures)) {
     const at = { x: created.length * 700, y: 0 };

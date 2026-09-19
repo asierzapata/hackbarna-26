@@ -303,3 +303,20 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   Do not drive concurrently. The script cleans up its fixture and restores fetch
   and media-query handling. Tauri's internal invoke is read-only; Vite context
   imports must retain their HMR query strings to avoid duplicate providers.
+
+## Canvas/chat regression checks
+
+- `WorkspacePanels` must give its inner canvas wrapper explicit full height;
+  panel dimensions alone do not prevent a zero-height canvas and clipped toolbar.
+  Keep both panels mounted when collapsing chat to preserve editor and draft state.
+- `addNode` supports native `geo` drafts (`geo: "rectangle"` or `"ellipse"`);
+  equal ellipse dimensions make a circle. `focusNodes` fits current-page targets
+  without changing shape records or selection and is exposed by the Rust MCP bridge.
+- `npm run test:desktop` supplies the desktop tsconfig for component-render tests.
+  Pure node helpers import runtime validation/schema utilities from `@tldraw/validate`
+  and `@tldraw/tlschema`, avoiding browser-runtime timers in Node tests.
+- With `npm run tauri:drive` running, `node scripts/canvas-chat.e2e.mjs` checks
+  canvas/toolbar visibility, resizing, chat state preservation, native shapes,
+  camera focus, and controlled streaming feedback in an isolated canvas. A connected
+  agent is required; add `--live` to also exercise the reported prompts with the
+  real provider. The script restores the original page and cleans its test canvas.

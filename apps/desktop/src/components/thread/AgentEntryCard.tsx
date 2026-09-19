@@ -20,6 +20,7 @@ export function AgentEntryCard({
 }) {
   const agent = useAuthor(entry.authorId);
   const summary = entry.text.replace(/\s+/g, " ").trim();
+  const hasSummary = summary.length > 0;
 
   return (
     <Message align="start">
@@ -33,14 +34,27 @@ export function AgentEntryCard({
               <span aria-hidden className="size-2 shrink-0 rounded-full bg-agent" />
               <span className="font-medium">{agent.name}</span>
             </MessageHeader>
-            <p
-              className={cn(
-                "text-xs leading-relaxed wrap-break-word",
-                streaming && "shimmer"
-              )}
-            >
-              {summary}
-            </p>
+            {hasSummary ? (
+              <p
+                className={cn(
+                  "text-xs leading-relaxed wrap-break-word",
+                  streaming && "shimmer"
+                )}
+              >
+                {summary}
+              </p>
+            ) : (
+              <span
+                role="status"
+                aria-live="polite"
+                className={cn(
+                  "text-xs leading-relaxed text-muted-foreground",
+                  streaming && "shimmer"
+                )}
+              >
+                {streaming ? "Working" : "No response received"}
+              </span>
+            )}
           </BubbleContent>
         </Bubble>
       </MessageContent>

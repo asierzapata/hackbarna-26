@@ -43,7 +43,7 @@ export function NodeCard({
   className,
   contentClassName,
 }: {
-  type: NodeType;
+  type: Exclude<NodeType, "geo">;
   title: string;
   description?: string;
   headerMeta?: ReactNode;
