@@ -6,8 +6,8 @@ routes in `apps/desktop/src/routes`), tldraw for the infinite canvas, shadcn
 
 ## Layout
 
-npm workspaces. Every command below runs from the repo root; the root scripts
-delegate into the workspace that owns the work.
+npm workspaces, orchestrated by Turborepo. Every command below runs from the
+repo root; the root scripts delegate into the workspace that owns the work.
 
 ```
 apps/desktop/        the Tauri app — src/, src-tauri/, index.html, vite.config.ts
@@ -22,6 +22,19 @@ The desktop app owns its own `tsconfig.json`, `components.json` and frontend
 dependencies. `@/*` resolves relative to `apps/desktop/tsconfig.json`, so it
 kept working across the move.
 
+`turbo.json` defines `build`, `typecheck`, `test` and `dev`. Only the first
+three go through turbo — they are cacheable and fan out across workspaces, and
+`build` restores `dist/` from the cache rather than re-running Vite.
+
+`dev`, `preview` and `tauri:drive` stay as direct `-w @kan/desktop` delegation
+on purpose. They are persistent single-workspace tasks, so turbo caches nothing
+for them, and its `@kan/desktop:` log prefix would break the `e2e` skill's
+anchored `^error` grep — the wait loop would spin for its full timeout instead
+of failing fast.
+
+`packageManager` is pinned in the root `package.json`. Turbo refuses to resolve
+the workspace without it.
+
 ## Commands
 
 | Task | Command |
@@ -31,6 +44,7 @@ kept working across the move.
 | Dev app + automation | `npm run tauri:drive` — adds WebDriver on :4445 |
 | Drive the running app | `node scripts/drive.mjs <cmd>` — see the `e2e` skill |
 | Typecheck (all) | `npm run typecheck` |
+| Build one workspace | `npx turbo run build --filter=@kan/desktop` |
 | Typecheck (frontend only) | `npm run typecheck -w @kan/desktop` |
 | Production build | `npm run build` |
 | Room server | `npm run server` |

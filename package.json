@@ -12,18 +12,20 @@
   "engines": {
     "node": ">=24"
   },
+  "packageManager": "npm@11.6.0",
   "scripts": {
     "dev": "npm run dev -w @kan/desktop",
-    "build": "npm run build -w @kan/desktop",
+    "build": "turbo run build",
     "preview": "npm run preview -w @kan/desktop",
     "tauri": "npm run tauri -w @kan/desktop --",
     "tauri:drive": "npm run tauri:drive -w @kan/desktop",
-    "typecheck": "npm run typecheck -w @kan/desktop && npm run typecheck:backend",
+    "typecheck": "turbo run typecheck && npm run typecheck:backend",
     "server": "tsx apps/room-server/src/main.ts",
     "test:backend": "tsx --test apps/room-server/test/*.test.ts",
     "typecheck:backend": "tsc -p tsconfig.backend.json"
   },
   "devDependencies": {
+    "turbo": "^2.11.2",
     "typescript": "~6.0.3"
   }
 }
