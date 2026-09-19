@@ -19,6 +19,7 @@ import {
 const DEMO_STYLE = "https://demotiles.maplibre.org/style.json";
 const CENTER_EPSILON = 0.00001;
 const ZOOM_EPSILON = 0.01;
+const MAP_ZOOM_STEP = 0.1;
 
 function mapStyleFor(style: MapNodeStyle) {
   switch (style) {
@@ -334,7 +335,11 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
               applyingPropsRef.current = false;
               const zoom = Math.min(
                 22,
-                Math.max(0, map.getZoom() + (event.deltaY < 0 ? 0.5 : -0.5)),
+                Math.max(
+                  0,
+                  map.getZoom() +
+                    (event.deltaY < 0 ? MAP_ZOOM_STEP : -MAP_ZOOM_STEP),
+                ),
               );
               map.zoomTo(zoom, { duration: 0 });
               if (moveTimerRef.current !== null) {
