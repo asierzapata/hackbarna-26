@@ -29,6 +29,45 @@
 .kan-timeline > li[data-selected="true"]::before { background: var(--node-accent); }
 .kan-node [data-calendar-date][aria-current="date"] > span:first-child { text-decoration: underline; text-underline-offset: 3px; }
 
+.kan-calendar__grid { column-gap: 0; }
+.kan-calendar__day {
+  border-radius: 0.5rem;
+}
+.kan-calendar__day[data-has-event="true"] {
+  background: color-mix(in oklab, var(--calendar-event-color) 16%, var(--card));
+  background-clip: border-box;
+  color: var(--foreground);
+  border-color: transparent;
+}
+.kan-calendar__day[data-has-event="true"]:hover {
+  background: color-mix(in oklab, var(--calendar-event-color) 25%, var(--card));
+  color: var(--foreground);
+}
+.kan-calendar__day[data-has-event="true"][aria-pressed="true"] {
+  background: color-mix(in oklab, var(--calendar-event-color) 34%, var(--card));
+  box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--calendar-event-color) 52%, transparent);
+}
+.kan-calendar__day[aria-pressed="true"]:not([data-has-event="true"]) {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.kan-calendar__day[data-has-event="true"]:not([data-range-start="true"]) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.kan-calendar__day[data-has-event="true"]:not([data-range-end="true"]) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.kan-calendar__event-count {
+  color: color-mix(in oklab, var(--calendar-event-color) 82%, var(--foreground));
+}
+.kan-calendar__event {
+  border-color: color-mix(in oklab, var(--calendar-event-color) 34%, var(--border));
+  border-left: 3px solid var(--calendar-event-color);
+  background: color-mix(in oklab, var(--calendar-event-color) 7%, var(--card));
+}
+
 .kan-node {
   border-radius: 12px;
   padding-top: 0;

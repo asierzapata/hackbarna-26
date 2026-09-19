@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { RiArrowLeftSLine, RiArrowRightSLine } from "@remixicon/react";
 import { BaseBoxShapeUtil, HTMLContainer, stopEventPropagation } from "tldraw";
 
@@ -10,6 +11,13 @@ import { NodeCard } from "./NodeCard";
 import { calendarShapeProps, type CalendarShape } from "./types";
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const eventColors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"] as const;
+
+function eventColor(eventId: string) {
+  let hash = 0;
+  for (const character of eventId) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return eventColors[(hash >>> 0) % eventColors.length];
+}
 
 export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
   static override type = "kan-calendar" as const;
@@ -41,6 +49,8 @@ export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
     const { title, events, sourceNote, month, selectedDate } = shape.props;
     const today = todayDate();
     const selectedEvents = selectedDate ? eventsOnDate(events, selectedDate) : [];
+    const days = calendarDays(month);
+    const eventsByDay = days.map((date) => date ? eventsOnDate(events, date) : []);
     const previous = shiftMonth(month, -1);
     const next = shiftMonth(month, 1);
     const update = (props: Partial<CalendarShape["props"]>) => {
@@ -72,52 +82,81 @@ export class CalendarShapeUtil extends BaseBoxShapeUtil<CalendarShape> {
                   </Button>
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-1" role="group" aria-label={`Days in ${formatMonth(month)}`}>
+              <div className="kan-calendar__grid grid grid-cols-7 gap-y-1" role="group" aria-label={`Days in ${formatMonth(month)}`}>
                 {weekdays.map((day) => <span key={day} className="py-1 text-center text-xs text-muted-foreground">{day}</span>)}
-                {calendarDays(month).map((date, index) => {
+                {days.map((date, index) => {
                   if (!date) return <span key={`blank-${index}`} aria-hidden="true" />;
-                  const dayEvents = eventsOnDate(events, date);
+                  const dayEvents = eventsByDay[index];
+                  const primaryEvent = dayEvents[0];
+                  const previousEvents = index % 7 === 0 ? [] : eventsByDay[index - 1] ?? [];
+                  const nextEvents = index % 7 === 6 ? [] : eventsByDay[index + 1] ?? [];
+                  const continuesFromPrevious = Boolean(primaryEvent && previousEvents.some((event) => event.id === primaryEvent.id));
+                  const continuesToNext = Boolean(primaryEvent && nextEvents.some((event) => event.id === primaryEvent.id));
+                  const style = primaryEvent
+                    ? { "--calendar-event-color": eventColor(primaryEvent.id) } as CSSProperties
+                    : undefined;
                   return (
                     <Button
                       key={date}
-                      variant={date === selectedDate ? "default" : dayEvents.length ? "secondary" : "ghost"}
-                      className="h-11 min-w-0 flex-col gap-0 px-0"
+                      variant="ghost"
+                      className="kan-calendar__day h-11 min-w-0 flex-col gap-0 px-0"
                       data-calendar-date={date}
+                      data-has-event={dayEvents.length ? "true" : undefined}
+                      data-range-start={primaryEvent && !continuesFromPrevious ? "true" : undefined}
+                      data-range-end={primaryEvent && !continuesToNext ? "true" : undefined}
                       aria-label={`${formatDate(date)}, ${dayEvents.length} events`}
                       aria-pressed={date === selectedDate}
                       aria-current={date === today ? "date" : undefined}
+                      style={style}
                       onPointerDown={stopEventPropagation}
                       onClick={() => update({ selectedDate: date })}
                     >
                       <span>{Number(date.slice(-2))}</span>
-                      {dayEvents.length ? <span className="text-[10px]">{dayEvents.length} {dayEvents.length === 1 ? "event" : "events"}</span> : null}
+                      {dayEvents.length ? <span className="kan-calendar__event-count text-[10px]">{dayEvents.length} {dayEvents.length === 1 ? "event" : "events"}</span> : null}
                     </Button>
                   );
                 })}
               </div>
-              <Separator />
-              <section className="flex flex-col gap-3 pb-2" aria-label="Selected day events" aria-live="polite">
-                {selectedDate ? <h4 className="text-sm font-medium">{formatDate(selectedDate)}</h4> : null}
-                {selectedEvents.length ? (
-                  <ol className="flex flex-col gap-3">
-                    {selectedEvents.map((event) => (
-                      <li key={event.id} className="flex flex-col gap-1 border-l-2 border-primary pl-3" data-calendar-event={event.id}>
-                        <p className="break-words font-medium">{event.title}</p>
-                        <p className="text-xs text-muted-foreground">{eventDateLabel(event)}</p>
-                        {event.description ? <p className="whitespace-pre-wrap break-words text-sm">{event.description}</p> : null}
-                        {event.sourceNote ? <p className="break-words text-xs text-muted-foreground">Source: {event.sourceNote}</p> : null}
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
+              {selectedDate ? (
+                <>
+                  <Separator />
+                  <section className="flex flex-col gap-2 pb-1" aria-label="Selected day events" aria-live="polite">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-xs font-medium">{formatDate(selectedDate)}</h4>
+                      {selectedEvents.length ? <span className="text-[11px] text-muted-foreground">{selectedEvents.length} {selectedEvents.length === 1 ? "event" : "events"}</span> : null}
+                    </div>
+                    {selectedEvents.length ? (
+                      <ol className="flex flex-col gap-1.5">
+                        {selectedEvents.map((event) => (
+                          <li
+                            key={event.id}
+                            className="kan-calendar__event flex flex-col gap-0.5 rounded-md border bg-muted/30 px-2 py-1.5"
+                            data-calendar-event={event.id}
+                            style={{ "--calendar-event-color": eventColor(event.id) } as CSSProperties}
+                          >
+                            <p className="break-words font-medium">{event.title}</p>
+                            <p className="text-[11px] text-muted-foreground">{eventDateLabel(event)}</p>
+                            {event.description ? <p className="whitespace-pre-wrap break-words text-xs leading-snug">{event.description}</p> : null}
+                            {event.sourceNote ? <p className="break-words text-[11px] text-muted-foreground">Source: {event.sourceNote}</p> : null}
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No events on this day</p>
+                    )}
+                  </section>
+                </>
+              ) : events.length ? null : (
+                <>
+                  <Separator />
                   <Empty className="p-2">
                     <EmptyHeader>
-                      <EmptyTitle>{selectedDate ? "No events on this day" : events.length ? "Select a day" : "No events yet"}</EmptyTitle>
-                      <EmptyDescription>{selectedDate ? "Choose another date to explore." : "Select a date to inspect its events."}</EmptyDescription>
+                      <EmptyTitle>No events yet</EmptyTitle>
+                      <EmptyDescription>Add events to this calendar to see them here.</EmptyDescription>
                     </EmptyHeader>
                   </Empty>
-                )}
-              </section>
+                </>
+              )}
             </div>
           </ScrollArea>
         </NodeCard>
