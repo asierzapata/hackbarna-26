@@ -18,6 +18,9 @@ export function canvasThinkingTargets(
       candidates = [output.shapeId ?? near?.shapeId];
       break;
     }
+    case "addMermaidDiagram":
+      candidates = Array.isArray(output.shapeIds) ? output.shapeIds : [];
+      break;
     case "updateNode":
       candidates = [args.shapeId];
       break;

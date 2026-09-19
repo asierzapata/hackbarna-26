@@ -64,6 +64,7 @@ export interface ThreadPanelProps extends ThreadActions {
     ThreadComposerProps,
     "onSend"
     | "disabled"
+    | "agentReady"
     | "modelSelection"
     | "models"
     | "modelDisabled"

@@ -33,6 +33,10 @@ test("new nodes replace the placement reference and removed nodes clear focus", 
     ["shape:new"],
   );
   assert.deepEqual(
+    canvasThinkingTargets("addMermaidDiagram", {}, { shapeIds: ["shape:group", "shape:group"] }),
+    ["shape:group"],
+  );
+  assert.deepEqual(
     canvasThinkingTargets("removeNodes", { shapeIds: ["shape:a"] }),
     [],
   );

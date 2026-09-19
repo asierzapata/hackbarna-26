@@ -98,7 +98,7 @@ try {
   console.log("PASS real local Devin connected through the app");
 
   run(
-    `const slider = document.querySelector('[role=slider]'); slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true})); return true;`,
+    `const slider = document.querySelector('[data-slot=slider-thumb]'); if (slider) { slider.focus(); slider.dispatchEvent(new KeyboardEvent('keydown', {key:'Home', bubbles:true})); } return true;`,
   );
   drive("clickText", "Simulate conversation");
   await waitFor(
@@ -148,6 +148,18 @@ try {
   }
   for (const sponsor of [/vonage/i, /cognition/i, /nebius/i, /preply/i])
     assert.match(JSON.stringify(table.props.rows), sponsor);
+  assert.ok(
+    shapes.some(({ type }) => type === "group"),
+    "Mermaid example should create a grouped diagram",
+  );
+  assert.ok(
+    shapes.some(({ text }) => /HackBarna 26/i.test(text ?? "")),
+    "Mermaid example should create a labelled native shape",
+  );
+  assert.ok(
+    evaluate("window.__kan.tools.getCanvas().connections.length >= 5"),
+    "Mermaid example should create arrows",
+  );
   assert.equal(shapes.filter(({ type }) => type === "calendar").length, 1);
   assert.equal(shapes.filter(({ type }) => type === "map").length, 1);
   for (const shape of [calendar, map, table])
@@ -162,7 +174,7 @@ try {
   run("window.__kan.editor.zoomToFit(); return true;");
   await pause(500);
   console.log(
-    "PASS two calendar days, both map pins, four sponsors, provenance, no duplicate calendar/map, and no runtime errors",
+    "PASS two calendar days, both map pins, four sponsors, Mermaid boxes/arrows, provenance, no duplicate calendar/map, and no runtime errors",
   );
   console.log(
     JSON.stringify(

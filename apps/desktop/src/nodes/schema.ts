@@ -273,6 +273,11 @@ export const addNodeInput = z.object({
     .describe("Explicit page position; overrides near"),
   provenance: provenance.optional(),
 });
+export const addMermaidDiagramInput = z.object({
+  source: z.string().min(1).describe("Mermaid source for a native editable diagram"),
+  at: z.object({ x: z.number(), y: z.number() }).optional().describe("Top-left page position; defaults to the viewport center"),
+  provenance: provenance.optional(),
+});
 export const updateNodeInput = z.object({
   shapeId: z.string(),
   patch: nodePatch.describe("Typed partial draft and geometry for the node"),
@@ -304,6 +309,7 @@ export const getCanvasInput = z.object({
 });
 
 export type AddNodeInput = z.infer<typeof addNodeInput>;
+export type AddMermaidDiagramInput = z.infer<typeof addMermaidDiagramInput>;
 export type UpdateNodeInput = z.infer<typeof updateNodeInput>;
 export type RemoveNodesInput = z.infer<typeof removeNodesInput>;
 export type ConnectNodesInput = z.infer<typeof connectNodesInput>;
@@ -314,6 +320,7 @@ export type GetCanvasInput = z.infer<typeof getCanvasInput>;
 
 export const toolSchemas = {
   addNode: addNodeInput,
+  addMermaidDiagram: addMermaidDiagramInput,
   updateNode: updateNodeInput,
   removeNodes: removeNodesInput,
   connectNodes: connectNodesInput,

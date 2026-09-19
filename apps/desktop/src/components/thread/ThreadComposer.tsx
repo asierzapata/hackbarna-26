@@ -1,5 +1,6 @@
 import * as React from "react";
-import { RiCornerDownLeftLine } from "@remixicon/react";
+import { RiCornerDownLeftLine, RiSparkling2Line } from "@remixicon/react";
+import { explicitInvocation } from "@kan/protocol";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +27,8 @@ export interface ThreadComposerProps {
   disabled?: boolean;
   /** `files` remains part of the transport draft for compatibility; the composer no longer uploads files. */
   onSend?: (draft: { text: string; files: File[]; replyToEntryId?: string }) => void;
+  /** Whether asking Kan is possible at all — no agent connected, no button. */
+  agentReady?: boolean;
   models?: AiModel[];
   modelDisabled?: boolean;
   modelSelection?: AiModelSelection;
@@ -34,23 +37,35 @@ export interface ThreadComposerProps {
 
 export function ThreadComposer({
   anchors = [],
-  placeholder = "Message the room · @kan to ask Kan",
+  placeholder = "Message the room · Ask Kan (⌘↵) to bring in the assistant",
   replyTo,
   onClearReply,
   disabled,
   onSend,
+  agentReady = false,
   modelSelection,
   models,
   modelDisabled,
   onModelSelectionChange,
 }: ThreadComposerProps) {
   const [text, setText] = React.useState("");
-  useQaSource("composer", () => ({ text, anchors, disabled, modelSelection }));
+  useQaSource("composer", () => ({ text, anchors, disabled, agentReady, modelSelection }));
   const canSend = !disabled && text.trim().length > 0;
 
-  function send() {
+  /**
+   * Sends the draft, optionally as an explicit request to Kan.
+   *
+   * `@kan` is the one thing that wakes the assistant up, and a room full of
+   * people typing plain sentences has no way to discover that. Rather than
+   * teach the transports a second entry point, the button writes the prefix
+   * the user would have had to remember: one path in, still visible in the
+   * thread as the words that asked.
+   */
+  function send(explicit = false) {
     if (!canSend) return;
-    onSend?.({ text: text.trim(), files: [], replyToEntryId: replyTo?.id });
+    const trimmed = text.trim();
+    const body = explicit && !explicitInvocation(trimmed) ? `@kan ${trimmed}` : trimmed;
+    onSend?.({ text: body, files: [], replyToEntryId: replyTo?.id });
     onClearReply?.();
     setText("");
   }
@@ -87,13 +102,13 @@ export function ThreadComposer({
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            send();
+            send(event.metaKey || event.ctrlKey);
           }
         }}
       />
 
-      {modelSelection ? (
-        <InputGroupAddon align="block-end" className="justify-end">
+      <InputGroupAddon align="block-end" className="justify-between gap-2">
+        {modelSelection ? (
           <ModelSelectorKit
             models={models ?? []}
             disabled={modelDisabled}
@@ -102,8 +117,21 @@ export function ThreadComposer({
             className="min-w-0"
             aria-label="Choose chat model"
           />
-        </InputGroupAddon>
-      ) : null}
+        ) : (
+          <span />
+        )}
+        <span className="flex items-center gap-2">
+          {agentReady ? (
+            <Button size="sm" disabled={!canSend} onClick={() => send(true)}>
+              <RiSparkling2Line data-icon="inline-start" />
+              Ask Kan
+            </Button>
+          ) : null}
+          <Button variant="outline" size="sm" disabled={!canSend} onClick={() => send()}>
+            Send
+          </Button>
+        </span>
+      </InputGroupAddon>
     </InputGroup>
   );
 }

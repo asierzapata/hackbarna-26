@@ -11,16 +11,52 @@ export interface AssistantExecutor {
   run(mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal): Promise<AssistantResult>;
 }
 
-export interface AssistantControllerSnapshot {
-  preferences: AssistantPreferences;
-  paused: boolean;
-  running: boolean;
-}
-
 let activeExecutor = false;
 
 export function parseAssistantResult(raw: unknown): AssistantResult {
   return AssistantResultSchema.parse(raw);
+}
+
+/**
+ * Pulls the result object out of one structured agent turn.
+ *
+ * The policy prompt asks for a bare JSON object and nothing else, and the
+ * adapters mostly comply — but "mostly" is not a contract. A stray ```json
+ * fence or a polite sentence before the brace used to fail the whole run at
+ * `JSON.parse`, losing a lease and a real agent turn to a formatting habit.
+ *
+ * So: scan for the first balanced top-level object and parse that. Braces
+ * inside strings do not count, which is why this is a scanner and not a
+ * regex. Anything outside the object is ignored, and a turn that contains no
+ * object at all still fails — silently accepting prose would let an agent
+ * skip the contract entirely.
+ */
+export function extractStructuredJson(raw: string): unknown {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') { inString = true; continue; }
+    if (char === "{") { if (depth === 0) start = i; depth += 1; continue; }
+    if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(raw.slice(start, i + 1));
+    }
+  }
+  throw new Error("agent returned no JSON object");
+}
+
+/** `extractStructuredJson` plus the schema, which is always how it is used. */
+export function parseStructuredOutput(raw: string): AssistantResult {
+  return parseAssistantResult(extractStructuredJson(raw));
 }
 
 export interface LeaseExecutionArgs {
@@ -95,23 +131,4 @@ export async function runAssistantTurn(executor: AssistantExecutor, mode: "act" 
   } finally {
     activeExecutor = false;
   }
-}
-
-export function createAssistantController(initial: AssistantPreferences = { scope: "own", background: false }) {
-  let executor: AssistantExecutor | null = null;
-  let preferences = initial;
-  let paused = false;
-  const listeners = new Set<(snapshot: AssistantControllerSnapshot) => void>();
-  const notify = () => { const snapshot = { preferences, paused, running: activeExecutor }; for (const listener of listeners) listener(snapshot); };
-  return {
-    configureExecutor(next: AssistantExecutor, nextPreferences = preferences) { executor = next; preferences = nextPreferences; notify(); },
-    setPreferences(next: AssistantPreferences) { preferences = next; notify(); },
-    setPaused(next: boolean) { paused = next; notify(); },
-    subscribe(listener: (snapshot: AssistantControllerSnapshot) => void) { listeners.add(listener); notify(); return () => listeners.delete(listener); },
-    async run(mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) {
-      if (!executor) throw new Error("no assistant executor configured");
-      return runAssistantTurn(executor, mode, context, signal);
-    },
-    snapshot() { return { preferences, paused, running: activeExecutor }; },
-  };
 }

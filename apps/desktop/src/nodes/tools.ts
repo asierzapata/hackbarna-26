@@ -13,6 +13,7 @@ import type { Editor } from "tldraw";
 
 import { draftToShapePartial, placementByType, shapeToSummary } from "./draft";
 import {
+  addMermaidDiagramInput,
   addNodeInput,
   arrangeInput,
   connectNodesInput,
@@ -25,6 +26,7 @@ import {
   type RemoveNodesInput,
   type UpdateNodeInput,
 } from "./schema";
+import { stripMermaidFence } from "@/lib/mermaid";
 import {
   isKanShape,
   type ChartShape,
@@ -347,6 +349,35 @@ export function createCanvasTools(editor: Editor) {
       }
 
       return { shapeId: id };
+    },
+
+    async addMermaidDiagram(input: unknown) {
+      const parsed = addMermaidDiagramInput.parse(input);
+      const before = new Set(editor.getCurrentPageShapeIds());
+      const { createMermaidDiagram } = await import("@tldraw/mermaid");
+      await createMermaidDiagram(editor, stripMermaidFence(parsed.source), {
+        ...(parsed.at
+          ? { blueprintRender: { position: parsed.at, centerOnPosition: false } }
+          : {}),
+      });
+
+      const shapeIds = [...editor.getCurrentPageShapeIds()].filter((id) => !before.has(id));
+      if (!shapeIds.length) throw new Error("Mermaid diagram did not create any shapes");
+
+      if (parsed.provenance) {
+        const updates: TLShapePartial[] = shapeIds.flatMap((shapeId) => {
+          const shape = editor.getShape(shapeId);
+          return shape
+            ? [{ id: shape.id, type: shape.type, meta: { ...shape.meta, provenance: parsed.provenance } }]
+            : [];
+        });
+        if (updates.length) editor.run(() => editor.updateShapes(updates));
+      }
+
+      const pageId = editor.getCurrentPageId();
+      const topLevelIds = shapeIds.filter((shapeId) => editor.getShape(shapeId)?.parentId === pageId);
+      editor.setSelectedShapes(topLevelIds.length ? topLevelIds : shapeIds);
+      return { shapeIds };
     },
 
     updateNode(input: UpdateNodeInput) {

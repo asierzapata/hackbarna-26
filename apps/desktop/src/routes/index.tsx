@@ -8,10 +8,14 @@ import {
   RiFileCopyLine,
   RiTimeLine,
   RiWifiOffLine,
+  RiEditLine,
+  RiCheckLine,
+  RiCloseLine,
 } from "@remixicon/react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Empty,
@@ -26,9 +30,14 @@ import { getInstallationProfile } from "@/lib/installation-profile";
 import {
   listLocalCanvases,
   createOfflineCanvas,
+  renameCanvas,
   type CanvasCatalogEntry,
 } from "@/lib/canvas-repository";
-import { listServerRooms, type ServerRoomSummary } from "@/lib/api-client";
+import {
+  listServerRooms,
+  patchServerRoom,
+  type ServerRoomSummary,
+} from "@/lib/api-client";
 import { duplicateOnlineToOffline } from "@/lib/duplicate-canvas";
 
 export const Route = createFileRoute("/")({
@@ -44,6 +53,13 @@ interface UnifiedCanvasItem {
   roomCode?: string;
   lastActivity: string;
   isOwned?: boolean;
+}
+
+interface RenameTarget {
+  mode: "offline" | "online";
+  id: string;
+  localCanvasId: string;
+  roomId?: string;
 }
 
 function formatDate(iso: string): string {
@@ -80,6 +96,10 @@ function CatalogPage() {
   // Dialog states
   const [joinDialogOpen, setJoinDialogOpen] = React.useState(false);
   const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = React.useState<RenameTarget | null>(null);
+  const [renameDraft, setRenameDraft] = React.useState("");
+  const [renameError, setRenameError] = React.useState<string | null>(null);
+  const [isRenaming, setIsRenaming] = React.useState(false);
 
   const refreshCatalog = React.useCallback(async () => {
     const profile = await getInstallationProfile();
@@ -143,6 +163,76 @@ function CatalogPage() {
     }
   };
 
+  const beginRename = (target: RenameTarget, name: string) => {
+    if (isRenaming) return;
+    setRenameTarget(target);
+    setRenameDraft(name);
+    setRenameError(null);
+  };
+
+  const cancelRename = () => {
+    if (isRenaming) return;
+    setRenameTarget(null);
+    setRenameDraft("");
+    setRenameError(null);
+  };
+
+  const handleRename = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const target = renameTarget;
+    if (!target) return;
+
+    const trimmed = renameDraft.trim();
+    if (!trimmed) {
+      setRenameError("Canvas name cannot be empty");
+      return;
+    }
+
+    setIsRenaming(true);
+    setRenameError(null);
+    try {
+      if (target.mode === "offline") {
+        const updated = await renameCanvas(target.localCanvasId, trimmed);
+        setLocalCanvases((canvases) =>
+          canvases.map((canvas) => (canvas.id === updated.id ? updated : canvas)),
+        );
+      } else {
+        const result = await patchServerRoom(target.roomId ?? target.id, {
+          name: trimmed,
+        });
+        const updatedName = result.room.name;
+        const updatedRoomId = target.roomId ?? target.id;
+
+        setServerRooms((rooms) =>
+          rooms.map((room) =>
+            room.id === updatedRoomId
+              ? { ...room, name: updatedName, updatedAt: result.room.updatedAt }
+              : room,
+          ),
+        );
+
+        if (localCanvases.some((canvas) => canvas.id === target.localCanvasId)) {
+          const updated = await renameCanvas(target.localCanvasId, updatedName);
+          setLocalCanvases((canvases) =>
+            canvases.map((canvas) =>
+              canvas.id === updated.id ? updated : canvas,
+            ),
+          );
+        }
+      }
+
+      setRenameTarget(null);
+      setRenameDraft("");
+      setRenameError(null);
+    } catch (err) {
+      setRenameError(
+        err instanceof Error ? err.message : "Failed to rename canvas",
+      );
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
   // Split into Offline and Online items
   const offlineItems: CanvasCatalogEntry[] = React.useMemo(() => {
     return localCanvases.filter((c) => c.mode === "offline");
@@ -186,6 +276,59 @@ function CatalogPage() {
     arr.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
     return arr;
   }, [serverRooms, localCanvases]);
+
+  const isEditing = (mode: RenameTarget["mode"], id: string) =>
+    renameTarget?.mode === mode && renameTarget.id === id;
+
+  const renderRenameEditor = () => (
+    <form
+      className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
+      onSubmit={(event) => void handleRename(event)}
+    >
+      <Input
+        value={renameDraft}
+        onChange={(event) => setRenameDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            cancelRename();
+          }
+        }}
+        aria-label="Canvas name"
+        aria-invalid={Boolean(renameError)}
+        autoFocus
+        maxLength={120}
+        disabled={isRenaming}
+        className="h-6 w-0 min-w-0 flex-1 font-heading"
+      />
+      <Button
+        type="submit"
+        size="icon-xs"
+        variant="ghost"
+        aria-label="Save canvas name"
+        title="Save canvas name"
+        disabled={isRenaming}
+      >
+        <RiCheckLine />
+      </Button>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        aria-label="Cancel renaming"
+        title="Cancel renaming"
+        onClick={cancelRename}
+        disabled={isRenaming}
+      >
+        <RiCloseLine />
+      </Button>
+      {renameError ? (
+        <p className="basis-full text-[10px] text-destructive" role="alert">
+          {renameError}
+        </p>
+      ) : null}
+    </form>
+  );
 
   if (loading) {
     return (
@@ -288,13 +431,17 @@ function CatalogPage() {
                   className="flex items-center justify-between p-3 sm:px-4 hover:bg-muted/40 transition-colors gap-3"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
-                    <Link
-                      to="/canvas/$canvasId"
-                      params={{ canvasId: canvas.id }}
-                      className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
-                    >
-                      {canvas.name}
-                    </Link>
+                    {isEditing("offline", canvas.id) ? (
+                      renderRenameEditor()
+                    ) : (
+                      <Link
+                        to="/canvas/$canvasId"
+                        params={{ canvasId: canvas.id }}
+                        className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
+                      >
+                        {canvas.name}
+                      </Link>
+                    )}
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
                       <span className="flex items-center gap-1">
                         <RiTimeLine className="size-3" />
@@ -311,6 +458,26 @@ function CatalogPage() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        beginRename(
+                          {
+                            mode: "offline",
+                            id: canvas.id,
+                            localCanvasId: canvas.id,
+                          },
+                          canvas.name,
+                        )
+                      }
+                      className="text-xs gap-1"
+                      disabled={isRenaming}
+                    >
+                      <RiEditLine className="size-3" />
+                      Rename
+                    </Button>
+
                     <Button
                       size="xs"
                       variant="outline"
@@ -397,13 +564,17 @@ function CatalogPage() {
                   className="flex items-center justify-between p-3 sm:px-4 hover:bg-muted/40 transition-colors gap-3"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
-                    <Link
-                      to="/room/$roomId"
-                      params={{ roomId: room.id }}
-                      className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
-                    >
-                      {room.name}
-                    </Link>
+                    {isEditing("online", room.id) ? (
+                      renderRenameEditor()
+                    ) : (
+                      <Link
+                        to="/room/$roomId"
+                        params={{ roomId: room.id }}
+                        className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
+                      >
+                        {room.name}
+                      </Link>
+                    )}
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
                       <span className="flex items-center gap-1">
                         <RiTimeLine className="size-3" />
@@ -428,6 +599,27 @@ function CatalogPage() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() =>
+                        beginRename(
+                          {
+                            mode: "online",
+                            id: room.id,
+                            localCanvasId: room.localCanvasId,
+                            roomId: room.roomId,
+                          },
+                          room.name,
+                        )
+                      }
+                      className="text-xs gap-1"
+                      disabled={isRenaming}
+                    >
+                      <RiEditLine className="size-3" />
+                      Rename
+                    </Button>
+
                     <Button
                       size="xs"
                       variant="ghost"

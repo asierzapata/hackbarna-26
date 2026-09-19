@@ -110,6 +110,20 @@ export async function saveCanvasEntry(entry: CanvasCatalogEntry): Promise<Canvas
   });
 }
 
+export async function renameCanvas(id: string, name: string): Promise<CanvasCatalogEntry> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Canvas name cannot be empty");
+
+  const existing = await getCanvasEntry(id);
+  if (!existing) throw new Error(`Canvas ${id} not found in catalog`);
+
+  return saveCanvasEntry({
+    ...existing,
+    name: trimmed,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function createOfflineCanvas(params?: {
   id?: string;
   name?: string;

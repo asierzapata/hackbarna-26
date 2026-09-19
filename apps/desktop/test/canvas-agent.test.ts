@@ -8,8 +8,10 @@ import {
 } from "../src/lib/canvas-agent";
 import { hackathonConversation } from "../src/lib/conversation-script";
 
-test("MCP exposes the eight validated canvas tools with native geo, focus, and grouping schemas", () => {
-  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "groupNodes", "removeNodes", "updateNode"]);
+test("MCP exposes the validated canvas tools with Mermaid, native geo, focus, and grouping schemas", () => {
+  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addMermaidDiagram", "addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "groupNodes", "removeNodes", "updateNode"]);
+  const mermaid = canvasToolDefinitions.find(({ name }) => name === "addMermaidDiagram")!;
+  assert.match(JSON.stringify(mermaid.inputSchema), /source/);
   const add = canvasToolDefinitions.find(({ name }) => name === "addNode")!;
   assert.match(JSON.stringify(add.inputSchema), /calendar/);
   assert.match(JSON.stringify(add.inputSchema), /map/);
@@ -76,11 +78,11 @@ test("dispatch validates focusNodes before calling the canvas tool", () => {
   assert.equal(calls.length, 1);
 });
 
-test("conversation triggers request calendar, map and sponsors without duplicate decision turns", () => {
+test("conversation triggers request calendar, map, sponsors, and Mermaid without duplicate decision turns", () => {
   const actionable = hackathonConversation.lines.filter(shouldActOnLine);
   assert.deepEqual(
     actionable.map(({ trigger }) => trigger?.label),
-    ["node:calendar", "action:show-map", "node:sponsors"],
+    ["node:calendar", "action:show-map", "node:sponsors", "node:mermaid"],
   );
   const index = hackathonConversation.lines.indexOf(actionable[1]);
   const prompt = buildCanvasPrompt(
@@ -95,4 +97,8 @@ test("conversation triggers request calendar, map and sponsors without duplicate
   assert.match(prompt, /focusNodes/);
   assert.match(prompt, /native tldraw geo shapes/);
   assert.match(prompt, /groupNodes/);
+  const mermaidIndex = hackathonConversation.lines.indexOf(actionable[3]);
+  const mermaidPrompt = buildCanvasPrompt(actionable[3].text, hackathonConversation.lines.slice(0, mermaidIndex + 1));
+  assert.match(mermaidPrompt, /addMermaidDiagram/);
+  assert.match(mermaidPrompt, /editable shapes and returns their IDs/);
 });
