@@ -194,6 +194,9 @@ export const arrangeInput = z.object({
   layout: z.enum(["grid", "row", "column"]),
   gap: z.number().optional(),
 });
+export const groupNodesInput = z.object({
+  shapeIds: z.array(z.string()).min(2).describe("Existing canvas node IDs to place in one group"),
+});
 export const getCanvasInput = z.object({
   scope: z.enum(["summary", "selection", "viewport", "full"]).default("summary"),
   shapeIds: z.array(z.string()).optional(),
@@ -204,6 +207,7 @@ export type UpdateNodeInput = z.infer<typeof updateNodeInput>;
 export type RemoveNodesInput = z.infer<typeof removeNodesInput>;
 export type ConnectNodesInput = z.infer<typeof connectNodesInput>;
 export type ArrangeInput = z.infer<typeof arrangeInput>;
+export type GroupNodesInput = z.infer<typeof groupNodesInput>;
 export type GetCanvasInput = z.infer<typeof getCanvasInput>;
 
 export const toolSchemas = {
@@ -212,5 +216,6 @@ export const toolSchemas = {
   removeNodes: removeNodesInput,
   connectNodes: connectNodesInput,
   arrange: arrangeInput,
+  groupNodes: groupNodesInput,
   getCanvas: getCanvasInput,
 };

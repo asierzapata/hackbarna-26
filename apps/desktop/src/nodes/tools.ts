@@ -4,6 +4,7 @@ import {
   type Editor,
   type TLArrowBinding,
   type TLArrowShape,
+  type TLFrameShape,
   type TLGeoShape,
   type TLShape,
   type TLShapeId,
@@ -20,8 +21,10 @@ import {
   arrangeInput,
   connectNodesInput,
   getCanvasInput,
+  groupNodesInput,
   removeNodesInput,
   updateNodeInput,
+  type GroupNodesInput,
   type RemoveNodesInput,
   type UpdateNodeInput,
 } from "./schema";
@@ -52,6 +55,50 @@ function easeInOutQuart(t: number) {
     : 1 - Math.pow(-2 * t + 2, 4) / 2;
 }
 
+const GROUP_PADDING = 28;
+const GROUP_GAP = 20;
+
+type GroupLayoutItem = { id: TLShapeId; w: number; h: number };
+type GroupLayout = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  positions: { id: TLShapeId; x: number; y: number }[];
+};
+
+function layoutGroup(items: GroupLayoutItem[], origin: { x: number; y: number }): GroupLayout {
+  const columnCount = Math.ceil(Math.sqrt(items.length));
+  const rowCount = Math.ceil(items.length / columnCount);
+  const columnWidths = Array.from({ length: columnCount }, () => 0);
+  const rowHeights = Array.from({ length: rowCount }, () => 0);
+
+  items.forEach(({ w, h }, index) => {
+    const column = index % columnCount;
+    const row = Math.floor(index / columnCount);
+    columnWidths[column] = Math.max(columnWidths[column], Math.max(1, w));
+    rowHeights[row] = Math.max(rowHeights[row], Math.max(1, h));
+  });
+
+  const xOffsets = columnWidths.map((_, index) =>
+    columnWidths.slice(0, index).reduce((sum, width) => sum + width + GROUP_GAP, 0),
+  );
+  const yOffsets = rowHeights.map((_, index) =>
+    rowHeights.slice(0, index).reduce((sum, height) => sum + height + GROUP_GAP, 0),
+  );
+
+  return {
+    ...origin,
+    w: GROUP_PADDING * 2 + columnWidths.reduce((sum, width) => sum + width, 0) + GROUP_GAP * (columnCount - 1),
+    h: GROUP_PADDING * 2 + rowHeights.reduce((sum, height) => sum + height, 0) + GROUP_GAP * (rowCount - 1),
+    positions: items.map(({ id }, index) => ({
+      id,
+      x: GROUP_PADDING + xOffsets[index % columnCount],
+      y: GROUP_PADDING + yOffsets[Math.floor(index / columnCount)],
+    })),
+  };
+}
+
 function textFromRichText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   if ("text" in value && typeof value.text === "string") return value.text;
@@ -67,14 +114,27 @@ function summarizeShape(editor: Editor, shape: TLShape, full = false) {
     return full ? { ...summary, props: shape.props, meta: shape.meta } : summary;
   }
   const bounds = editor.getShapePageBounds(shape);
-  const text = editor.getShapeUtil(shape).getText(shape);
-  return {
+  const common = {
     id: shape.id,
     type: shape.type,
     x: bounds?.x ?? shape.x,
     y: bounds?.y ?? shape.y,
     w: bounds?.w ?? 0,
     h: bounds?.h ?? 0,
+  };
+  if (shape.type === "frame") {
+    const frame = shape as TLFrameShape;
+    return {
+      ...common,
+      type: "group",
+      title: frame.props.name || "Group",
+      children: editor.getSortedChildIdsForParent(frame.id),
+      ...(full ? { props: frame.props, meta: frame.meta } : {}),
+    };
+  }
+  const text = editor.getShapeUtil(shape).getText(shape);
+  return {
+    ...common,
     ...(text ? { text } : {}),
   };
 }
@@ -97,6 +157,112 @@ function getConnections(editor: Editor) {
         },
       ];
     });
+}
+
+export function isGroupedFrame(shape: TLShape): shape is TLFrameShape {
+  return shape.type === "frame" && (shape.meta.kanGroup === true || shape.props.name === "Group");
+}
+
+export function ungroupCanvasFrame(editor: Editor, frameId: TLShapeId) {
+  if (editor.getIsReadonly()) throw new Error("Canvas is read-only");
+
+  const frame = editor.getShape(frameId);
+  if (!frame || !isGroupedFrame(frame)) {
+    throw new Error(`Grouped frame not found: ${frameId}`);
+  }
+  if (editor.isShapeOrAncestorLocked(frame)) {
+    throw new Error("Cannot ungroup a locked group");
+  }
+
+  const childIds = editor.getSortedChildIdsForParent(frame.id);
+  editor.markHistoryStoppingPoint("ungroup nodes");
+  editor.run(() => {
+    editor.reparentShapes(childIds, frame.parentId, frame.index);
+    editor.deleteShapes([frame.id]);
+    editor.select(...childIds);
+  });
+
+  return { shapeIds: childIds };
+}
+
+function groupShapes(editor: Editor, shapeIds: string[]) {
+  if (editor.getIsReadonly()) throw new Error("Canvas is read-only");
+
+  const ids = [...new Set(shapeIds)] as TLShapeId[];
+  if (ids.length < 2) throw new Error("At least two shapes are required to create a group");
+
+  const currentPageId = editor.getCurrentPageId();
+  const shapes = ids.map((id) => {
+    const shape = editor.getShape(id);
+    if (!shape) throw new Error(`Shape not found: ${id}`);
+    if (editor.getAncestorPageId(shape) !== currentPageId) {
+      throw new Error(`Shape is not on the current page: ${id}`);
+    }
+    const bounds = editor.getShapePageBounds(shape);
+    if (!bounds) throw new Error(`Unable to read bounds: ${id}`);
+    return { shape, bounds };
+  });
+  const groupableShapes = shapes.filter(({ shape }) => !editor.isShapeOrAncestorLocked(shape));
+  if (groupableShapes.length < 2) {
+    throw new Error("At least two unlocked shapes are required to create a group");
+  }
+  const groupableIds = groupableShapes.map(({ shape }) => shape.id);
+
+  const minX = Math.min(...groupableShapes.map(({ bounds }) => bounds.x));
+  const minY = Math.min(...groupableShapes.map(({ bounds }) => bounds.y));
+  const maxX = Math.max(...groupableShapes.map(({ bounds }) => bounds.x + bounds.w));
+  const maxY = Math.max(...groupableShapes.map(({ bounds }) => bounds.y + bounds.h));
+  const origin = { x: minX - GROUP_PADDING, y: minY - GROUP_PADDING };
+  const initialSize = {
+    w: Math.max(1, maxX - minX + GROUP_PADDING * 2),
+    h: Math.max(1, maxY - minY + GROUP_PADDING * 2),
+  };
+  const layout = layoutGroup(
+    groupableShapes.map(({ shape, bounds }) => ({ id: shape.id, w: bounds.w, h: bounds.h })),
+    origin,
+  );
+  const groupId = createShapeId();
+
+  editor.markHistoryStoppingPoint("group nodes");
+  editor.run(() => {
+    editor.createShape<TLFrameShape>({
+      id: groupId,
+      type: "frame",
+      parentId: currentPageId,
+      x: origin.x,
+      y: origin.y,
+      meta: { kanGroup: true },
+      props: {
+        ...initialSize,
+        name: "Group",
+        color: "black",
+      },
+    });
+    editor.reparentShapes(groupableIds, groupId);
+  });
+
+  editor.animateShapes(
+    [
+      {
+        id: groupId,
+        type: "frame",
+        props: { w: layout.w, h: layout.h },
+      },
+      ...layout.positions.map(({ id, x, y }) => {
+        const shape = editor.getShape(id);
+        return shape ? { id, type: shape.type, x, y } : null;
+      }),
+    ],
+    {
+      animation: {
+        duration: editor.options.animationMediumMs * 2,
+        easing: easeInOutQuart,
+      },
+    },
+  );
+  editor.select(groupId);
+
+  return { shapeId: groupId, memberShapeIds: groupableIds };
 }
 
 export function createCanvasTools(editor: Editor) {
@@ -431,6 +597,11 @@ export function createCanvasTools(editor: Editor) {
         ]);
       });
       return { shapeId: id };
+    },
+
+    groupNodes(input: GroupNodesInput) {
+      const parsed = groupNodesInput.parse(input);
+      return groupShapes(editor, parsed.shapeIds);
     },
 
     arrange(input: unknown) {

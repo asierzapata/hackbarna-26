@@ -35,6 +35,7 @@ function shapeLabel(editor: Editor, id: TLShapeId): string {
       ? shape.props.name || shape.props.domain
       : shape.props.title || id;
   }
+  if (shape?.type === "frame") return shape.props.name || "Group";
   if (shape?.type !== "kan-node") return id;
   const draft = (shape.props as { draft?: { type: string; title?: string; label?: string } })
     .draft;
