@@ -125,7 +125,10 @@ function attachEventsSocket(engine: Engine, roomId: string, userId: string, sinc
       ready: s.ready,
       agentId: s.agentId,
       busy: s.busy,
+      scope: s.scope,
+      background: s.background,
     })),
+
     triggers: engine.listTriggers(roomId),
   });
   ws.on("message", (data) => {
@@ -143,7 +146,7 @@ function attachEventsSocket(engine: Engine, roomId: string, userId: string, sinc
       return;
     }
     if (msg.data.type === "executor.ready") {
-      engine.setExecutorReady(roomId, session.sessionId, msg.data.ready, msg.data.agentId);
+      engine.setExecutorReady(roomId, session.sessionId, msg.data.ready, msg.data.agentId, msg.data.scope, msg.data.background);
       engine.tick();
     } else {
       engine.heartbeatSession(roomId, session.sessionId);

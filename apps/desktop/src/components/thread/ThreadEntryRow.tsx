@@ -4,6 +4,8 @@ import type { ThreadEntry } from "@/lib/thread";
 
 import { AgentEntryCard } from "./AgentEntryCard";
 import { SuggestionCard } from "./SuggestionCard";
+import { TriggerEntryCard } from "./TriggerEntryCard";
+import { OfferCard } from "./OfferCard";
 import { SystemEntryRow } from "./SystemEntryRow";
 import { UserMessageEntry } from "./UserMessageEntry";
 
@@ -30,6 +32,8 @@ export const defaultRenderers = {
   message: UserMessageEntry,
   agent: AgentEntryCard,
   suggestion: SuggestionCard,
+  trigger: TriggerEntryCard,
+  offer: OfferCard,
   system: SystemEntryRow,
   // `transcript` has no entry here: consecutive transcript lines are folded
   // into a TranscriptRun by buildThreadRows and never rendered standalone.

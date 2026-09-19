@@ -33,16 +33,16 @@
   --destructive: oklch(0.577 0.245 27.325);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.55 0.20 264);
-  --chart-2: oklch(0.70 0.15 75);
+  --chart-1: oklch(0.55 0.2 264);
+  --chart-2: oklch(0.7 0.15 75);
   --chart-3: oklch(0.62 0.15 160);
-  --chart-4: oklch(0.62 0.20 20);
+  --chart-4: oklch(0.62 0.2 20);
   --chart-5: oklch(0.58 0.18 305);
-  --node-markdown: oklch(0.55 0.10 75);
+  --node-markdown: oklch(0.55 0.1 75);
   --node-chart: oklch(0.52 0.15 260);
-  --node-table: oklch(0.50 0.09 190);
+  --node-table: oklch(0.5 0.09 190);
   --node-image: oklch(0.54 0.13 305);
-  --node-map: oklch(0.50 0.10 150);
+  --node-map: oklch(0.5 0.1 150);
   --node-logo: oklch(0.55 0.12 15);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
@@ -141,7 +141,9 @@ body,
   overflow: hidden;
   border-radius: 12px;
   background: rgba(164, 204, 239, 0.045);
-  box-shadow: inset 0 0 0 1px rgba(146, 191, 230, 0.22), 0 0 14px rgba(146, 191, 230, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(146, 191, 230, 0.22),
+    0 0 14px rgba(146, 191, 230, 0.08);
 }
 
 .kan-toolbar {
@@ -206,16 +208,16 @@ body,
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.65 0.20 264);
+  --chart-1: oklch(0.65 0.2 264);
   --chart-2: oklch(0.78 0.15 75);
   --chart-3: oklch(0.72 0.15 160);
-  --chart-4: oklch(0.72 0.20 20);
+  --chart-4: oklch(0.72 0.2 20);
   --chart-5: oklch(0.68 0.18 305);
-  --node-markdown: oklch(0.78 0.10 75);
+  --node-markdown: oklch(0.78 0.1 75);
   --node-chart: oklch(0.76 0.12 260);
   --node-table: oklch(0.76 0.09 190);
   --node-image: oklch(0.78 0.12 305);
-  --node-map: oklch(0.76 0.10 150);
+  --node-map: oklch(0.76 0.1 150);
   --node-logo: oklch(0.78 0.11 15);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
@@ -235,9 +237,9 @@ body,
 }
 
 @theme inline {
-  --font-sans: 'Inter Variable', sans-serif;
-  --font-heading: 'JetBrains Mono Variable', monospace;
-  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+  --font-sans: "Inter Variable", sans-serif;
+  --font-heading: "JetBrains Mono Variable", monospace;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
   --color-agent: var(--agent);
   --color-agent-foreground: var(--agent-foreground);
   --color-agent-subtle: var(--agent-subtle);

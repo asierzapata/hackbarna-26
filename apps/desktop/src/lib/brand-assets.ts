@@ -25,5 +25,8 @@ export function faviconImageUrl(domain: string) {
 }
 
 export function brandInitials(name: string) {
-  return name.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
+  return name
+    .replace(/[^a-z0-9]/gi, "")
+    .slice(0, 2)
+    .toUpperCase();
 }

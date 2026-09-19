@@ -13,7 +13,7 @@ export interface Classifier {
   decide(state: ClassificationState): Promise<Decision>;
 }
 
-const INTENTS: Intent[] = ["answer", "capture", "update", "lookup", "none"];
+const INTENTS: Intent[] = ["answer", "capture", "update", "lookup", "evidence", "align", "none"];
 
 function checkProbability(v: unknown): number {
   if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) {

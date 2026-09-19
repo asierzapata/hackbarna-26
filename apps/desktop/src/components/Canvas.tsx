@@ -46,23 +46,58 @@ const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
 const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils];
 
-const primaryTools = ["select", "hand", "draw", "eraser", "arrow", "text", "note"];
+const primaryTools = [
+  "select",
+  "hand",
+  "draw",
+  "eraser",
+  "arrow",
+  "text",
+  "note",
+];
 const extraTools = [
-  "rectangle", "ellipse", "triangle", "diamond", "hexagon", "oval", "rhombus", "star",
-  "cloud", "heart", "x-box", "check-box", "arrow-left", "arrow-up", "arrow-down",
-  "arrow-right", "line", "highlight", "laser", "frame",
+  "rectangle",
+  "ellipse",
+  "triangle",
+  "diamond",
+  "hexagon",
+  "oval",
+  "rhombus",
+  "star",
+  "cloud",
+  "heart",
+  "x-box",
+  "check-box",
+  "arrow-left",
+  "arrow-up",
+  "arrow-down",
+  "arrow-right",
+  "line",
+  "highlight",
+  "laser",
+  "frame",
 ];
 
 function CanvasToolbar() {
   const editor = useEditor();
-  const readonly = useValue("readonly", () => editor.getInstanceState().isReadonly, [editor]);
+  const readonly = useValue(
+    "readonly",
+    () => editor.getInstanceState().isReadonly,
+    [editor],
+  );
   if (readonly) return null;
 
   return (
     <div className="tlui-main-toolbar tlui-main-toolbar--horizontal">
-      <TldrawUiToolbar label="Canvas tools" className="tlui-main-toolbar__tools kan-toolbar" tooltipSide="top">
+      <TldrawUiToolbar
+        label="Canvas tools"
+        className="tlui-main-toolbar__tools kan-toolbar"
+        tooltipSide="top"
+      >
         <TldrawUiMenuContextProvider type="toolbar" sourceId="toolbar">
-          {primaryTools.map((tool) => <ToolbarItem key={tool} tool={tool} />)}
+          {primaryTools.map((tool) => (
+            <ToolbarItem key={tool} tool={tool} />
+          ))}
         </TldrawUiMenuContextProvider>
         <TldrawUiPopover id="kan-toolbar-color">
           <TldrawUiPopoverTrigger>
@@ -81,9 +116,15 @@ function CanvasToolbar() {
             </TldrawUiToolbarButton>
           </TldrawUiPopoverTrigger>
           <TldrawUiPopoverContent side="top" align="end" collisionPadding={8}>
-            <TldrawUiToolbar label="More canvas tools" orientation="grid" className="kan-toolbar__overflow">
+            <TldrawUiToolbar
+              label="More canvas tools"
+              orientation="grid"
+              className="kan-toolbar__overflow"
+            >
               <TldrawUiMenuContextProvider type="toolbar" sourceId="toolbar">
-                {extraTools.map((tool) => <ToolbarItem key={tool} tool={tool} />)}
+                {extraTools.map((tool) => (
+                  <ToolbarItem key={tool} tool={tool} />
+                ))}
               </TldrawUiMenuContextProvider>
             </TldrawUiToolbar>
           </TldrawUiPopoverContent>
@@ -139,8 +180,18 @@ type KanDevWindow = Window & {
   __kan?: { editor: Editor; tools: CanvasTools };
 };
 
-export function Canvas({ roomId, online = false }: { roomId: string; online?: boolean }) {
-  return online ? <OnlineCanvas roomId={roomId} /> : <OfflineCanvas roomId={roomId} />;
+export function Canvas({
+  roomId,
+  online = false,
+}: {
+  roomId: string;
+  online?: boolean;
+}) {
+  return online ? (
+    <OnlineCanvas roomId={roomId} />
+  ) : (
+    <OfflineCanvas roomId={roomId} />
+  );
 }
 
 function OfflineCanvas({ roomId }: { roomId: string }) {
@@ -171,7 +222,7 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
         }
       };
     },
-    [roomId, setEditor]
+    [roomId, setEditor],
   );
 
   return (
@@ -198,7 +249,10 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
 const resolvedAssets = new Map<string, Promise<string>>();
 const onlineAssetStore: TLAssetStore = {
   async upload(_asset, file) {
-    const uploaded = await uploadServerAsset(file, file.type || "application/octet-stream");
+    const uploaded = await uploadServerAsset(
+      file,
+      file.type || "application/octet-stream",
+    );
     return { src: `/assets/${uploaded.id}` };
   },
   resolve(asset) {
@@ -208,7 +262,9 @@ const onlineAssetStore: TLAssetStore = {
     if (!match) return src;
     let pending = resolvedAssets.get(match[1]);
     if (!pending) {
-      pending = fetchServerAsset(match[1]).then((blob) => URL.createObjectURL(blob));
+      pending = fetchServerAsset(match[1]).then((blob) =>
+        URL.createObjectURL(blob),
+      );
       resolvedAssets.set(match[1], pending);
     }
     return pending;
@@ -228,7 +284,10 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
     uri: getSyncUri,
   });
 
-  const onMount = React.useCallback((editor: Editor) => setEditor(editor), [setEditor]);
+  const onMount = React.useCallback(
+    (editor: Editor) => setEditor(editor),
+    [setEditor],
+  );
   React.useEffect(() => () => setEditor(null), [setEditor]);
 
   return (

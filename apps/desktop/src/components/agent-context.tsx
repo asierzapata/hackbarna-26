@@ -14,6 +14,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
+import { AssistantResultSchema, buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
 import { useQaSource } from "@/lib/qa-source";
 
 /** Providers, keyed the way the Rust side deserializes them. */
@@ -96,6 +97,7 @@ interface AgentApi {
   signOut: () => Promise<void>;
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
+  runStructured: (mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) => Promise<AssistantResult>;
   busy: boolean;
   thinkingShapeIds: string[];
   cancel: () => Promise<void>;
@@ -276,6 +278,41 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         if (turnId.current === id) {
           turnId.current = null;
           handlers.current = null;
+          setThinkingShapeIds([]);
+          setBusy(false);
+        }
+      }
+    },
+    runStructured: async (mode, context, signal) => {
+      if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
+      if (turnId.current) throw new Error("An agent turn is already running");
+      const id = crypto.randomUUID();
+      turnId.current = id;
+      setThinkingShapeIds([]);
+      setBusy(true);
+      let abortHandler: (() => void) | undefined;
+      try {
+        await listenersReady.current;
+        if (signal.aborted || turnId.current !== id) throw new DOMException("assistant turn cancelled", "AbortError");
+        const abortPromise = new Promise<never>((_, reject) => {
+          abortHandler = () => {
+            void invoke("agent_cancel", { turnId: id }).catch(() => {});
+            reject(new DOMException("assistant turn cancelled", "AbortError"));
+          };
+          signal.addEventListener("abort", abortHandler, { once: true });
+        });
+        const invokePromise = invoke<string>("agent_prompt_structured", { prompt: buildAssistantPrompt(mode, context), turnId: id });
+        const raw = await Promise.race([invokePromise, abortPromise]);
+        if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
+        let value: unknown;
+        try { value = JSON.parse(raw); } catch { throw new Error("agent returned non-JSON structured output"); }
+        const result = AssistantResultSchema.parse(value);
+        if ((mode === "context" || mode === "propose") && result.kind === "act") throw new Error("contextual assistant turns cannot act");
+        return result;
+      } finally {
+        if (abortHandler) signal.removeEventListener("abort", abortHandler);
+        if (turnId.current === id) {
+          turnId.current = null;
           setThinkingShapeIds([]);
           setBusy(false);
         }

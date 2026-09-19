@@ -18,7 +18,10 @@ beforeEach(() => {
 });
 
 test("canvas catalog lifecycle and ordering", async (t) => {
-  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-19T12:00:00Z") });
+  t.mock.timers.enable({
+    apis: ["Date"],
+    now: new Date("2026-09-19T12:00:00Z"),
+  });
   clearMockIndexedDB();
 
   const c1 = await createOfflineCanvas({ name: "Canvas 1" });

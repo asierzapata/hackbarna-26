@@ -228,7 +228,7 @@ test("lease expiry marks run failed, stale mutations denied, no auto-replay, exp
   ctx.clock.advance(31_000);
   ctx.server.engine.tick();
   let t = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "failed");
+  assert.equal(t.status, "expired");
 
   // stale mutation denied
   const stale = await api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, {
@@ -252,84 +252,33 @@ test("lease expiry marks run failed, stale mutations denied, no auto-replay, exp
   await ctx.cleanup();
 });
 
-test("propose mode: cannot mutate, suggestion flow with single accept", async () => {
+test("context mode: mutation denied, structured draft approval is atomic and opposite resolution conflicts", async () => {
   const ctx = await setup();
-  ctx.classifier.next = {
-    addressedProbability: 0.1,
-    worthCapturingProbability: 0.95,
-    intent: "capture",
-    intentProbability: 0.8,
-    relatedShapeId: null,
-    needsExternalDataProbability: 0,
-    captureScore: 3,
-  };
   const u1 = await registerUser(ctx.base, "p1");
   const u2 = await registerUser(ctx.base, "p2");
   const room = await createRoom(u1, ctx.base);
   await api(u2, ctx.base, "/rooms/join", { method: "POST", body: JSON.stringify({ code: room.code }) });
-  await api(u1, ctx.base, `/rooms/${room.id}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ id: randomUUID(), text: "decision: use sqlite" }),
-  });
+  ctx.classifier.next = { addressedProbability: 0.1, worthCapturingProbability: 0.95, intent: "capture", intentProbability: 0.8, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 3 };
+  await api(u1, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "decision: use sqlite" }) });
   await ctx.server.engine.classifierIdle(room.id);
   const trig = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(trig.mode, "propose");
-
-  const ev = new EventsClient(ctx.server.port(), room.id, await ticket(u1, ctx.base, room.id, "events"));
-  await ev.ready;
-  ev.executorReady();
-  ctx.server.engine.tick();
-  const claim = await api(u1, ctx.base, `/rooms/${room.id}/triggers/${trig.id}/claim`, {
-    method: "POST",
-    body: JSON.stringify({ sessionId: ev.sessionId }),
-  });
-  assert.equal(claim.status, 200);
-  const runAuth = { authorization: `Bearer ${claim.body.lease.leaseToken}` };
-
-  // propose-mode mutate forbidden
-  const mut = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/mutate`, {
-    method: "POST",
-    headers: runAuth,
-    body: JSON.stringify({ id: randomUUID(), operations: [{ type: "add", draft: { type: "concept", label: "n" } }] }),
-  });
-  assert.equal(mut.status, 403);
-
-  // suggestion created
-  const sug = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/suggestions`, {
-    method: "POST",
-    headers: runAuth,
-    body: JSON.stringify({ id: randomUUID(), draft: { type: "decision", title: "Use sqlite", bullets: ["a", "b"] } }),
-  });
-  assert.equal(sug.status, 200);
-  const sugEntry = sug.body.entry;
-  assert.equal(sugEntry.kind, "suggestion");
-
-  // concurrent accepts: exactly one node created
-  const [r1, r2] = await Promise.all([
-    api(u1, ctx.base, `/rooms/${room.id}/suggestions/${sugEntry.id}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ resolution: "accepted" }),
-    }),
-    api(u2, ctx.base, `/rooms/${room.id}/suggestions/${sugEntry.id}/resolve`, {
-      method: "POST",
-      body: JSON.stringify({ resolution: "accepted" }),
-    }),
-  ]);
-  assert.ok(r1.status === 200 && r2.status === 200); // same resolution is idempotent
-  assert.equal(r1.body.shapeId, r2.body.shapeId);
-  const canvas = await api(u1, ctx.base, `/rooms/${room.id}/canvas`);
-  const nodes = canvas.body.records.filter((r: any) => r.type === "kan-node");
-  assert.equal(nodes.length, 1);
-  assert.equal(nodes[0].meta.provenance.acceptedBy === u1.id || nodes[0].meta.provenance.acceptedBy === u2.id, true);
-
-  // opposite resolution now conflicts
-  const opp = await api(u2, ctx.base, `/rooms/${room.id}/suggestions/${sugEntry.id}/resolve`, {
-    method: "POST",
-    body: JSON.stringify({ resolution: "dismissed" }),
-  });
-  assert.equal(opp.status, 409);
-  ev.close();
-  await ctx.cleanup();
+  assert.equal(trig.mode, "context");
+  const ev = new EventsClient(ctx.server.port(), room.id, await ticket(u1, ctx.base, room.id, "events")); await ev.ready; ev.executorReady(); ctx.server.engine.tick();
+  const claim = await api(u1, ctx.base, `/rooms/${room.id}/triggers/${trig.id}/claim`, { method: "POST", body: JSON.stringify({ sessionId: ev.sessionId }) });
+  assert.equal(claim.status, 200, JSON.stringify(claim.body));
+  const auth = { authorization: `Bearer ${claim.body.lease.leaseToken}` };
+  const denied = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/mutate`, { method: "POST", headers: auth, body: JSON.stringify({ id: randomUUID(), operations: [{ type: "add", draft: { type: "concept", label: "no" } }] }) });
+  assert.equal(denied.status, 403);
+  const context = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/context`, { headers: auth });
+  const completed = await api(null, ctx.base, `/rooms/${room.id}/runs/${claim.body.lease.runId}/complete`, { method: "POST", headers: auth, body: JSON.stringify({ id: randomUUID(), revision: context.body.revision, result: { kind: "draft", text: "Capture the decision", sources: [{ kind: "entry", id: trig.causeEntryIds[0] }], draft: { type: "decision", title: "Use sqlite", bullets: ["a", "b"] } } }) });
+  assert.equal(completed.status, 200, JSON.stringify(completed.body));
+  const suggestion = completed.body.outcomeEntry;
+  const first = await api(u1, ctx.base, `/rooms/${room.id}/suggestions/${suggestion.id}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "accepted" }) });
+  const second = await api(u2, ctx.base, `/rooms/${room.id}/suggestions/${suggestion.id}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "accepted" }) });
+  assert.equal(first.status, 200); assert.equal(second.status, 200); assert.equal(first.body.shapeId, second.body.shapeId);
+  const canvas = await api(u1, ctx.base, `/rooms/${room.id}/canvas`); assert.equal(canvas.body.records.filter((r: any) => r.type === "kan-node").length, 1);
+  const opposite = await api(u2, ctx.base, `/rooms/${room.id}/suggestions/${suggestion.id}/resolve`, { method: "POST", body: JSON.stringify({ resolution: "dismissed" }) }); assert.equal(opposite.status, 409);
+  ev.close(); await ctx.cleanup();
 });
 
 test("data/query requires a live lease and calls demo data verbatim", async () => {

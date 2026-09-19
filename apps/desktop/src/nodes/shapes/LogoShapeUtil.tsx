@@ -46,16 +46,17 @@ export class LogoShapeUtil extends BaseBoxShapeUtil<LogoShape> {
 
   component(shape: LogoShape) {
     const brandfetchUrl = brandfetchImageUrl(shape.props.domain);
-    const [source, setSource] = React.useState<"brandfetch" | "favicon" | "initials">(
-      brandfetchUrl ? "brandfetch" : "favicon",
-    );
+    const [source, setSource] = React.useState<
+      "brandfetch" | "favicon" | "initials"
+    >(brandfetchUrl ? "brandfetch" : "favicon");
 
     React.useEffect(() => {
       setSource(brandfetchUrl ? "brandfetch" : "favicon");
     }, [brandfetchUrl, shape.props.domain]);
 
     const faviconUrl = faviconImageUrl(shape.props.domain);
-    const imageUrl = source === "brandfetch" ? brandfetchUrl ?? faviconUrl : faviconUrl;
+    const imageUrl =
+      source === "brandfetch" ? (brandfetchUrl ?? faviconUrl) : faviconUrl;
     const displayName = shape.props.name || shape.props.domain;
 
     return (

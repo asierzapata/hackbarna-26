@@ -12,6 +12,8 @@ services:
       KAN_ALLOWED_ORIGINS: "tauri://localhost,http://tauri.localhost,http://localhost:1420"
       AI_GATEWAY_API_KEY: ${AI_GATEWAY_API_KEY:-}
       VONAGE_APPLICATION_ID: ${VONAGE_APPLICATION_ID:-}
+      # Base64 of the PEM. The raw key is multi-line and would be mangled by
+      # the env-var field it is pasted into; `normalizePrivateKey` decodes it.
       VONAGE_PRIVATE_KEY: ${VONAGE_PRIVATE_KEY:-}
     volumes:
       - kan-data:/data

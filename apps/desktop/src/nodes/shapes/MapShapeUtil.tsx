@@ -77,12 +77,15 @@ function createBrandMarkerElement(markerData: MapMarker, selected: boolean) {
   image.draggable = false;
 
   const fallback = document.createElement("span");
-  fallback.className = "font-heading text-[10px] font-semibold text-muted-foreground";
+  fallback.className =
+    "font-heading text-[10px] font-semibold text-muted-foreground";
   fallback.textContent = brandInitials(brand.name);
 
   const brandfetchUrl = brandfetchImageUrl(brand.domain);
   const faviconUrl = faviconImageUrl(brand.domain);
-  let source: "brandfetch" | "favicon" = brandfetchUrl ? "brandfetch" : "favicon";
+  let source: "brandfetch" | "favicon" = brandfetchUrl
+    ? "brandfetch"
+    : "favicon";
   image.addEventListener("error", () => {
     if (source === "brandfetch") {
       source = "favicon";
@@ -207,7 +210,8 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
           applyingPropsRef.current = false;
           return;
         }
-        if (moveTimerRef.current !== null) window.clearTimeout(moveTimerRef.current);
+        if (moveTimerRef.current !== null)
+          window.clearTimeout(moveTimerRef.current);
         moveTimerRef.current = window.setTimeout(() => {
           const currentShape = latestShapeRef.current;
           const center = map.getCenter();
@@ -238,7 +242,8 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
       resizeObserverRef.current = observer;
 
       return () => {
-        if (moveTimerRef.current !== null) window.clearTimeout(moveTimerRef.current);
+        if (moveTimerRef.current !== null)
+          window.clearTimeout(moveTimerRef.current);
         observer.disconnect();
         resizeObserverRef.current = null;
         markerRefs.current.forEach((marker) => marker.remove());
@@ -258,7 +263,8 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
         !map ||
         !hasMaptilerKey ||
         appliedStyleRef.current === shape.props.style
-      ) return;
+      )
+        return;
       appliedStyleRef.current = shape.props.style;
       map.setStyle(mapStyleFor(shape.props.style));
     }, [hasMaptilerKey, shape.props.style]);
@@ -293,7 +299,8 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
           customElement
             ? { element: customElement, anchor: "bottom" }
             : {
-                color: index === shape.props.selectedMarker ? selected : primary,
+                color:
+                  index === shape.props.selectedMarker ? selected : primary,
                 scale: index === shape.props.selectedMarker ? 1.2 : 0.9,
               },
         )
@@ -330,7 +337,9 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
           type="map"
           title={shape.props.title}
           headerMeta={
-            !hasMaptilerKey ? <Badge variant="outline">demo tiles</Badge> : undefined
+            !hasMaptilerKey ? (
+              <Badge variant="outline">demo tiles</Badge>
+            ) : undefined
           }
           contentClassName="px-0"
           footer={

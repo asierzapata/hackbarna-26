@@ -191,10 +191,19 @@ export function createMockTransport(includeDemo = false): RoomTransport {
       });
     },
 
+    async resolveOffer(entryId, accepted) {
+      emit({ id: `resolved-${entryId}`, seq: nextSeq++, kind: "system", at: new Date().toISOString(), authorId: "system", text: accepted ? "offer accepted" : "offer dismissed" });
+    },
+
+    async cancelTrigger() {},
+    async retryTrigger() {},
+
     async claimTrigger() {
       // No classifier without a server, so nothing ever assigns us a trigger.
-      return false;
+      return null;
     },
+    setExecutorReady() {},
+    snapshot() { return { connected: true, ready: false, sessionId: null, members: [], executors: [], triggers: [] }; },
   };
 }
 

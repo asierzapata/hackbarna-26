@@ -62,9 +62,21 @@ export const tableFixture = {
   title: "Options compared",
   columns: ["Option", "Cost", "Effort", "Risk", "Notes"],
   rows: [
-    ["Pre-warm tenants", "$2.4k/mo", "Medium", "Low", "Best for predictable traffic"],
+    [
+      "Pre-warm tenants",
+      "$2.4k/mo",
+      "Medium",
+      "Low",
+      "Best for predictable traffic",
+    ],
     ["Shared warm pool", "$1.1k/mo", "Low", "Medium", "Fastest path to pilot"],
-    ["Runtime snapshots", "$0.6k/mo", "High", "Medium", "Largest long-term gain"],
+    [
+      "Runtime snapshots",
+      "$0.6k/mo",
+      "High",
+      "Medium",
+      "Largest long-term gain",
+    ],
     ["No change", "$0", "None", "High", "Misses the SLO"],
   ],
   highlightRow: 1,
@@ -103,11 +115,40 @@ export const logoFixture = {
 } satisfies NodeDraft;
 
 const researchEvents = [
-  { id: "kickoff", title: "Research kickoff", start: "2026-09-14", description: "Agree on the research question and divide the reading list." },
-  { id: "reading", title: "Literature review", start: "2026-09-16", end: "2026-09-21", description: "Read the selected papers and collect supporting and conflicting evidence.", sourceNote: "Team reading list" },
-  { id: "discussion", title: "Study group discussion", start: "2026-09-19", description: "Compare findings and identify gaps in the evidence." },
-  { id: "synthesis", title: "Synthesis workshop", start: "2026-09-29", end: "2026-10-02", description: "Turn the evidence into a shared summary and next steps." },
-  { id: "review", title: "Final review", start: "2026-10-05", description: "Review conclusions and decide what to investigate next." },
+  {
+    id: "kickoff",
+    title: "Research kickoff",
+    start: "2026-09-14",
+    description: "Agree on the research question and divide the reading list.",
+  },
+  {
+    id: "reading",
+    title: "Literature review",
+    start: "2026-09-16",
+    end: "2026-09-21",
+    description:
+      "Read the selected papers and collect supporting and conflicting evidence.",
+    sourceNote: "Team reading list",
+  },
+  {
+    id: "discussion",
+    title: "Study group discussion",
+    start: "2026-09-19",
+    description: "Compare findings and identify gaps in the evidence.",
+  },
+  {
+    id: "synthesis",
+    title: "Synthesis workshop",
+    start: "2026-09-29",
+    end: "2026-10-02",
+    description: "Turn the evidence into a shared summary and next steps.",
+  },
+  {
+    id: "review",
+    title: "Final review",
+    start: "2026-10-05",
+    description: "Review conclusions and decide what to investigate next.",
+  },
 ];
 
 export const timelineFixture = {

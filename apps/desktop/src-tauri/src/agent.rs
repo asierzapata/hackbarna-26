@@ -34,8 +34,8 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{channel, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -210,6 +210,41 @@ fn launch_spec(
 /// Hands out one id per connection, so a dying reader thread can tell whether
 /// the connection it was reading is still the active one.
 static NEXT_CONN: AtomicU64 = AtomicU64::new(1);
+const AGENT_TURN_TIMEOUT_MS: u64 = 180_000;
+const MAX_STRUCTURED_BYTES: usize = 64 * 1024;
+static STRUCTURED_BUSY: AtomicBool = AtomicBool::new(false);
+
+#[derive(Clone)]
+struct ActiveTurn { conn_id: u64, turn_id: String, session_id: String, cancelled: bool }
+static ACTIVE_TURN: Mutex<Option<ActiveTurn>> = Mutex::new(None);
+
+struct StructuredBuffer { text: String, overflow: bool, session_id: String, turn_id: String }
+
+struct TurnGuard { turn_id: String }
+impl Drop for TurnGuard {
+    fn drop(&mut self) {
+        let mut active = ACTIVE_TURN.lock().unwrap();
+        if active.as_ref().is_some_and(|turn| turn.turn_id == self.turn_id) { *active = None; }
+        STRUCTURED_BUSY.store(false, Ordering::SeqCst);
+    }
+}
+
+fn begin_turn(conn_id: u64, session_id: String, turn_id: String) -> Result<TurnGuard, String> {
+    let mut active = ACTIVE_TURN.lock().unwrap();
+    if active.is_some() { return Err("another agent turn is running".to_string()); }
+    *active = Some(ActiveTurn { conn_id, turn_id: turn_id.clone(), session_id, cancelled: false });
+    STRUCTURED_BUSY.store(true, Ordering::SeqCst);
+    Ok(TurnGuard { turn_id })
+}
+
+fn set_turn_session(conn_id: u64, turn_id: &str, session_id: String) -> Result<(), String> {
+    let mut active = ACTIVE_TURN.lock().unwrap();
+    let Some(turn) = active.as_mut() else { return Err("agent turn is no longer active".to_string()); };
+    if turn.conn_id != conn_id || turn.turn_id != turn_id || turn.cancelled { return Err("agent turn was cancelled".to_string()); }
+    turn.session_id = session_id;
+    Ok(())
+}
+
 
 /// One running ACP server.
 struct Conn {
@@ -220,6 +255,7 @@ struct Conn {
     mode: AuthMode,
     stdin: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
+    structured_buffer: Arc<Mutex<Option<StructuredBuffer>>>,
     next_id: AtomicU64,
     session_id: Mutex<Option<String>>,
     models: Mutex<Models>,
@@ -277,6 +313,23 @@ impl Conn {
         Ok(reply.get("result").cloned().unwrap_or(Value::Null))
     }
 
+    fn request_timeout(&self, method: &str, params: Value, timeout: std::time::Duration) -> Result<Value, RpcError> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = channel();
+        self.pending.lock().unwrap().insert(id, tx);
+        if let Err(error) = write_message(&self.stdin, &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })) {
+            self.pending.lock().unwrap().remove(&id);
+            return Err(error);
+        }
+        let reply = match rx.recv_timeout(timeout) {
+            Ok(reply) => reply,
+            Err(RecvTimeoutError::Timeout) => { self.pending.lock().unwrap().remove(&id); return Err(RpcError::transport("agent turn timed out")); }
+            Err(RecvTimeoutError::Disconnected) => return Err(RpcError::transport("the agent exited before replying")),
+        };
+        if let Some(err) = reply.get("error") { return Err(RpcError { code: err.get("code").and_then(Value::as_i64).unwrap_or(0), message: err.get("message").and_then(Value::as_str).unwrap_or("unknown error").to_string() }); }
+        Ok(reply.get("result").cloned().unwrap_or(Value::Null))
+    }
+
     /// The advertised method matching the user's choice.
     ///
     /// Ids are not standardised — Devin advertises `devin-browser`, the Codex
@@ -317,6 +370,7 @@ fn reader_loop(
     stdin: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     canvas_mcp: Arc<CanvasMcp>,
+    structured_buffer: Arc<Mutex<Option<StructuredBuffer>>>,
 ) {
     for line in BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
@@ -355,11 +409,30 @@ fn reader_loop(
             (Some("session/update"), None) => {
                 if let Some(update) = msg.pointer("/params/update") {
                     let session_id = msg.pointer("/params/sessionId").and_then(Value::as_str);
-                    if let Some(session_id) = session_id {
-                        canvas_mcp.record_tool_call(session_id, update);
-                    }
-                    if let Some(turn_id) = session_id.and_then(|id| canvas_mcp.active_turn(id)) {
-                        let _ = app.emit_to("main", "agent:update", json!({"turnId": turn_id, "update": update}));
+                    let session_matches = ACTIVE_TURN.lock().unwrap().as_ref().is_some_and(|turn| turn.conn_id == conn_id && !turn.cancelled && session_id == Some(turn.session_id.as_str()));
+                    if session_matches {
+                        let mut buffer = structured_buffer.lock().unwrap();
+                        if let Some(buffer) = buffer.as_mut() {
+                            let matches_buffer = session_id == Some(buffer.session_id.as_str()) && ACTIVE_TURN.lock().unwrap().as_ref().is_some_and(|turn| turn.turn_id == buffer.turn_id && turn.conn_id == conn_id && !turn.cancelled);
+                            if !matches_buffer { continue; }
+                            if update.get("sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk") {
+                                if let Some(chunk) = update.pointer("/content/text").and_then(Value::as_str) {
+                                    if !buffer.overflow {
+                                        if buffer.text.len().saturating_add(chunk.len()) > MAX_STRUCTURED_BYTES {
+                                            buffer.overflow = true;
+                                            buffer.text.clear();
+                                        } else {
+                                            buffer.text.push_str(chunk);
+                                        }
+                                    }
+                                }
+                            }
+                        } else if let Some(session_id) = session_id {
+                            canvas_mcp.record_tool_call(session_id, update);
+                            if let Some(turn_id) = canvas_mcp.active_turn(session_id) {
+                                let _ = app.emit_to("main", "agent:update", json!({"turnId": turn_id, "update": update}));
+                            }
+                        }
                     }
                 }
             }
@@ -533,6 +606,7 @@ fn open(
     let stdin = Arc::new(Mutex::new(child.stdin.take().expect("piped stdin")));
     let stdout = child.stdout.take().expect("piped stdout");
     let pending: Arc<Mutex<HashMap<u64, Sender<Value>>>> = Arc::default();
+    let structured_buffer: Arc<Mutex<Option<StructuredBuffer>>> = Arc::default();
     let id = NEXT_CONN.fetch_add(1, Ordering::SeqCst);
 
     {
@@ -540,7 +614,8 @@ fn open(
         let stdin = stdin.clone();
         let pending = pending.clone();
         let canvas_mcp = canvas_mcp.clone();
-        std::thread::spawn(move || reader_loop(app, id, stdout, stdin, pending, canvas_mcp));
+        let structured_buffer = structured_buffer.clone();
+        std::thread::spawn(move || reader_loop(app, id, stdout, stdin, pending, canvas_mcp, structured_buffer));
     }
 
     let conn = Arc::new(Conn {
@@ -549,6 +624,7 @@ fn open(
         mode,
         stdin,
         pending,
+        structured_buffer,
         next_id: AtomicU64::new(1),
         session_id: Mutex::new(None),
         models: Mutex::new(Models::default()),
@@ -807,6 +883,50 @@ pub async fn agent_sign_in(
     .map_err(|e| e.to_string())
 }
 
+/// Runs one isolated structured turn. The model's JSON is buffered from ACP
+/// message chunks and returned to the webview; it never becomes a chat entry.
+#[tauri::command]
+pub async fn agent_prompt_structured(app: AppHandle, prompt: String, turn_id: String) -> Result<String, String> {
+    if prompt.len() > 128 * 1024 || turn_id.is_empty() || turn_id.len() > 128 {
+        return Err("Invalid agent prompt".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or_else(|| "no agent is connected".to_string())?;
+        let _turn = conn.prompt_lock.try_lock().map_err(|_| "An agent turn is already running")?;
+        let _guard = begin_turn(conn.id, String::new(), turn_id.clone())?;
+        let cwd = scratch(&app, "structured-workspace").map_err(String::from)?;
+        let session = match conn.request_timeout("session/new", json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] }), std::time::Duration::from_millis(10_000)) { Ok(value) => value, Err(error) => { conn.pending.lock().unwrap().clear(); if let Ok(mut child) = conn.child.lock() { let _ = child.kill(); } return Err(String::from(error)); } };
+        let session_id = session.get("sessionId").and_then(Value::as_str).ok_or_else(|| "agent returned no structured sessionId".to_string())?.to_string();
+        set_turn_session(conn.id, &turn_id, session_id.clone())?;
+        if let Some(model_id) = conn.models.lock().unwrap().current.clone() {
+            let models = Models::parse(&session);
+            if models.current.as_deref() != Some(model_id.as_str()) {
+                if !models.available.iter().any(|model| model.id == model_id) {
+                    return Err("The selected model is not available for this assistant turn".into());
+                }
+                if let Some(config_id) = models.config_id {
+                    let response = conn.request("session/set_config_option", json!({ "sessionId": session_id, "configId": config_id, "value": model_id, "type": "id" })).map_err(String::from)?;
+                    if Models::parse(&response).current.as_deref() != Some(model_id.as_str()) {
+                        return Err("The provider did not confirm the selected model".into());
+                    }
+                } else {
+                    conn.request("session/set_model", json!({ "sessionId": session_id, "modelId": model_id })).map_err(String::from)?;
+                }
+            }
+        }
+        *conn.structured_buffer.lock().unwrap() = Some(StructuredBuffer { text: String::new(), overflow: false, session_id: session_id.clone(), turn_id: turn_id.clone() });
+        let response = conn.request_timeout("session/prompt", json!({ "sessionId": session_id, "prompt": [{ "type": "text", "text": prompt }] }), std::time::Duration::from_millis(AGENT_TURN_TIMEOUT_MS));
+        let buffer = conn.structured_buffer.lock().unwrap().take();
+        let stop = match response { Ok(value) => value, Err(error) => { conn.pending.lock().unwrap().clear(); if let Ok(mut child) = conn.child.lock() { let _ = child.kill(); } return Err(String::from(error)); } };
+        let Some(buffer) = buffer else { return Err("structured agent buffer missing".to_string()); };
+        if buffer.overflow { return Err("structured agent output exceeded size limit".to_string()); }
+        if stop.get("stopReason").and_then(Value::as_str) != Some("end_turn") { return Err("structured agent did not complete normally".to_string()); }
+        if ACTIVE_TURN.lock().unwrap().as_ref().is_none_or(|turn| turn.cancelled || turn.turn_id != turn_id) { return Err("structured agent turn cancelled".to_string()); }
+        if buffer.text.trim().is_empty() { return Err("structured agent returned no JSON".to_string()); }
+        Ok(buffer.text)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// Runs one prompt turn. Text streams back as `agent:update` events; this
 /// resolves with the stop reason when the turn ends.
 #[tauri::command]
@@ -821,11 +941,12 @@ pub async fn agent_prompt(app: AppHandle, text: String, turn_id: String, canvas_
             return Err("Connect the local agent for this canvas before sending a prompt".into());
         }
         let session_id = conn.session_id.lock().unwrap().clone().ok_or("the agent has no session")?;
+        let _guard = begin_turn(conn.id, session_id.clone(), turn_id.clone())?;
         conn.canvas_mcp.begin(turn_id.clone(), canvas_id, session_id.clone())?;
-        let result = conn.request("session/prompt", json!({
+        let result = conn.request_timeout("session/prompt", json!({
             "sessionId": session_id,
             "prompt": [{ "type": "text", "text": text }]
-        })).map_err(String::from);
+        }), std::time::Duration::from_millis(AGENT_TURN_TIMEOUT_MS)).map_err(String::from);
         let was_active = conn.canvas_mcp.finish(&turn_id);
         if result.is_err() {
             let _ = write_message(&conn.stdin, &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}));
@@ -843,22 +964,34 @@ pub fn agent_canvas_result(app: AppHandle, request_id: String, turn_id: String, 
 }
 
 #[tauri::command]
-pub fn agent_cancel(app: AppHandle, turn_id: String) {
-    let conn = app.state::<Agent>().0.lock().unwrap().clone();
-    if let Some(conn) = conn {
-        if conn.canvas_mcp.finish(&turn_id) {
-            let session_id = conn.session_id.lock().unwrap().clone();
-            let _ = write_message(&conn.stdin, &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}));
-        }
-    }
-}
-
-#[tauri::command]
 pub fn agent_status(app: AppHandle, canvas_id: Option<String>) -> AgentStatus {
     match app.state::<Agent>().0.lock().unwrap().as_ref() {
         Some(conn) if conn.session_id.lock().unwrap().is_some() && *conn.session_canvas.lock().unwrap() == canvas_id => AgentStatus::ready(conn, conn.agent.lock().unwrap().clone()),
         _ => AgentStatus { state: "idle", provider: None, provider_label: None, agent: None, message: None, models: Models::default(), mode: None },
     }
+}
+
+#[tauri::command]
+pub fn agent_cancel(app: AppHandle, turn_id: String) -> Result<(), String> {
+    let active = ACTIVE_TURN.lock().unwrap().clone();
+    let Some(active) = active else { return Ok(()); };
+    if active.turn_id != turn_id { return Ok(()); }
+    let conn = app.try_state::<Agent>().and_then(|slot| slot.0.lock().unwrap().clone());
+    let Some(conn) = conn else { return Ok(()); };
+    if conn.id != active.conn_id { return Ok(()); }
+    {
+        let mut current = ACTIVE_TURN.lock().unwrap();
+        let Some(current) = current.as_mut().filter(|current| current.turn_id == turn_id && current.conn_id == conn.id) else { return Ok(()); };
+        current.cancelled = true;
+    }
+    conn.canvas_mcp.finish(&turn_id);
+    let _ = write_message(&conn.stdin, &json!({ "jsonrpc": "2.0", "method": "session/cancel", "params": { "sessionId": active.session_id, "turnId": turn_id } }));
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let still_active = ACTIVE_TURN.lock().unwrap().as_ref().is_some_and(|turn| turn.turn_id == turn_id && turn.conn_id == conn.id);
+        if still_active { conn.pending.lock().unwrap().clear(); conn.structured_buffer.lock().unwrap().take(); if let Ok(mut child) = conn.child.lock() { let _ = child.kill(); } }
+    });
+    Ok(())
 }
 
 /// Drops the connection; the child is killed with it, and the reader thread
@@ -888,6 +1021,10 @@ pub async fn agent_sign_out(app: AppHandle) -> Result<(), String> {
 fn disconnect(app: &AppHandle) {
     let state = app.state::<Agent>();
     let conn = state.0.lock().unwrap().take();
+    if let Some(active) = ACTIVE_TURN.lock().unwrap().as_mut() {
+        if conn.as_ref().is_some_and(|current| current.id == active.conn_id) { active.cancelled = true; }
+    }
+    if let Some(current) = conn.as_ref() { current.pending.lock().unwrap().clear(); if let Ok(mut child) = current.child.lock() { let _ = child.kill(); } }
 
     // Read what we need, then drop the Arc: its `Drop` waits for the child, so
     // the file cannot be rewritten underneath us afterwards.
@@ -925,5 +1062,20 @@ fn forget_cached_api_key_in(app: &AppHandle, home: &str) {
         });
     if cached_a_key {
         let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_turn_guard_is_exclusive_and_releases() {
+        let first = begin_turn(1, "session-a".to_string(), "turn-a".to_string()).unwrap();
+        assert!(begin_turn(2, "session-b".to_string(), "turn-b".to_string()).is_err());
+        drop(first);
+        assert!(begin_turn(2, "session-b".to_string(), "turn-b".to_string()).is_ok());
+        ACTIVE_TURN.lock().unwrap().take();
+        STRUCTURED_BUSY.store(false, Ordering::SeqCst);
     }
 }

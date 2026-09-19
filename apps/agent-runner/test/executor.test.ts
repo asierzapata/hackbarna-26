@@ -31,7 +31,7 @@ for (const mode of ["act", "propose"] as const) test(`fake ACP and real MCP ${mo
   await waitFor(() => events.some((e) => e.type === "run.done"));
   const thread = ctx.server.engine.thread(room.id, 0, 100).entries;
   const turn = thread.find((e) => e.kind === "agent_turn");
-  assert.equal(turn?.kind === "agent_turn" && turn.text, "Shared canvas updated.");
+  assert.equal(turn?.kind === "agent_turn" ? turn.text : undefined, mode === "propose" ? "Capture the desktop decision." : "Shared canvas updated.");
   assert.ok(observer.messages.some((m) => m.type === "event" && m.event.entry.kind === "agent_turn" && m.event.entry.status === "done"));
   if (mode === "act") assert.ok(ctx.server.engine.canvasSummary(room.id).shapes.some((s) => s.label === "From fake ACP"));
   else {
@@ -44,7 +44,7 @@ for (const mode of ["act", "propose"] as const) test(`fake ACP and real MCP ${mo
   }
 });
 
-test("same trigger explicit retry is run once at the new attempt", async (t) => {
+test("completed trigger cannot be retried", async (t) => {
   const ctx = await setup({ classifier: null }); ctx.clock.t = Date.now(); t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base), events: ExecutorEvent[] = [];
   const executor = await startRoomExecutor({ serverUrl: ctx.base, roomId: room.id, credential: { userId: u.id, secret: u.secret }, agent: agent(), autoClaim: true, onEvent: (event) => events.push(event) }); t.after(() => executor.close());
@@ -53,9 +53,8 @@ test("same trigger explicit retry is run once at the new attempt", async (t) => 
   await waitFor(() => events.filter((e) => e.type === "run.done").length === 1);
   await sleep(100);
   const trigger = ctx.server.engine.listTriggers(room.id)[0];
-  ctx.server.engine.retryTrigger(u.id, room.id, trigger.id, randomUUID()); ctx.server.engine.tick();
-  await waitFor(() => events.filter((e) => e.type === "run.done").length === 2);
-  assert.equal(ctx.server.engine.listTriggers(room.id)[0].attempt, 2);
+  assert.throws(() => ctx.server.engine.retryTrigger(u.id, room.id, trigger.id, randomUUID()));
+  assert.equal(ctx.server.engine.listTriggers(room.id)[0].attempt, 1);
 });
 
 test("manual executor never runs until local claim intent", async (t) => {

@@ -1,9 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import WebSocket from "ws";
 import { api, createRoom, registerUser, setup, ticket, EventsClient } from "./helpers";
 import { configFromEnv } from "../src/config";
+import { normalizePrivateKey } from "../src/video";
 
 test("replay delivers more than 10000 distinct events before ready", async (t) => {
   const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
@@ -73,4 +77,12 @@ test("classifier hashes actual state, sanitizes errors, durable queue recovers",
 test("environment rejects invalid configuration and defaults classifier disabled", () => {
   assert.equal(configFromEnv({}).classifier, null);
   for (const env of [{ PORT: "0" }, { PORT: "65536" }, { PORT: "1.5" }, { KAN_CLASSIFIER: "unknown" }, { KAN_CLASSIFIER: "jev" }, { KAN_ALLOWED_ORIGINS: "*" }, { VONAGE_APPLICATION_ID: "one" }]) assert.throws(() => configFromEnv(env));
+});
+
+test("Vonage private key is accepted as a PEM, an escaped PEM, base64 or a path", () => {
+  const pem = "-----BEGIN PRIVATE KEY-----\nabc\ndef\n-----END PRIVATE KEY-----\n";
+  const file = join(mkdtempSync(join(tmpdir(), "kan-key-")), "private.key");
+  writeFileSync(file, pem);
+  for (const form of [pem, pem.replace(/\n/g, "\\n"), Buffer.from(pem).toString("base64"), file]) assert.equal(normalizePrivateKey(form), pem);
+  for (const bad of ["", "   ", "not a key at all"]) assert.throws(() => normalizePrivateKey(bad));
 });

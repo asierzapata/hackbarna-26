@@ -21,7 +21,7 @@ function decision(partial: Partial<Decision>): Decision {
 test("addressed exactly 0.8 does not act, 0.8001 does", () => {
   assert.equal(triggerDecision(decision({ addressedProbability: 0.8, intent: "answer" })), null);
   const t = triggerDecision(decision({ addressedProbability: 0.8001, intent: "answer" }));
-  assert.equal(t?.mode, "act");
+  assert.equal(t?.mode, "context");
 });
 
 test("worthCapturing exactly 0.7 does not propose, 0.7001 does when captureScore >= 2", () => {
@@ -30,7 +30,7 @@ test("worthCapturing exactly 0.7 does not propose, 0.7001 does when captureScore
     null,
   );
   const t = triggerDecision(decision({ worthCapturingProbability: 0.7001, captureScore: 2, intent: "capture" }));
-  assert.equal(t?.mode, "propose");
+  assert.equal(t?.mode, "context");
 });
 
 test("captureScore 1.99 blocks propose, 2 allows", () => {
@@ -40,7 +40,7 @@ test("captureScore 1.99 blocks propose, 2 allows", () => {
   );
   assert.equal(
     triggerDecision(decision({ worthCapturingProbability: 0.9, captureScore: 2, intent: "capture" }))?.mode,
-    "propose",
+    "context",
   );
 });
 

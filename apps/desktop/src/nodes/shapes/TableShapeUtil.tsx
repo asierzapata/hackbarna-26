@@ -211,16 +211,17 @@ function TableViewport({
 
 function CompanyLogo({ domain, name }: { domain: string; name: string }) {
   const brandfetchUrl = brandfetchImageUrl(domain);
-  const [source, setSource] = React.useState<"brandfetch" | "favicon" | "initials">(
-    brandfetchUrl ? "brandfetch" : "favicon",
-  );
+  const [source, setSource] = React.useState<
+    "brandfetch" | "favicon" | "initials"
+  >(brandfetchUrl ? "brandfetch" : "favicon");
 
   React.useEffect(() => {
     setSource(brandfetchUrl ? "brandfetch" : "favicon");
   }, [brandfetchUrl, domain]);
 
   const faviconUrl = faviconImageUrl(domain);
-  const imageUrl = source === "brandfetch" ? brandfetchUrl ?? faviconUrl : faviconUrl;
+  const imageUrl =
+    source === "brandfetch" ? (brandfetchUrl ?? faviconUrl) : faviconUrl;
   const displayName = name || domain;
 
   return (
@@ -308,11 +309,12 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
     const namedLogoColumn = columns.findIndex((column) =>
       /company|sponsor|partner|brand|name/i.test(column),
     );
-    const logoColumnIndex = namedLogoColumn >= 0
-      ? namedLogoColumn
-      : rows.some((row) => companyBrand(row[0] ?? null))
-        ? 0
-        : -1;
+    const logoColumnIndex =
+      namedLogoColumn >= 0
+        ? namedLogoColumn
+        : rows.some((row) => companyBrand(row[0] ?? null))
+          ? 0
+          : -1;
 
     const update = (props: Partial<TableShape["props"]>) => {
       this.editor.updateShape({ id: shape.id, type: shape.type, props });

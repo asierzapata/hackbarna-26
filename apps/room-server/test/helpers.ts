@@ -188,7 +188,7 @@ export class EventsClient {
     this.ws.send(JSON.stringify(obj));
   }
   executorReady(agentId = "stub-agent") {
-    this.send({ type: "executor.ready", ready: true, agentId });
+    this.send({ type: "executor.ready", ready: true, agentId, scope: "room", background: true });
   }
   async waitFor(pred: (m: any) => boolean, timeoutMs = 3000): Promise<any> {
     const found = this.messages.find(pred);

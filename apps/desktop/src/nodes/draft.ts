@@ -80,7 +80,10 @@ export function draftToShapePartial(
         type: "kan-table",
         props: {
           ...size,
-          w: Math.max(size.w, size.w + Math.max(0, draft.columns.length - 4) * 100),
+          w: Math.max(
+            size.w,
+            size.w + Math.max(0, draft.columns.length - 4) * 100,
+          ),
           title: draft.title,
           columns: draft.columns,
           rows: draft.rows,
@@ -218,7 +221,11 @@ export function shapeToSummary(shape: KanShape) {
       return {
         ...common,
         title: shape.props.title,
-        markers: shape.props.markers.map(({ label, lat, lng }) => ({ label, lat, lng })),
+        markers: shape.props.markers.map(({ label, lat, lng }) => ({
+          label,
+          lat,
+          lng,
+        })),
         center: shape.props.center,
         zoom: shape.props.zoom,
         selectedMarker: shape.props.selectedMarker,
@@ -228,7 +235,12 @@ export function shapeToSummary(shape: KanShape) {
         ...common,
         title: shape.props.title,
         eventCount: shape.props.events.length,
-        events: shape.props.events.map(({ id, title, start, end }) => ({ id, title, start, end })),
+        events: shape.props.events.map(({ id, title, start, end }) => ({
+          id,
+          title,
+          start,
+          end,
+        })),
         selectedEventId: shape.props.selectedEventId,
       };
     case "kan-calendar":
@@ -236,7 +248,12 @@ export function shapeToSummary(shape: KanShape) {
         ...common,
         title: shape.props.title,
         eventCount: shape.props.events.length,
-        events: shape.props.events.map(({ id, title, start, end }) => ({ id, title, start, end })),
+        events: shape.props.events.map(({ id, title, start, end }) => ({
+          id,
+          title,
+          start,
+          end,
+        })),
         month: shape.props.month,
         selectedDate: shape.props.selectedDate,
       };

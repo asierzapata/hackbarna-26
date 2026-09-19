@@ -18,7 +18,8 @@ export type MapMarker = {
   note?: string;
 };
 
-export type MapNodeStyle = "streets" | "aquarelle" | "light" | "dark" | "satellite" | "outdoor";
+export type MapNodeStyle =
+  "streets" | "aquarelle" | "light" | "dark" | "satellite" | "outdoor";
 
 export type MarkdownShapeProps = {
   w: number;
@@ -236,7 +237,14 @@ export const mapShapeProps = {
   markers: T.arrayOf(mapMarkerValidator),
   center: T.nullable(mapCenterValidator),
   zoom: T.nullable(T.number),
-  style: T.literalEnum("streets", "aquarelle", "light", "dark", "satellite", "outdoor"),
+  style: T.literalEnum(
+    "streets",
+    "aquarelle",
+    "light",
+    "dark",
+    "satellite",
+    "outdoor",
+  ),
   selectedMarker: T.number,
 };
 

@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import type { CanvasAnchor, ParticipantMap, SuggestionEntry } from "@/lib/thread";
+import type { CanvasAnchor, OfferEntry, ParticipantMap, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
 import { participantOf } from "@/lib/thread";
 
 export interface ThreadActions {
@@ -16,6 +16,12 @@ export interface ThreadActions {
   resolveAnchorLabel?: (nodeId: string) => string | undefined;
   onAcceptSuggestion?: (suggestion: SuggestionEntry) => void;
   onDismissSuggestion?: (suggestion: SuggestionEntry) => void;
+  onClaimTrigger?: (trigger: TriggerEntry) => void;
+  onCancelTrigger?: (trigger: TriggerEntry) => void;
+  onRetryTrigger?: (trigger: TriggerEntry) => void;
+  onAcceptOffer?: (offer: OfferEntry) => void;
+  onDismissOffer?: (offer: OfferEntry) => void;
+  onReply?: (entry: ThreadEntry) => void;
 }
 
 export interface ThreadContextValue extends ThreadActions {

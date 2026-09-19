@@ -12,17 +12,32 @@
     { "speaker": "enric", "text": "good good, you" },
     { "speaker": "juanjo", "text": "all good, ready for this" },
     { "speaker": "enric", "text": "haha let's see" },
-    { "speaker": "juanjo", "text": "okay so, we have to organize a hackathon, where do we start" },
+    {
+      "speaker": "juanjo",
+      "text": "okay so, we have to organize a hackathon, where do we start"
+    },
     { "speaker": "enric", "text": "dates first i guess" },
     { "speaker": "juanjo", "text": "yeah makes sense" },
     { "speaker": "enric", "text": "so i was thinking the weekend of the 26th" },
     { "speaker": "juanjo", "text": "hmm wait, isn't the 24th a holiday here" },
     { "speaker": "enric", "text": "oh right, la merce, that's a thursday" },
-    { "speaker": "juanjo", "text": "yeah exactly, so people are gonna take the long weekend and leave town" },
-    { "speaker": "enric", "text": "true, nobody's gonna show up the 26th-27th then" },
-    { "speaker": "juanjo", "text": "what about the weekend before, the 19th-20th" },
+    {
+      "speaker": "juanjo",
+      "text": "yeah exactly, so people are gonna take the long weekend and leave town"
+    },
+    {
+      "speaker": "enric",
+      "text": "true, nobody's gonna show up the 26th-27th then"
+    },
+    {
+      "speaker": "juanjo",
+      "text": "what about the weekend before, the 19th-20th"
+    },
     { "speaker": "enric", "text": "mm that could work" },
-    { "speaker": "juanjo", "text": "yeah, before the holiday rush, people are still around" },
+    {
+      "speaker": "juanjo",
+      "text": "yeah, before the holiday rush, people are still around"
+    },
     { "speaker": "enric", "text": "saturday 19th, sunday 20th" },
     { "speaker": "juanjo", "text": "exactly" },
     {
@@ -37,12 +52,27 @@
     },
     { "speaker": "enric", "text": "cool, venue next" },
     { "speaker": "juanjo", "text": "yeah where do we host it" },
-    { "speaker": "enric", "text": "i was thinking glovo, they've got that big office downtown" },
-    { "speaker": "juanjo", "text": "hmm, we could also just repeat last year's spot" },
+    {
+      "speaker": "enric",
+      "text": "i was thinking glovo, they've got that big office downtown"
+    },
+    {
+      "speaker": "juanjo",
+      "text": "hmm, we could also just repeat last year's spot"
+    },
     { "speaker": "enric", "text": "which one was that again" },
-    { "speaker": "juanjo", "text": "norrsken, house barcelona, right by the port" },
-    { "speaker": "enric", "text": "oh right, that place was great, good wifi, big kitchen" },
-    { "speaker": "juanjo", "text": "and they already said yes for this year too" },
+    {
+      "speaker": "juanjo",
+      "text": "norrsken, house barcelona, right by the port"
+    },
+    {
+      "speaker": "enric",
+      "text": "oh right, that place was great, good wifi, big kitchen"
+    },
+    {
+      "speaker": "juanjo",
+      "text": "and they already said yes for this year too"
+    },
     {
       "speaker": "enric",
       "text": "okay, kan, can you show them both on a map next to the calendar please? For this mock planning exercise use approximate pins: Glovo at latitude 41.403, longitude 2.194, and Norrsken at latitude 41.375, longitude 2.189. Label both positions as approximate.",
@@ -50,18 +80,33 @@
     },
     { "speaker": "juanjo", "text": "haha nice, let's see them side by side" },
     { "speaker": "enric", "text": "norrsken's closer to the metro actually" },
-    { "speaker": "juanjo", "text": "yeah and it's free, glovo would need budget approval" },
+    {
+      "speaker": "juanjo",
+      "text": "yeah and it's free, glovo would need budget approval"
+    },
     {
       "speaker": "enric",
       "text": "norrsken it is then",
       "trigger": { "label": "decision:venue", "confidence": 0.92 }
     },
     { "speaker": "juanjo", "text": "sponsors, who do we have lined up" },
-    { "speaker": "enric", "text": "vonage confirmed, they're gold sponsor again" },
+    {
+      "speaker": "enric",
+      "text": "vonage confirmed, they're gold sponsor again"
+    },
     { "speaker": "juanjo", "text": "nice, and cognition's in too right" },
-    { "speaker": "enric", "text": "yep, devin's team, they're bringing mentors" },
-    { "speaker": "juanjo", "text": "nebius said yes as well, for compute credits" },
-    { "speaker": "enric", "text": "don't forget preply, they signed as silver" },
+    {
+      "speaker": "enric",
+      "text": "yep, devin's team, they're bringing mentors"
+    },
+    {
+      "speaker": "juanjo",
+      "text": "nebius said yes as well, for compute credits"
+    },
+    {
+      "speaker": "enric",
+      "text": "don't forget preply, they signed as silver"
+    },
     {
       "speaker": "juanjo",
       "text": "true, kan, add a sponsors table beside the map listing Vonage, Cognition, Nebius and Preply, with the contributions we just discussed",

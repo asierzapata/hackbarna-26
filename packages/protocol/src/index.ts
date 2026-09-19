@@ -1,8 +1,19 @@
 import { z } from "zod";
 
+export * from "./assistant-policy";
+
 const uuid = z.uuid();
 const isoDate = z.iso.datetime();
 export const shapeId = z.string().regex(/^shape:[A-Za-z0-9_-]{1,80}$/);
+
+export const ExecutorScopeSchema = z.enum(["own", "room", "manual"]);
+export const EvidenceSourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("entry"), id: uuid }),
+  z.strictObject({ kind: z.literal("shape"), id: shapeId }),
+]);
+export const EvidenceSourcesSchema = z.array(EvidenceSourceSchema).max(12);
+export type EvidenceSource = z.infer<typeof EvidenceSourceSchema>;
+
 const isoDay = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -110,17 +121,18 @@ export const RoomSchema = z.strictObject({
   createdBy: uuid,
   createdAt: isoDate,
   updatedAt: isoDate,
+  assistantPaused: z.boolean().optional().default(false),
 });
 export type Room = z.infer<typeof RoomSchema>;
 
-export const TriggerStatusSchema = z.enum(["pending", "offered", "running", "needs_claim", "done", "failed"]);
+export const TriggerStatusSchema = z.enum(["pending", "offered", "running", "needs_claim", "done", "failed", "cancelled", "expired"]);
 export const TriggerSchema = z.strictObject({
   id: uuid,
   causeEntryIds: z.array(z.string().max(80)).max(20),
   requestedBy: uuid,
   reason: z.string().max(1000),
-  intent: z.enum(["answer", "capture", "update", "lookup"]),
-  mode: z.enum(["act", "propose"]),
+  intent: z.enum(["answer", "capture", "update", "lookup", "evidence", "align"]),
+  mode: z.enum(["act", "propose", "context"]),
   anchors: z.array(shapeId).max(64),
   confidence: z.number().min(0).max(1),
   status: TriggerStatusSchema,
@@ -128,6 +140,10 @@ export const TriggerSchema = z.strictObject({
   offerExpiresAt: z.number().int().nonnegative().nullable(),
   attempt: z.number().int().nonnegative(),
   runId: uuid.nullable(),
+  source: z.enum(["explicit", "context", "accepted"]).optional(),
+  createdAt: z.number().int().nonnegative().optional(),
+  approvedRequest: z.string().max(4000).optional(),
+  acceptedOfferId: uuid.optional(),
 });
 export type Trigger = z.infer<typeof TriggerSchema>;
 
@@ -142,6 +158,8 @@ export const EntrySchema = z.discriminatedUnion("kind", [
     text: z.string().min(1).max(8000),
     anchors: z.array(shapeId).max(64),
     attachments: z.array(uuid).max(8),
+    source: z.enum(["typed", "transcript"]).optional(),
+    replyToEntryId: uuid.optional(),
   }),
   z.strictObject({
     ...entryBase,
@@ -159,9 +177,11 @@ export const EntrySchema = z.discriminatedUnion("kind", [
     byUserId: uuid,
     agentId: z.string().min(1).max(120),
     text: z.string().max(50_000),
-    status: z.enum(["running", "done", "failed"]),
+    status: z.enum(["running", "done", "failed", "cancelled"]),
     steps: z.array(AgentStepSchema).max(200),
     touchedShapeIds: z.array(shapeId).max(500),
+    sources: EvidenceSourcesSchema.optional(),
+    hidden: z.boolean().optional(),
   }),
   z.strictObject({
     ...entryBase,
@@ -169,9 +189,29 @@ export const EntrySchema = z.discriminatedUnion("kind", [
     triggerId: uuid,
     runId: uuid,
     draft: NodeDraftSchema,
-    status: z.enum(["open", "accepted", "dismissed"]),
+    status: z.enum(["open", "accepted", "dismissed", "outdated"]),
     shapeId: shapeId.nullable(),
     acceptedBy: uuid.nullable().optional(),
+    text: z.string().max(20_000).optional(),
+    sources: EvidenceSourcesSchema.optional(),
+    targetShapeId: shapeId.optional(),
+    expectedDraft: NodeDraftSchema.optional(),
+    revision: z.string().max(128).optional(),
+    resolvedBy: uuid.nullable().optional(),
+  }),
+  z.strictObject({
+    ...entryBase,
+    kind: z.literal("offer"),
+    triggerId: uuid,
+    runId: uuid,
+    title: z.string().min(1).max(200),
+    request: z.string().min(1).max(4000),
+    text: z.string().max(20_000),
+    sources: EvidenceSourcesSchema,
+    status: z.enum(["open", "accepted", "dismissed", "outdated"]),
+    resolvedBy: uuid.nullable(),
+    resultTriggerId: uuid.nullable(),
+    revision: z.string().max(128),
   }),
 ]);
 export type Entry = z.infer<typeof EntrySchema>;
@@ -191,6 +231,8 @@ export const ExecutorPresenceSchema = z.strictObject({
   ready: z.boolean(),
   agentId: z.string().max(120),
   busy: z.boolean(),
+  scope: ExecutorScopeSchema.optional().default("own"),
+  background: z.boolean().optional().default(false),
 });
 export type ExecutorPresence = z.infer<typeof ExecutorPresenceSchema>;
 
@@ -228,6 +270,17 @@ export const MutationSchema = z.discriminatedUnion("type", [
 ]);
 export type Mutation = z.infer<typeof MutationSchema>;
 
+const contributionBody = { text: z.string().min(1).max(20_000), sources: EvidenceSourcesSchema };
+export const AssistantResultSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("silent") }),
+  z.strictObject({ kind: z.literal("reply"), ...contributionBody }),
+  z.strictObject({ kind: z.literal("offer"), ...contributionBody, title: z.string().min(1).max(200), request: z.string().min(1).max(4000) }),
+  z.strictObject({ kind: z.literal("draft"), ...contributionBody, draft: NodeDraftSchema, targetShapeId: shapeId.optional() }),
+  z.strictObject({ kind: z.literal("act"), ...contributionBody, operations: z.array(MutationSchema).min(1).max(8) }),
+]);
+export type AssistantResult = z.infer<typeof AssistantResultSchema>;
+export const RunCompleteInput = z.strictObject({ id: uuid, revision: z.string().max(128), result: AssistantResultSchema });
+
 export const CanvasReadInput = z.strictObject({ scope: z.enum(["summary", "selection", "full"]), shapeIds: z.array(shapeId).max(500).optional() });
 export const CanvasToolInputs = {
   getCanvas: CanvasReadInput,
@@ -244,7 +297,10 @@ export const RegisterInput = z.strictObject({
   name: z.string().min(1).max(80),
 });
 export const PatchMeInput = z.strictObject({ name: z.string().min(1).max(80) });
-export const PatchRoomInput = z.strictObject({ name: z.string().min(1).max(120) });
+export const PatchRoomInput = z.strictObject({
+  name: z.string().min(1).max(120).optional(),
+  assistantPaused: z.boolean().optional(),
+}).refine((value) => value.name !== undefined || value.assistantPaused !== undefined, "at least one field is required");
 export const JoinInput = z.strictObject({ code: z.string().min(1).max(32) });
 export const ImportedMessageInput = z.strictObject({
   id: uuid,
@@ -252,6 +308,8 @@ export const ImportedMessageInput = z.strictObject({
   at: isoDate,
   anchors: z.array(shapeId).max(64).optional(),
   attachments: z.array(uuid).max(8).optional(),
+  source: z.enum(["typed", "transcript"]).optional(),
+  replyToEntryId: uuid.optional(),
 });
 export const CreateRoomInput = z.strictObject({
   localCanvasId: uuid,
@@ -265,6 +323,8 @@ export const PostMessageInput = z.strictObject({
   text: z.string().min(1).max(8000),
   anchors: z.array(shapeId).max(64).optional(),
   attachments: z.array(uuid).max(8).optional(),
+  source: z.enum(["typed", "transcript"]).optional(),
+  replyToEntryId: uuid.optional(),
 });
 export const SocketTicketInput = z.strictObject({ channel: z.enum(["sync", "events"]) });
 export const ClaimInput = z.strictObject({ sessionId: z.string().min(1).max(128), manual: z.boolean().optional() });
@@ -272,6 +332,7 @@ export const RetryInput = z.strictObject({ id: uuid });
 export const MutateInput = z.strictObject({ id: uuid, operations: z.array(MutationSchema).min(1).max(100) });
 export const SuggestionInput = z.strictObject({ id: uuid, draft: NodeDraftSchema });
 export const ResolveSuggestionInput = z.strictObject({ resolution: z.enum(["accepted", "dismissed"]) });
+export const ResolveOfferInput = z.strictObject({ resolution: z.enum(["accepted", "dismissed"]) });
 export const DataQueryInput = z
   .strictObject({
     source: z.literal("demo-metrics"),
@@ -284,10 +345,16 @@ export const RunPatchInput = z.strictObject({
   id: uuid,
   text: z.string().max(50_000).optional(),
   steps: z.array(boundedJson(8)).max(200).optional(),
-  status: z.enum(["done", "failed"]).optional(),
+  status: z.enum(["done", "failed", "cancelled"]).optional(),
 });
 export const EventsClientMessage = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("executor.ready"), ready: z.boolean(), agentId: z.string().min(1).max(120) }),
+  z.strictObject({
+    type: z.literal("executor.ready"),
+    ready: z.boolean(),
+    agentId: z.string().min(1).max(120),
+    scope: ExecutorScopeSchema.optional().default("own"),
+    background: z.boolean().optional().default(false),
+  }),
   z.strictObject({ type: z.literal("heartbeat") }),
 ]);
 

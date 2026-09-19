@@ -61,16 +61,27 @@ export function InteractiveCanvas({
         const dy = focus.y - dot.y;
         const distance = Math.hypot(dx, dy);
         const influence = Math.max(0, 1 - distance / 160);
-        const shift = motion.matches ? 0 : Math.min(Math.max(0, maxDistance), distance) * influence;
-        const x = dot.x + (distance ? dx / distance * shift : 0);
-        const y = dot.y + (distance ? dy / distance * shift : 0);
+        const shift = motion.matches
+          ? 0
+          : Math.min(Math.max(0, maxDistance), distance) * influence;
+        const x = dot.x + (distance ? (dx / distance) * shift : 0);
+        const y = dot.y + (distance ? (dy / distance) * shift : 0);
         ctx.globalAlpha = 0.4 + influence * 0.6;
         ctx.beginPath();
         ctx.moveTo(dot.x, dot.y);
         ctx.lineTo(x, y);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(x, y, Math.min(1.5, 0.55 + influence * Math.max(0, dotSizeMultiplier) / 100), 0, Math.PI * 2);
+        ctx.arc(
+          x,
+          y,
+          Math.min(
+            1.5,
+            0.55 + (influence * Math.max(0, dotSizeMultiplier)) / 100,
+          ),
+          0,
+          Math.PI * 2,
+        );
         ctx.fill();
       }
       ctx.globalAlpha = 1;
@@ -100,11 +111,18 @@ export function InteractiveCanvas({
       fill = dotColor ?? style.getPropertyValue("--thinking-dot").trim();
       stroke = lineColor ?? style.getPropertyValue("--thinking-line").trim();
       const inset = Math.max(0, Math.min(padding, width / 2, height / 2));
-      const columns = Math.max(2, Math.min(60, Math.floor(gridWidth), Math.floor(width / 14)));
-      const rows = Math.max(2, Math.min(60, Math.floor(gridHeight), Math.floor(height / 14)));
+      const columns = Math.max(
+        2,
+        Math.min(60, Math.floor(gridWidth), Math.floor(width / 14)),
+      );
+      const rows = Math.max(
+        2,
+        Math.min(60, Math.floor(gridHeight), Math.floor(height / 14)),
+      );
       dots = Array.from({ length: columns * rows }, (_, i) => ({
-        x: inset + (i % columns) * (width - inset * 2) / (columns - 1),
-        y: inset + Math.floor(i / columns) * (height - inset * 2) / (rows - 1),
+        x: inset + ((i % columns) * (width - inset * 2)) / (columns - 1),
+        y:
+          inset + (Math.floor(i / columns) * (height - inset * 2)) / (rows - 1),
       }));
       restart();
     };
@@ -113,9 +131,14 @@ export function InteractiveCanvas({
       const rect = canvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
-      pointer = x >= 0 && y >= 0 && x <= rect.width && y <= rect.height ? { x, y } : null;
+      pointer =
+        x >= 0 && y >= 0 && x <= rect.width && y <= rect.height
+          ? { x, y }
+          : null;
     };
-    const leave = () => { pointer = null; };
+    const leave = () => {
+      pointer = null;
+    };
     const observer = new ResizeObserver(resize);
     const intersection = new IntersectionObserver(([entry]) => {
       visible = entry.isIntersecting;
@@ -139,7 +162,25 @@ export function InteractiveCanvas({
       document.removeEventListener("visibilitychange", restart);
       motion.removeEventListener("change", restart);
     };
-  }, [gridWidth, gridHeight, dotColor, lineColor, backgroundColor, padding, maxDistance, dotSizeMultiplier]);
+  }, [
+    gridWidth,
+    gridHeight,
+    dotColor,
+    lineColor,
+    backgroundColor,
+    padding,
+    maxDistance,
+    dotSizeMultiplier,
+  ]);
 
-  return <canvas ref={canvasRef} aria-hidden="true" className={cn("interactive-canvas pointer-events-none absolute inset-0 block size-full", className)} />;
+  return (
+    <canvas
+      ref={canvasRef}
+      aria-hidden="true"
+      className={cn(
+        "interactive-canvas pointer-events-none absolute inset-0 block size-full",
+        className,
+      )}
+    />
+  );
 }

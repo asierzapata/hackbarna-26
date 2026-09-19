@@ -1,5 +1,9 @@
 import * as React from "react";
-import { RiKey2Line, RiLogoutBoxRLine, RiSparkling2Line } from "@remixicon/react";
+import {
+  RiKey2Line,
+  RiLogoutBoxRLine,
+  RiSparkling2Line,
+} from "@remixicon/react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -24,11 +28,7 @@ import {
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import {
-  providerLabels,
-  useAgent,
-  type Provider,
-} from "./agent-context";
+import { providerLabels, useAgent, type Provider } from "./agent-context";
 
 const providers: Provider[] = ["devin", "openai"];
 
@@ -46,7 +46,15 @@ export function SignInButton() {
     const provider = status.providerLabel ?? "Agent";
     return (
       <div className="inline-flex items-center gap-0.5">
-        {status.message && <span role="alert" className="max-w-64 truncate text-xs text-destructive" title={status.message}>{status.message}</span>}
+        {status.message && (
+          <span
+            role="alert"
+            className="max-w-64 truncate text-xs text-destructive"
+            title={status.message}
+          >
+            {status.message}
+          </span>
+        )}
         <span
           className="inline-flex h-8 items-center gap-1.5 px-2.5 text-xs font-medium text-muted-foreground"
           data-testid="agent-status"

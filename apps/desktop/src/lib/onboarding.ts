@@ -14,10 +14,17 @@ export interface OnboardingResult {
 
 export async function isOnboardingComplete(): Promise<boolean> {
   const profile = await getInstallationProfile();
-  return Boolean(profile && profile.onboardingCompletedAt && profile.name && profile.onboardingVersion >= 2);
+  return Boolean(
+    profile &&
+    profile.onboardingCompletedAt &&
+    profile.name &&
+    profile.onboardingVersion >= 2,
+  );
 }
 
-export async function completeOnboarding(displayName: string): Promise<OnboardingResult> {
+export async function completeOnboarding(
+  displayName: string,
+): Promise<OnboardingResult> {
   const validation = validateDisplayName(displayName);
   if (!validation.valid) {
     throw new Error(validation.error ?? "Invalid display name");
