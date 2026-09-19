@@ -14,7 +14,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
-import { AssistantResultSchema, buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { parseStructuredOutput } from "@/lib/assistant-controller";
 import { useQaSource } from "@/lib/qa-source";
 
 /** Providers, keyed the way the Rust side deserializes them. */
@@ -304,9 +305,9 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         const invokePromise = invoke<string>("agent_prompt_structured", { prompt: buildAssistantPrompt(mode, context), turnId: id });
         const raw = await Promise.race([invokePromise, abortPromise]);
         if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
-        let value: unknown;
-        try { value = JSON.parse(raw); } catch { throw new Error("agent returned non-JSON structured output"); }
-        const result = AssistantResultSchema.parse(value);
+        let result: AssistantResult;
+        try { result = parseStructuredOutput(raw); }
+        catch (error) { throw new Error(`agent returned unusable structured output: ${error instanceof Error ? error.message : error}`); }
         if ((mode === "context" || mode === "propose") && result.kind === "act") throw new Error("contextual assistant turns cannot act");
         return result;
       } finally {
