@@ -22,10 +22,11 @@ export interface PublishResult {
   created: boolean;
 }
 
-const DEFAULT_BACKEND_URL = "http://localhost:8787";
+// The deployed room server. Point VITE_ROOM_SERVER_URL at
+// http://localhost:8787 in .env.local to work against `npm run server`.
+const DEFAULT_BACKEND_URL = "https://kan.asierzapata.com";
 
 export function getBackendBaseUrl(): string {
-  // Allow overriding via environment variable
   const envUrl = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_ROOM_SERVER_URL;
   if (envUrl && envUrl.trim().length > 0) {
     return envUrl.trim().replace(/\/+$/, "");
