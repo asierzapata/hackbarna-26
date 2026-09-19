@@ -45,6 +45,12 @@ function intersects(a: Bounds, b: Bounds) {
   );
 }
 
+function easeInOutQuart(t: number) {
+  return t < 0.5
+    ? 8 * t * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 4) / 2;
+}
+
 function textFromRichText(value: unknown): string {
   if (!value || typeof value !== "object") return "";
   if ("text" in value && typeof value.text === "string") return value.text;
@@ -144,6 +150,20 @@ export function createCanvasTools(editor: Editor) {
           draftToShapePartial(parsed.draft, id, position, parsed.provenance),
         );
       });
+
+      const bounds = editor.getShapePageBounds(id);
+      if (bounds) {
+        editor.centerOnPoint(
+          { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 },
+          {
+            animation: {
+              duration: editor.options.animationMediumMs * 5,
+              easing: easeInOutQuart,
+            },
+          },
+        );
+      }
+
       return { shapeId: id };
     },
 
