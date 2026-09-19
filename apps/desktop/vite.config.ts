@@ -9,6 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
+  envDir: path.resolve(__dirname, "../.."),
   plugins: [
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
     react(),

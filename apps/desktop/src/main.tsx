@@ -6,6 +6,20 @@ import "./styles.css";
 
 const router = createRouter({ routeTree });
 
+if (import.meta.env.DEV) {
+  const devWindow = window as Window & { __kanErrors?: string[] };
+  devWindow.__kanErrors = [];
+  window.addEventListener("error", (event) => {
+    devWindow.__kanErrors?.push(event.message);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    devWindow.__kanErrors?.push(
+      reason instanceof Error ? reason.message : String(reason),
+    );
+  });
+}
+
 declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;

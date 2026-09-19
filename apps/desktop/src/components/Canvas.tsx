@@ -9,6 +9,7 @@ import {
 import { useSync } from "@tldraw/sync";
 import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
 import "tldraw/tldraw.css";
+import "@/nodes/nodes.css";
 
 import { shapeUtils } from "@/lib/canvas-shapes";
 import { consumeCanvasInitialRecords } from "@/lib/canvas-repository";
@@ -18,10 +19,17 @@ import {
   getRoomWebSocketUrl,
   uploadServerAsset,
 } from "@/lib/api-client";
+import { createKanShapeUtils } from "@/nodes/shapes";
+import { createCanvasTools, type CanvasTools } from "@/nodes/tools";
 import { useCanvas } from "./canvas-context";
 
 const assetUrls = getAssetUrlsByImport();
+const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
 const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils];
+
+type KanDevWindow = Window & {
+  __kan?: { editor: Editor; tools: CanvasTools };
+};
 
 export function Canvas({ roomId, online = false }: { roomId: string; online?: boolean }) {
   return online ? <OnlineCanvas roomId={roomId} /> : <OfflineCanvas roomId={roomId} />;
@@ -40,11 +48,23 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           if (initialRecords?.length) editor.store.put(initialRecords as any[]);
         });
       }
+
+      if (import.meta.env.DEV) {
+        (window as KanDevWindow).__kan = {
+          editor,
+          tools: createCanvasTools(editor),
+        };
+      }
+
+      return () => {
+        setEditor(null);
+        if ((window as KanDevWindow).__kan?.editor === editor) {
+          delete (window as KanDevWindow).__kan;
+        }
+      };
     },
     [roomId, setEditor]
   );
-
-  React.useEffect(() => () => setEditor(null), [setEditor]);
 
   return (
     <section className="canvas" aria-label="Infinite canvas">
@@ -55,7 +75,7 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           key={roomId}
           persistenceKey={`kan-room-${roomId}`}
           assetUrls={assetUrls}
-          shapeUtils={shapeUtils}
+          shapeUtils={canvasShapeUtils}
           onMount={onMount}
         />
       </div>

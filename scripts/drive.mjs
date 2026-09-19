@@ -10,6 +10,7 @@
  *   node scripts/drive.mjs text <css>             textContent of a selector
  *   node scripts/drive.mjs click <css>            click an element
  *   node scripts/drive.mjs clickText <label>      click a button/tab by its label
+ *   node scripts/drive.mjs drag <css> <dx> <dy>   drag from an element's centre
  *   node scripts/drive.mjs reload                 reload the webview
  *   node scripts/drive.mjs fill <css> <value>     set an input's value
  *   node scripts/drive.mjs shot [path]            PNG screenshot (default /tmp/kan.png)
@@ -79,6 +80,91 @@ const commands = {
        el.click();
        return true;`,
       [selector]
+    );
+  },
+
+  async drag(call, [selector, dxArg, dyArg]) {
+    const dx = Number(dxArg);
+    const dy = Number(dyArg);
+    if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+      throw new Error("drag dx and dy must be finite numbers");
+    }
+    const element = await evalJs(
+      call,
+      `const el = document.querySelector(arguments[0]);
+       if (!el) throw new Error("no element for " + arguments[0]);
+       return el;`,
+      [selector]
+    );
+    const steps = [1, 2, 3].map((step) => ({
+      x: Math.round((dx * step) / 3) - Math.round((dx * (step - 1)) / 3),
+      y: Math.round((dy * step) / 3) - Math.round((dy * (step - 1)) / 3),
+    }));
+    await call("POST", "/actions", {
+      actions: [{
+        type: "pointer",
+        id: "mouse",
+        parameters: { pointerType: "mouse" },
+        actions: [
+          { type: "pointerMove", duration: 0, origin: element, x: 0, y: 0 },
+          { type: "pointerDown", button: 0 },
+          ...steps.map(({ x, y }) => ({
+            type: "pointerMove",
+            duration: 100,
+            origin: "pointer",
+            x,
+            y,
+          })),
+          { type: "pointerUp", button: 0 },
+        ],
+      }],
+    });
+    await call("DELETE", "/actions");
+    return evalJs(
+      call,
+      `const el = document.querySelector(arguments[0]);
+       if (!el) throw new Error("no element for " + arguments[0]);
+       const dx = arguments[1];
+       const dy = arguments[2];
+       const rect = el.getBoundingClientRect();
+       const startX = rect.left + rect.width / 2;
+       const startY = rect.top + rect.height / 2;
+       const fire = (type, clientX, clientY, buttons) => el.dispatchEvent(
+         new PointerEvent(type, {
+           bubbles: true,
+           cancelable: true,
+           composed: true,
+           pointerId: 1,
+           isPrimary: true,
+           pointerType: "mouse",
+           button: 0,
+           buttons,
+           clientX,
+           clientY,
+         })
+       );
+       fire("pointerdown", startX, startY, 1);
+       fire("pointermove", startX + dx / 3, startY + dy / 3, 1);
+       fire("pointermove", startX + dx * 2 / 3, startY + dy * 2 / 3, 1);
+       fire("pointermove", startX + dx, startY + dy, 1);
+       fire("pointerup", startX + dx, startY + dy, 0);
+       const mouse = (type, clientX, clientY, buttons) => new MouseEvent(type, {
+         bubbles: true,
+         cancelable: true,
+         composed: true,
+         view: window,
+         button: 0,
+         buttons,
+         clientX,
+         clientY,
+       });
+       el.dispatchEvent(mouse("mousedown", startX, startY, 1));
+       document.dispatchEvent(mouse("mousemove", startX + dx / 3, startY + dy / 3, 1));
+       document.dispatchEvent(mouse("mousemove", startX + dx * 2 / 3, startY + dy * 2 / 3, 1));
+       document.dispatchEvent(mouse("mousemove", startX + dx, startY + dy, 1));
+       document.dispatchEvent(mouse("mouseup", startX + dx, startY + dy, 0));
+       return { selector: arguments[0], dx, dy };`,
+      [selector, dx, dy]
     );
   },
 

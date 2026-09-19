@@ -164,6 +164,57 @@ mode, apiKey)` command covers all four combinations.
   auth logout` / `codex logout` — which would log the user out of their terminal
   too.
 
+## Canvas nodes and the tool layer (`apps/desktop/src/nodes/`)
+
+The agent never touches tldraw directly; it goes through the tool layer.
+
+- `schema.ts` — zod contract (`nodeDraft`, `addNodeInput`, … and `toolSchemas`).
+  This is what the future MCP server exposes; keep `.describe()` on fields.
+  Pure, no React/DOM imports. Will move to `packages/protocol`.
+- `draft.ts` — pure `draftToShapePartial` / `shapeToSummary` mapping. Reusable
+  server-side. Will move to `packages/nodes`.
+- `shapes/` — tldraw `BaseBoxShapeUtil`s for `kan-markdown`, `kan-chart`,
+  `kan-table`, `kan-image`, `kan-map`, and `kan-logo`, registered via
+  `createKanShapeUtils()`. Interactive state that must be shared (hidden series,
+  sort, selected rows, focusX, map view and selected marker) lives in shape props.
+- `tools.ts` — `createCanvasTools(editor)` → `addNode`, `updateNode`,
+  `removeNodes`, `connectNodes`, `arrange`, `getCanvas`. Every input is
+  zod-parsed first.
+- In dev, `window.__kan = { editor, tools }` and `window.__kanErrors` exist.
+  There is no node demo palette, node scenario runner, or automatic canvas
+  seeding; nodes remain available through the tool layer. Existing room data
+  and the separate thread conversation simulator are preserved. Drive tools with
+  `node scripts/drive.mjs eval 'window.__kan.tools.getCanvas()'`.
+
+The rich node tools currently operate on offline desktop canvases; they are
+not wired into the room server's MCP tools or shared `kan-node` wire schema.
+Online canvases retain only the shared renderer; publishing rich-node snapshots
+requires that follow-up schema integration. Offline canvases register both
+renderers, preserve duplicated initial records, and reuse `CanvasProvider`.
+Run `node scripts/canvas-tools.e2e.mjs` against the Tauri driver to verify an
+empty fresh offline canvas, all eight rich node types, tool actions, thread
+selection labels, and persistence. It also runs the date-node e2e suite, cleans
+its own test canvas, and restores the original page. Do not drive concurrently.
+
+Keys: `apps/desktop/src/lib/config.ts` zod-parses `VITE_MAPTILER_KEY` and
+`VITE_BRANDFETCH_CLIENT_ID` from the root `.env.local` (see `.env.example`).
+Vite's `envDir` keeps that location stable after the workspace move. Both are
+optional — the map falls back to MapLibre demo tiles, the logo to a favicon.
+`VITE_*` vars are embedded in the frontend bundle, so only publishable keys
+belong there (the Brandfetch *client id* is publishable; its API key is not).
+`kan-logo` is deliberately chromeless (no `NodeCard`), aspect-locked, and
+`addNode({ near })` overlaps it on the near shape's top-right corner
+(`placementByType` in `draft.ts`). The map disables MapLibre's own `dragPan`
+and `scrollZoom` and forwards pointer/wheel gestures itself, otherwise tldraw's
+transformed layer breaks them.
+
+Pointer model inside a node: the `HTMLContainer` has `pointerEvents: all`; each
+interactive control calls `stopEventPropagation` on `pointerdown`; the card
+header is the drag handle. Custom shape types must be added to tldraw's
+`TLGlobalShapePropsMap` (see `shapes/types.ts`) or `editor.createShape` won't
+accept them. Arrow bindings need `snap: "none"` in tldraw 5; labels are
+`richText: toRichText(...)`.
+
 ## Gotchas
 
 - **The Devin CLI owns `~/.codex`.** It is a Codex fork, and its `auth.json`
@@ -216,3 +267,17 @@ use temporary `KAN_DATA_DIR` fixtures for verification. Append migrations instea
 of deleting user data. Keep installation credentials in the parent; pass only
 scoped run leases to MCP, obtain fresh socket tickets on reconnect, and never log
 credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
+
+## Timeline and calendar nodes
+
+- `kan-timeline` and `kan-calendar` share date-only events: stable unique `id`,
+  `title`, `start` (`YYYY-MM-DD`), optional inclusive `end`, `description`, and
+  `sourceNote`. Years 0001–9999 are supported; no timed events or external sync.
+- Timeline expansion (`selectedEventId`), calendar month (`YYYY-MM`), and
+  `selectedDate` live in shape props. Selecting a date through `updateNode`
+  reveals its month; changing months clears an out-of-month selection.
+- Unit checks: `node --test scripts/date-nodes.test.mjs` (Node 22.18+ or 24).
+  Repeat with `TZ=America/Los_Angeles` to check date-only timezone handling.
+- Running-app regression: start `npm run tauri:drive`, then run
+  `node scripts/date-nodes.e2e.mjs`. It creates and removes only its own test
+  nodes and restores the camera. Avoid driving the same window concurrently.

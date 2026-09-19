@@ -1,0 +1,84 @@
+@import "@maptiler/sdk/dist/maptiler-sdk.css";
+
+.kan-node[data-node-type="markdown"] { --node-accent: var(--node-markdown); }
+.kan-node[data-node-type="chart"] { --node-accent: var(--node-chart); }
+.kan-node[data-node-type="table"] { --node-accent: var(--node-table); }
+.kan-node[data-node-type="image"] { --node-accent: var(--node-image); }
+.kan-node[data-node-type="map"] { --node-accent: var(--node-map); }
+.kan-node[data-node-type="logo"] { --node-accent: var(--node-logo); }
+.kan-node[data-node-type="timeline"] { --node-accent: var(--chart-3); }
+.kan-node[data-node-type="calendar"] { --node-accent: var(--chart-2); }
+
+.kan-timeline {
+  margin: 4px 8px 4px 10px;
+  padding-left: 16px;
+  border-left: 2px solid var(--border);
+}
+.kan-timeline > li { position: relative; padding-bottom: 12px; }
+.kan-timeline > li::before {
+  content: "";
+  position: absolute;
+  left: -22px;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid var(--node-accent);
+}
+.kan-timeline > li[data-selected="true"]::before { background: var(--node-accent); }
+.kan-node [data-calendar-date][aria-current="date"] > span:first-child { text-decoration: underline; text-underline-offset: 3px; }
+
+.kan-node {
+  border-radius: 12px;
+  padding-top: 0;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--node-accent) 22%, var(--border)),
+    0 3px 12px color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+
+.kan-node > [data-slot="card-header"] {
+  flex-shrink: 0;
+  padding-top: var(--card-spacing);
+  background: color-mix(in oklab, var(--node-accent) 8%, var(--card));
+  border-color: color-mix(in oklab, var(--node-accent) 14%, var(--card));
+}
+
+.kan-node > [data-slot="card-header"] > div:first-child > svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--node-accent);
+}
+
+.kan-node [data-node-badge] {
+  border-radius: 999px;
+  border-color: color-mix(in oklab, var(--node-accent) 18%, transparent);
+  background: color-mix(in oklab, var(--node-accent) 7%, var(--card));
+  color: var(--node-accent);
+}
+
+.kan-node > [data-slot="card-footer"] {
+  flex-shrink: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.kan-prose {
+  color: var(--foreground);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.kan-prose > * + * { margin-top: 0.65rem; }
+.kan-prose h1, .kan-prose h2, .kan-prose h3 { font-family: var(--font-heading); font-weight: 600; line-height: 1.25; }
+.kan-prose h1 { font-size: 1.25rem; }
+.kan-prose h2 { font-size: 1.1rem; }
+.kan-prose h3 { font-size: 1rem; }
+.kan-prose ul, .kan-prose ol { padding-left: 1.25rem; }
+.kan-prose ul { list-style: disc; }
+.kan-prose ol { list-style: decimal; }
+.kan-prose a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
+.kan-prose code { background: var(--muted); padding: 0.1rem 0.25rem; font-family: var(--font-mono); }
+.kan-prose pre { overflow-x: auto; background: var(--muted); padding: 0.75rem; }
+.kan-prose pre code { padding: 0; }
+.kan-prose blockquote { border-left: 2px solid var(--border); padding-left: 0.75rem; color: var(--muted-foreground); }
+.kan-prose strong { font-weight: 600; }

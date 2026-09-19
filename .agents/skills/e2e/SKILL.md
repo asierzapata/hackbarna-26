@@ -65,6 +65,7 @@ node scripts/drive.mjs snapshot              # whole thread panel state at once
 node scripts/drive.mjs eval '<js expression>'
 node scripts/drive.mjs clickText 'Send'      # click a button/tab by label
 node scripts/drive.mjs click '<css>'
+node scripts/drive.mjs drag '<css>' 120 60   # pointer drag from element centre
 node scripts/drive.mjs fill '<css>' 'text'   # sets value the way React notices
 node scripts/drive.mjs shot /tmp/kan.png     # then Read the file
 node scripts/drive.mjs reload                # reset frontend state

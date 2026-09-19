@@ -11,6 +11,7 @@ import * as React from "react";
 import { useValue, type Editor, type TLShapeId } from "tldraw";
 
 import type { CanvasAnchor } from "@/lib/thread";
+import { isKanShape } from "@/nodes/shapes/types";
 
 interface CanvasContextValue {
   editor: Editor | null;
@@ -28,6 +29,11 @@ interface CanvasContextValue {
 /** Prefers the node's own title over its raw shape id. */
 function shapeLabel(editor: Editor, id: TLShapeId): string {
   const shape = editor.getShape(id);
+  if (shape && isKanShape(shape)) {
+    return shape.type === "kan-logo"
+      ? shape.props.name || shape.props.domain
+      : shape.props.title || id;
+  }
   if (shape?.type !== "kan-node") return id;
   const draft = (shape.props as { draft?: { type: string; title?: string; label?: string } })
     .draft;
@@ -65,7 +71,7 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
     () =>
       (editor?.getSelectedShapeIds() ?? []).map((id) => ({
         nodeId: id,
-        label: editor?.getShape(id)?.type === "kan-node" ? shapeLabel(editor, id) : id,
+        label: editor ? shapeLabel(editor, id) : id,
       })),
     [editor]
   );
