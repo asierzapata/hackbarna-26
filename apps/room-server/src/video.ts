@@ -7,6 +7,7 @@ export interface VideoProvider {
   applicationId: string;
   createSession(): Promise<{ sessionId: string }>;
   generateClientToken(sessionId: string, opts: { role: string; expireTime: number; data: string }): string;
+  startCaptions?(sessionId: string, token: string): Promise<void>;
 }
 
 const PEM_HEADER = "-----BEGIN";
@@ -34,7 +35,7 @@ function pem(value: string): string {
   return `${value.trimEnd()}\n`;
 }
 
-export function createVonageProvider(applicationId: string, privateKey: string): VideoProvider {
+export function createVonageProvider(applicationId: string, privateKey: string, languageCode = "en-US"): VideoProvider {
   const vonage = new Vonage(new Auth({ applicationId, privateKey: normalizePrivateKey(privateKey) }), { timeout: 5000 });
   return {
     applicationId,
@@ -43,5 +44,12 @@ export function createVonageProvider(applicationId: string, privateKey: string):
       return { sessionId: session.sessionId };
     },
     generateClientToken: (sessionId, opts) => vonage.video.generateClientToken(sessionId, opts),
+    async startCaptions(sessionId, token) {
+      try {
+        await vonage.video.enableCaptions(sessionId, token, { languageCode, maxDuration: 14400 });
+      } catch (error) {
+        if ((error as { response?: { status?: number } }).response?.status !== 409) throw error;
+      }
+    },
   };
 }

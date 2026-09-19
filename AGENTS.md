@@ -429,3 +429,37 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 - Focused tests: `npx tsx --tsconfig apps/desktop/tsconfig.json --test apps/desktop/test/agent-diagnostics.test.ts`,
   `npx tsx --test apps/agent-runner/test/diagnostics.test.ts`, and
   `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`.
+
+## Live room transcription
+
+- Vonage captions start after microphone publication, through authenticated
+  `POST /rooms/:id/captions`. The moderator token stays server-side; client video
+  tokens remain publishers. The existing Vonage SDK creates routed sessions and
+  enables partial captions by default. `VONAGE_CAPTION_LANGUAGE` selects the call
+  language on the server (default `en-US`); this is not automatic language detection.
+- Each client subscribes only to its own published stream for captions, using a
+  detached subscriber with audio/video reception disabled. Only that speaker
+  relays partial/final text through the authenticated events socket. The server
+  assigns the author, so muted listeners receive all transcripts without duplicate
+  writes. This path transcribes speech published by Kan clients, not external SIP
+  participants or other clients that do not relay their own captions.
+- Partials are ephemeral, replaced in place, and cleared on disconnect or after
+  15 seconds without an update. Only finals become durable `message` entries with
+  `source: "transcript"`; the UI maps those to collapsed transcript runs. Finals
+  use stable UUIDs and an in-memory retry queue across socket reconnects, not a
+  durable offline outbox. New captions do not open a collapsed run, and the thread
+  keeps the reader's expansion state independently of run grouping.
+- Caption-service starts are coalesced and refreshed every minute while publishing
+  audio, including after reconnect. Vonage ends captioning 60 seconds after the
+  last Video client disconnects. Retrying transcription does not restart media.
+  Deploy the room server and desktop together: old servers do not understand the
+  new transcript socket messages. Vonage live captions are usage-billed.
+- Focused checks: `npx tsx --tsconfig apps/desktop/tsconfig.json --test
+  apps/desktop/test/transcription.test.ts apps/room-server/test/transcription.test.ts`.
+  These cover controlled SDK events, rendering, real HTTP/WebSocket transport,
+  replay, attribution, and room isolation, not live-provider speech recognition.
+- A captions-only subscriber with `insertDefaultUI: false` must pass `undefined`
+  as the target element. Supplying even a detached div is rejected by OpenTok.js
+  before subscription (`OT_INVALID_PARAMETER`, code 1011). Keep the SDK option
+  compatibility assertion in the transcription test; an unconstrained mock missed
+  this integration failure.

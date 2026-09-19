@@ -12,7 +12,7 @@
  * here may widen it — `toViewEntry` is the only place the two vocabularies
  * meet.
  */
-import type { Entry, ExecutorPresence, Lease, NodeDraft, Room, User } from "@kan/protocol";
+import type { Entry, ExecutorPresence, Lease, LiveTranscript, NodeDraft, Room, TranscriptInput, User } from "@kan/protocol";
 import { EventsServerMessage } from "@kan/protocol";
 import {
   cancelServerTrigger,
@@ -52,12 +52,14 @@ export interface RoomSnapshot {
   executors: ExecutorPresence[];
   triggers: import("@kan/protocol").Trigger[];
   error?: string;
+  transcripts?: LiveTranscript[];
 }
 
 export interface RoomTransport {
   /** Fires on every authoritative websocket event and ready snapshot. */
   subscribe(onEntry: (entry: ThreadEntry) => void, onSnapshot?: (snapshot: RoomSnapshot) => void): () => void;
   send(input: SendInput): Promise<void>;
+  sendTranscript?(input: TranscriptInput | null): void;
   resolveSuggestion(entryId: string, accepted: boolean): Promise<void>;
   resolveOffer(entryId: string, accepted: boolean): Promise<void>;
   cancelTrigger(triggerId: string): Promise<void>;
@@ -106,6 +108,7 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
 
   switch (entry.kind) {
     case "message":
+      if (entry.source === "transcript") return { ...base, kind: "transcript", authorId: entry.authorId, text: entry.text };
       return {
         ...base,
         kind: "message",
@@ -202,6 +205,15 @@ export function createWsTransport(roomId: string): RoomTransport {
   let readiness: { ready: boolean; agentId: string; scope: "own" | "room" | "manual"; background: boolean } | null = null;
   let stopped = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const finalCaptions = new Map<string, TranscriptInput>();
+  let partialCaption: TranscriptInput | null = null;
+  let partialCaptionAt = 0;
+  const flushCaptions = (includePartial = false) => {
+    if (!ready || socket?.readyState !== WebSocket.OPEN) return;
+    for (const caption of finalCaptions.values()) socket.send(JSON.stringify({ type: "transcript", ...caption }));
+    if (partialCaption && Date.now() - partialCaptionAt >= 15_000) partialCaption = null;
+    if (includePartial && partialCaption) socket.send(JSON.stringify({ type: "transcript", ...partialCaption }));
+  };
 
   const emit = (entry: Entry) => {
     const view = toViewEntry(entry);
@@ -223,6 +235,7 @@ export function createWsTransport(roomId: string): RoomTransport {
       socket = ws;
       ws.onopen = () => sendReady(ws);
       ws.onmessage = (event) => {
+        if (socket !== ws || stopped || connectEpoch !== epoch) return;
         let raw: unknown;
         try {
           raw = JSON.parse(String(event.data));
@@ -231,7 +244,18 @@ export function createWsTransport(roomId: string): RoomTransport {
         }
         const parsed = EventsServerMessage.safeParse(raw);
         if (!parsed.success) return;
-        if (parsed.data.type === "event") {
+        if (parsed.data.type === "transcript") {
+          const { sessionId: speakerSession, caption } = parsed.data;
+          publishSnapshot({ ...currentSnapshot, transcripts: [...(currentSnapshot.transcripts ?? []).filter((line) => line.sessionId !== speakerSession), ...(caption ? [caption] : [])] });
+        } else if (parsed.data.type === "transcript.ack") {
+          finalCaptions.delete(parsed.data.id);
+        } else if (parsed.data.type === "transcript.error") {
+          finalCaptions.delete(parsed.data.id);
+          publishSnapshot({ ...currentSnapshot, error: parsed.data.error });
+        } else if (parsed.data.type === "event") {
+          const entry = parsed.data.event.entry;
+          finalCaptions.delete(entry.id);
+          if (currentSnapshot.transcripts?.some((line) => line.id === entry.id)) publishSnapshot({ ...currentSnapshot, transcripts: currentSnapshot.transcripts.filter((line) => line.id !== entry.id) });
           cursor = Math.max(cursor, parsed.data.event.cursor);
           if (parsed.data.event.entry.kind === "trigger") {
             const next = parsed.data.event.entry.trigger;
@@ -242,12 +266,13 @@ export function createWsTransport(roomId: string): RoomTransport {
           cursor = Math.max(cursor, parsed.data.cursor);
           sessionId = parsed.data.sessionId;
           ready = true;
-          publishSnapshot({ connected: true, ready: true, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: parsed.data.triggers });
+          publishSnapshot({ connected: true, ready: true, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: parsed.data.triggers, transcripts: parsed.data.transcripts });
           sendReady(ws);
-          heartbeatTimer = setInterval(() => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "heartbeat" })); }, 10_000);
+          flushCaptions(true);
+          heartbeatTimer = setInterval(() => { if (ws.readyState === WebSocket.OPEN) { ws.send(JSON.stringify({ type: "heartbeat" })); flushCaptions(); } }, 10_000);
           for (const entry of preReady.splice(0)) emit(entry);
         } else if (parsed.data.type === "presence") {
-          publishSnapshot({ connected: true, ready, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: currentSnapshot.triggers });
+          publishSnapshot({ ...currentSnapshot, connected: true, ready, sessionId, room: parsed.data.room, members: parsed.data.members, executors: parsed.data.executors, triggers: currentSnapshot.triggers });
         }
       };
       ws.onclose = () => {
@@ -287,6 +312,18 @@ export function createWsTransport(roomId: string): RoomTransport {
           ready = false;
         }
       };
+    },
+    sendTranscript(input) {
+      if (input?.isFinal) {
+        if (finalCaptions.size >= 200) {
+          publishSnapshot({ ...currentSnapshot, error: "Transcription could not be saved while disconnected. Reconnect the room." });
+          return;
+        }
+        finalCaptions.set(input.id, input);
+        if (partialCaption?.id === input.id) partialCaption = null;
+      } else { partialCaption = input; partialCaptionAt = Date.now(); }
+      if (!ready || socket?.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify(input ? { type: "transcript", ...input } : { type: "transcript.clear" }));
     },
     async send({ id, text, anchors, files, source, replyToEntryId }) {
       const attachments: string[] = [];

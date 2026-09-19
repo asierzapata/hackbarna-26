@@ -130,6 +130,7 @@ function attachEventsSocket(engine: Engine, roomId: string, userId: string, sinc
     })),
 
     triggers: engine.listTriggers(roomId),
+    transcripts: [...engine.getRoomHandle(roomId).sessions.values()].flatMap((peer) => peer.transcript ? [peer.transcript] : []),
   });
   ws.on("message", (data) => {
     session.lastSeen = engine.now();
@@ -145,7 +146,12 @@ function attachEventsSocket(engine: Engine, roomId: string, userId: string, sinc
       ws.close(4400, "unsupported message");
       return;
     }
-    if (msg.data.type === "executor.ready") {
+    if (msg.data.type === "transcript") {
+      try { engine.receiveTranscript(roomId, session.sessionId, msg.data); }
+      catch { send({ type: "transcript.error", id: msg.data.id, error: "A transcript line could not be saved." }); }
+    } else if (msg.data.type === "transcript.clear") {
+      engine.clearTranscript(roomId, session.sessionId);
+    } else if (msg.data.type === "executor.ready") {
       engine.setExecutorReady(roomId, session.sessionId, msg.data.ready, msg.data.agentId, msg.data.scope, msg.data.background);
       engine.tick();
     } else {

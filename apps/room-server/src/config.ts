@@ -24,7 +24,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): ServerConfi
   const classifier = mode === "disabled" ? null : new JevClassifier();
   const video =
     env.VONAGE_APPLICATION_ID && env.VONAGE_PRIVATE_KEY
-      ? createVonageProvider(env.VONAGE_APPLICATION_ID, env.VONAGE_PRIVATE_KEY)
+      ? createVonageProvider(env.VONAGE_APPLICATION_ID, env.VONAGE_PRIVATE_KEY, env.VONAGE_CAPTION_LANGUAGE || "en-US")
       : null;
   return {
     port,

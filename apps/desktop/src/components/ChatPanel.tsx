@@ -96,11 +96,15 @@ function describeError(error: unknown): string {
 export function ChatPanel({
   roomId,
   online = false,
+  roomTransport,
+  transcription,
   onClose,
   className,
 }: {
   roomId?: string;
   online?: boolean;
+  roomTransport?: RoomTransport;
+  transcription?: { status: string; error: string | null; retry: () => void };
   onClose?: () => void;
   className?: string;
 }) {
@@ -144,6 +148,7 @@ export function ChatPanel({
   }, []);
 
   const transport = React.useMemo<RoomTransport>(() => {
+    if (roomTransport) return roomTransport;
     if (online && roomId) return createWsTransport(roomId);
     return createLocalTransport({
       canvasId: roomId ?? fallbackCanvasId.current,
@@ -154,7 +159,7 @@ export function ChatPanel({
         return applyAssistantOperations(editorRef.current, operations, provenance);
       },
     });
-  }, [online, roomId]);
+  }, [online, roomId, roomTransport]);
 
   const [entries, setEntries] = React.useState<ThreadEntry[]>([]);
   const entryOrderRef = React.useRef(new Map<string, number>());
@@ -211,6 +216,9 @@ export function ChatPanel({
       // The room numbered it, so our optimistic copy is now the real thing.
       setPendingIds((prev) => withoutId(prev, entry.id));
     }, (snapshot) => {
+      for (const line of snapshot.transcripts ?? []) {
+        if (!entryOrderRef.current.has(line.id)) entryOrderRef.current.set(line.id, nextEntryOrderRef.current++);
+      }
       setRoomSnapshot(snapshot);
       if (snapshot.ready && snapshot.room?.assistantPaused !== undefined) setAssistantPaused(snapshot.room.assistantPaused);
     });
@@ -448,20 +456,23 @@ export function ChatPanel({
     return [...humans, ...agents];
   }, [agent.status.agent, roomSnapshot.executors, roomSnapshot.members, userId, userName]);
 
+  const liveEntries = React.useMemo(() => (roomSnapshot.transcripts ?? []).filter((line) => !entries.some((entry) => entry.id === line.id)).map((line) => ({ ...line, kind: "transcript" as const, seq: PENDING_SEQ })), [roomSnapshot.transcripts, entries]);
+  const visibleEntries = React.useMemo(() => [...entries, ...liveEntries], [entries, liveEntries]);
   const view = React.useMemo(
     () => ({
+      interimIds: new Set(liveEntries.map((line) => line.id)),
       pendingIds,
       streamingIds,
       entryOrder: entryOrderRef.current,
     }),
-    [pendingIds, streamingIds]
+    [pendingIds, streamingIds, liveEntries]
   );
 
   return (
     <ThreadPanel
       className={className}
       channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
-      entries={entries}
+      entries={visibleEntries}
       participants={participants}
       currentUserId={userId}
       anchors={selectedAnchors}
@@ -482,6 +493,10 @@ export function ChatPanel({
             <Switch checked={backgroundChecks} onCheckedChange={setBackgroundChecks} />
           </label>
           {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(() => undefined); }} /></label> : null}
+          {transcription && <div className="flex flex-col gap-1 text-muted-foreground">
+            <span>{transcription.status}</span>
+            {transcription.error && <div role="status" className="flex items-center gap-2"><span>{transcription.error}</span><Button variant="outline" size="xs" onClick={transcription.retry}>Retry transcription</Button></div>}
+          </div>}
           {actionError || roomSnapshot.error ? <p role="status">{actionError ?? roomSnapshot.error}</p> : null}
           <ConversationSimulator
             script={hackathonConversation}

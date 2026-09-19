@@ -279,6 +279,11 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
     return c.json(engine.resolveSuggestion(c.get("user").id, c.req.param("id")!, c.req.param("entryId")!, input.resolution));
   });
 
+  app.post("/rooms/:id/captions", auth, async (c) => {
+    await engine.startCaptions(c.get("user").id, c.req.param("id")!);
+    return c.json({ started: true });
+  });
+
   app.get("/rooms/:id/video-token", auth, async (c) => {
     return c.json(await engine.videoToken(c.get("user").id, c.req.param("id")!));
   });

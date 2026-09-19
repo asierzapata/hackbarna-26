@@ -14,6 +14,7 @@ import { getInstallationProfile } from "@/lib/installation-profile";
 import { RoomPrejoin, RoomParticipantStrip } from "../components/RoomVideo";
 import { useLocalMedia } from "../components/use-local-media";
 import { useRoomVideo } from "../components/use-room-video";
+import { createWsTransport } from "@/lib/room-transport";
 
 export const Route = createFileRoute("/room/$roomId")({
   component: RoomPage,
@@ -29,7 +30,8 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
   const [joined, setJoined] = React.useState(false);
   const [identity, setIdentity] = React.useState<{ id: string; name: string } | null>(null);
   const media = useLocalMedia();
-  const call = useRoomVideo(roomId, joined, media.state.audio.track, media.state.video.track);
+  const transport = React.useMemo(() => createWsTransport(roomId), [roomId]);
+  const call = useRoomVideo(roomId, joined, media.state.audio.track, media.state.video.track, transport.sendTranscript);
 
   React.useEffect(() => {
     let active = true;
@@ -122,6 +124,8 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
                 <ChatPanel
                   className="h-full w-full"
                   roomId={roomId}
+                  roomTransport={transport}
+                  transcription={call.transcription}
                   online
                   onClose={() => setThreadOpen(false)}
                 />
