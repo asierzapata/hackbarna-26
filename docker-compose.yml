@@ -1,7 +1,9 @@
 services:
   room-server:
     build: .
+    init: true
     restart: unless-stopped
+    stop_grace_period: 30s
     environment:
       KAN_DATA_DIR: /data
       PORT: 8787
@@ -26,11 +28,17 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
+    init: true
+    pull_policy: always
     restart: unless-stopped
-    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in /srv/kan.env}
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN:?set CF_TUNNEL_TOKEN in Dokploy}
     depends_on:
       room-server:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
 volumes:
   kan-data:
