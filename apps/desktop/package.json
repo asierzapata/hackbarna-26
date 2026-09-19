@@ -20,6 +20,7 @@
     "@kan/nodes": "0.1.0",
     "@kan/protocol": "0.1.0",
     "@maptiler/sdk": "^4.1.0",
+    "@opentok/client": "2.35.2",
     "@remixicon/react": "^4.9.0",
     "@shadcn/react": "^0.3.1",
     "@tailwindcss/vite": "^4.3.3",

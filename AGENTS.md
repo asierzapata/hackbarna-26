@@ -352,3 +352,18 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   `identifier`, `build.devUrl`, and `build.beforeDevCommand` (Vite `--port`). Set
   `TAURI_WEBDRIVER_PORT` for the app and `TAURI_WEBDRIVER_URL` for the driver.
   Do not stop or drive somebody else's app on the default ports.
+
+## Online room video
+
+- Every online room entry mounts `RoomPrejoin` before canvas sync or Vonage connects.
+  Device previews are local; `Join room` is the publication boundary. The room route
+  owns capture so the selected tracks survive the transition, and cancellation or
+  leaving releases them. `LocalMedia` cancels stale permission/device requests.
+- `useRoomVideo` lazy-loads `@opentok/client` and gets short-lived credentials from
+  authenticated `GET /rooms/:id/video-token`. Vonage application secrets stay on
+  the room server. Both-off participants still connect and can receive the call.
+- `RoomParticipantStrip` sits at the top center of the canvas. Online tldraw users
+  use `createUserId(installationId)` to match the identity in Vonage connection
+  data; following uses tldraw's native start/stop-following methods.
+- Focused media lifecycle checks: `npx tsx --test apps/desktop/test/room-media.test.ts`.
+  Live multi-person media and follow-view checks still require two room clients.

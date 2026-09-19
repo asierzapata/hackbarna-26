@@ -10,6 +10,10 @@ import { CanvasProvider } from "../components/canvas-context";
 import { getServerRoom } from "@/lib/api-client";
 import { getCanvasEntry, touchCanvas } from "@/lib/canvas-repository";
 import { duplicateOnlineToOffline } from "@/lib/duplicate-canvas";
+import { getInstallationProfile } from "@/lib/installation-profile";
+import { RoomPrejoin, RoomParticipantStrip } from "../components/RoomVideo";
+import { useLocalMedia } from "../components/use-local-media";
+import { useRoomVideo } from "../components/use-room-video";
 
 export const Route = createFileRoute("/room/$roomId")({
   component: RoomPage,
@@ -17,7 +21,23 @@ export const Route = createFileRoute("/room/$roomId")({
 
 function RoomPage() {
   const { roomId } = Route.useParams();
+  return <RoomWorkspace key={roomId} roomId={roomId} />;
+}
+
+function RoomWorkspace({ roomId }: { roomId: string }) {
   const navigate = useNavigate();
+  const [joined, setJoined] = React.useState(false);
+  const [identity, setIdentity] = React.useState<{ id: string; name: string } | null>(null);
+  const media = useLocalMedia();
+  const call = useRoomVideo(roomId, joined, media.state.audio.track, media.state.video.track);
+
+  React.useEffect(() => {
+    let active = true;
+    void getInstallationProfile().then((profile) => {
+      if (active && profile) setIdentity({ id: profile.installationId, name: profile.name });
+    });
+    return () => { active = false; };
+  }, []);
 
   const [threadOpen, setThreadOpen] = React.useState(true);
   const [roomTitle, setRoomTitle] = React.useState("Online Canvas");
@@ -89,12 +109,15 @@ function RoomPage() {
             title={roomTitle}
             mode="online"
             roomCode={roomCode}
-            onDuplicateOffline={handleDuplicateOffline}
+            onDuplicateOffline={joined ? handleDuplicateOffline : undefined}
           />
-          <main className="workspace__body relative">
+          {!joined || !identity ? <RoomPrejoin title={roomTitle} name={identity?.name ?? "You"} controls={media} onJoin={() => { if (identity) setJoined(true); }} onCancel={() => void navigate({ to: "/" })} /> : <main className="workspace__body relative">
             <WorkspacePanels
               chatOpen={threadOpen}
-              canvas={<Canvas roomId={roomId} online />}
+              canvas={<div className="relative flex h-full min-h-0 flex-col">
+                <Canvas roomId={roomId} online onlineUser={identity} />
+                <RoomParticipantStrip name={identity.name} controls={media} call={call} />
+              </div>}
               chat={
                 <ChatPanel
                   className="h-full w-full"
@@ -105,7 +128,7 @@ function RoomPage() {
               }
             />
             {!threadOpen ? <ChatReopenButton onClick={() => setThreadOpen(true)} /> : null}
-          </main>
+          </main>}
         </div>
       </CanvasProvider>
     </AgentProvider>

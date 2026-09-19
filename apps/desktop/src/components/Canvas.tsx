@@ -1,6 +1,9 @@
 import * as React from "react";
 import {
   Tldraw,
+  atom,
+  createUserId,
+  UserRecordType,
   defaultBindingUtils,
   defaultShapeUtils,
   DefaultStylePanel,
@@ -182,12 +185,14 @@ type KanDevWindow = Window & {
 export function Canvas({
   roomId,
   online = false,
+  onlineUser,
 }: {
   roomId: string;
   online?: boolean;
+  onlineUser?: { id: string; name: string };
 }) {
   return online ? (
-    <OnlineCanvas roomId={roomId} />
+    onlineUser ? <OnlineCanvas roomId={roomId} user={onlineUser} /> : null
   ) : (
     <OfflineCanvas roomId={roomId} />
   );
@@ -268,8 +273,11 @@ const onlineAssetStore: TLAssetStore = {
   },
 };
 
-function OnlineCanvas({ roomId }: { roomId: string }) {
+function OnlineCanvas({ roomId, user }: { roomId: string; user: { id: string; name: string } }) {
   const { setEditor } = useCanvas();
+  const users = React.useMemo(() => ({
+    currentUser: atom("room user", UserRecordType.create({ id: createUserId(user.id), name: user.name, color: "#5273c9" })),
+  }), [user.id, user.name]);
   const getSyncUri = React.useCallback(async () => {
     const { ticket } = await createSocketTicket(roomId, "sync");
     return getRoomWebSocketUrl(roomId, "sync", ticket);
@@ -278,6 +286,7 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
     shapeUtils: syncShapeUtils,
     bindingUtils: defaultBindingUtils,
     assets: onlineAssetStore,
+    users,
     uri: getSyncUri,
   });
 

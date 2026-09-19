@@ -211,6 +211,24 @@ export async function fetchServerAsset(assetId: string): Promise<Blob> {
   return res.blob();
 }
 
+export async function getRoomVideoToken(roomId: string, signal?: AbortSignal): Promise<{
+  applicationId: string;
+  sessionId: string;
+  token: string;
+  expiresAt: number;
+}> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/video-token`, { signal });
+  if (!res.ok) {
+    throw new Error(res.status === 503
+      ? "Video calls are not configured on this server. You can still use the canvas."
+      : res.status === 401 || res.status === 403
+        ? "You do not have permission to join this call. Reopen the room and try again."
+        : "The video service is unavailable. You can still use the canvas and retry the call.");
+  }
+  return res.json();
+}
+
 export async function createSocketTicket(
   roomId: string,
   channel: "sync" | "events"
