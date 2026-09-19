@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useEditor, useValue, type TLShapeId } from "tldraw";
 import { useAgent } from "./agent-context";
 import { InteractiveCanvas } from "./ui/interactive-canvas";
@@ -27,6 +28,13 @@ export function CanvasThinkingOverlay() {
     },
     [editor, thinkingShapeIds],
   );
+
+  // The overlay is the only consumer of the agent's thinking targets, so it is
+  // also the only honest place to observe them from a driver session.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as Window & { __kanThinking?: unknown }).__kanThinking = { shapeIds: thinkingShapeIds, rendered: targets.map((target) => target.id) };
+  }, [targets, thinkingShapeIds]);
 
   return (
     <>

@@ -98,10 +98,8 @@ function draftLabel(draft: NodeDraft): string {
 /**
  * Maps one wire entry onto the row model the thread renders.
  *
- * `trigger` returns null on purpose: a trigger is a real entry the whole room
- * sees, but the panel has no renderer for it yet, and dropping it here is
- * honest about that. Voice has no wire kind at all yet, so `transcript` view
- * entries only ever come from fixtures.
+ * Voice has no wire kind at all yet, so `transcript` view entries only ever
+ * come from fixtures — everything else the room can say has a case here.
  */
 export function toViewEntry(entry: Entry): ThreadEntry | null {
   const base = { id: entry.id, seq: entry.seq, at: entry.at };
@@ -159,6 +157,7 @@ export function toViewEntry(entry: Entry): ThreadEntry | null {
         reason: entry.trigger.reason,
         mode: entry.trigger.mode,
         status: entry.trigger.status,
+        anchors: entry.trigger.anchors,
         assigneeSessionId: entry.trigger.assigneeSessionId,
         attempt: entry.trigger.attempt,
       };

@@ -71,3 +71,13 @@ test("one local run owns the canvas, cancellation rejects late completion, retry
   assert.equal(secondLease!.attempt, 2);
   unsubscribe();
 });
+
+test("a local trigger inherits the anchors of the request that caused it", async () => {
+  const fixture = setup();
+  const transport = createLocalTransport(fixture.options);
+  const unsubscribe = transport.subscribe(() => {});
+  transport.setExecutorReady(true, "fixture", "own", false);
+  await transport.send({ id: crypto.randomUUID(), text: "@kan tidy these", anchors: ["shape:a", "shape:b"], files: [], source: "typed" });
+  assert.deepEqual(transport.snapshot().triggers[0].anchors, ["shape:a", "shape:b"]);
+  unsubscribe();
+});

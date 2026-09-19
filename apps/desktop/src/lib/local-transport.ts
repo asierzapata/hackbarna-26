@@ -117,7 +117,10 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
     }
   };
   const addTrigger = (causeEntryIds: string[], mode: "act" | "context", approval?: { request: string; offerId: string }) => {
-    const trigger: Trigger = { id: crypto.randomUUID(), causeEntryIds, requestedBy: options.userId, reason: approval?.request.slice(0, 1000) ?? (mode === "act" ? "Requested assistance" : "Check whether a grounded contribution would help"), intent: "answer", mode, anchors: [], confidence: 1, status: "needs_claim", assigneeSessionId: null, offerExpiresAt: null, attempt: 0, runId: null, source: approval ? "accepted" : mode === "act" ? "explicit" : "context", createdAt: Date.now(), ...(approval ? { approvedRequest: approval.request, acceptedOfferId: approval.offerId } : {}) };
+    // The nodes selected when the request was made are what the request is
+    // about, so they are also what the canvas lights up while Kan works.
+    const anchors = [...new Set(entries.flatMap((entry) => causeEntryIds.includes(entry.id) && entry.kind === "message" ? entry.anchors : []))].slice(0, 64);
+    const trigger: Trigger = { id: crypto.randomUUID(), causeEntryIds, requestedBy: options.userId, reason: approval?.request.slice(0, 1000) ?? (mode === "act" ? "Requested assistance" : "Check whether a grounded contribution would help"), intent: "answer", mode, anchors, confidence: 1, status: "needs_claim", assigneeSessionId: null, offerExpiresAt: null, attempt: 0, runId: null, source: approval ? "accepted" : mode === "act" ? "explicit" : "context", createdAt: Date.now(), ...(approval ? { approvedRequest: approval.request, acceptedOfferId: approval.offerId } : {}) };
     entries.push({ ...base(), kind: "trigger", trigger });
     fresh.add(trigger.id);
     refreshOffers();

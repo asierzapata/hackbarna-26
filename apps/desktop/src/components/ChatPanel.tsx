@@ -205,7 +205,7 @@ export function ChatPanel({
         const value = await getServerRunContext(roomId!, lease.runId, lease.leaseToken);
         return { revision: value.revision, value };
       },
-      run: (mode, context, signal) => runAssistantTurn({ ready: agent.status.state === "ready", agentId: agent.status.agent ?? "Kan", run: (nextMode, nextContext, nextSignal) => agent.runStructured(nextMode, nextContext, nextSignal) }, mode, context, signal),
+      run: (mode, context, signal) => runAssistantTurn({ ready: agent.status.state === "ready", agentId: agent.status.agent ?? "Kan", run: (nextMode, nextContext, nextSignal) => agent.runStructured(nextMode, nextContext, nextSignal, trigger.anchors) }, mode, context, signal),
       heartbeat: () => online ? heartbeatServerRun(roomId!, lease.runId, lease.leaseToken) : (transport as LocalTransport).heartbeatLocal(lease.runId),
       complete: (input, signal) => {
         if (signal.aborted) return Promise.reject(new DOMException("assistant turn cancelled", "AbortError"));
@@ -451,6 +451,7 @@ export function ChatPanel({
       composer={{
         onSend: handleSend,
         disabled: userId === DEFAULT_USER || !roomSnapshot.ready,
+        agentReady: agent.status.state === "ready",
         modelSelection: models.length ? modelSelection : undefined,
         models,
         modelDisabled: agent.busy || agent.status.state !== "ready",

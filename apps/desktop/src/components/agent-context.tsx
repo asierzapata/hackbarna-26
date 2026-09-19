@@ -14,7 +14,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
-import { AssistantResultSchema, buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { parseStructuredOutput } from "@/lib/assistant-controller";
 import { useQaSource } from "@/lib/qa-source";
 
 /** Providers, keyed the way the Rust side deserializes them. */
@@ -97,7 +98,17 @@ interface AgentApi {
   signOut: () => Promise<void>;
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
-  runStructured: (mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) => Promise<AssistantResult>;
+  /**
+   * One structured turn against a claimed trigger. `shapeIds` are the nodes
+   * the trigger anchored on, so the canvas shows what Kan is looking at for
+   * the same reason a tool-driven turn does.
+   */
+  runStructured: (
+    mode: "act" | "context" | "propose",
+    context: unknown,
+    signal: AbortSignal,
+    shapeIds?: string[]
+  ) => Promise<AssistantResult>;
   busy: boolean;
   thinkingShapeIds: string[];
   cancel: () => Promise<void>;
@@ -283,12 +294,12 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         }
       }
     },
-    runStructured: async (mode, context, signal) => {
+    runStructured: async (mode, context, signal, shapeIds) => {
       if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
       if (turnId.current) throw new Error("An agent turn is already running");
       const id = crypto.randomUUID();
       turnId.current = id;
-      setThinkingShapeIds([]);
+      setThinkingShapeIds(shapeIds ?? []);
       setBusy(true);
       let abortHandler: (() => void) | undefined;
       try {
@@ -304,9 +315,9 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         const invokePromise = invoke<string>("agent_prompt_structured", { prompt: buildAssistantPrompt(mode, context), turnId: id });
         const raw = await Promise.race([invokePromise, abortPromise]);
         if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
-        let value: unknown;
-        try { value = JSON.parse(raw); } catch { throw new Error("agent returned non-JSON structured output"); }
-        const result = AssistantResultSchema.parse(value);
+        let result: AssistantResult;
+        try { result = parseStructuredOutput(raw); }
+        catch (error) { throw new Error(`agent returned unusable structured output: ${error instanceof Error ? error.message : error}`); }
         if ((mode === "context" || mode === "propose") && result.kind === "act") throw new Error("contextual assistant turns cannot act");
         return result;
       } finally {
