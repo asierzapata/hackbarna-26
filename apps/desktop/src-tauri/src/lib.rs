@@ -1,6 +1,7 @@
 mod agent;
 mod agent_preferences;
 mod canvas_mcp;
+mod qa;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -22,6 +23,7 @@ pub fn run() {
             agent::agent_preferences,
             agent::agent_cancel,
             agent::agent_canvas_result,
+            qa::qa_save_report,
         ]);
 
     // Automation server for e2e tests. Gated behind the `webdriver` feature so
