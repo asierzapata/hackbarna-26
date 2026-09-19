@@ -16,6 +16,7 @@ import {
   type Editor,
   type TLAssetStore,
   type TLComponents,
+  type TLUiOverrides,
 } from "tldraw";
 import { useSync } from "@tldraw/sync";
 import { getAssetUrlsByImport } from "@tldraw/assets/imports.vite";
@@ -31,7 +32,12 @@ import {
   uploadServerAsset,
 } from "@/lib/api-client";
 import { createKanShapeUtils } from "@/nodes/shapes";
-import { createCanvasTools, type CanvasTools } from "@/nodes/tools";
+import {
+  createCanvasTools,
+  isGroupedFrame,
+  ungroupCanvasFrame,
+  type CanvasTools,
+} from "@/nodes/tools";
 import { useCanvas } from "./canvas-context";
 import { CanvasThinkingOverlay } from "./CanvasThinkingOverlay";
 
@@ -98,6 +104,36 @@ const canvasComponents = {
   InFrontOfTheCanvas: CanvasThinkingOverlay,
 } satisfies TLComponents;
 
+const canvasOverrides: TLUiOverrides = {
+  actions: (editor, actions) => {
+    const groupAction = actions.group;
+    if (!groupAction) return actions;
+
+    return {
+      ...actions,
+      group: {
+        ...groupAction,
+        onSelect(source) {
+          const selectedShapeIds = editor.getSelectedShapeIds();
+          const onlySelectedShape = editor.getOnlySelectedShape();
+          if (onlySelectedShape && isGroupedFrame(onlySelectedShape)) {
+            ungroupCanvasFrame(editor, onlySelectedShape.id);
+            return;
+          }
+          if (
+            selectedShapeIds.length < 2 ||
+            (onlySelectedShape && editor.isShapeOfType(onlySelectedShape, "group"))
+          ) {
+            groupAction.onSelect(source);
+            return;
+          }
+          createCanvasTools(editor).groupNodes({ shapeIds: selectedShapeIds });
+        },
+      },
+    };
+  },
+};
+
 type KanDevWindow = Window & {
   __kan?: { editor: Editor; tools: CanvasTools };
 };
@@ -148,6 +184,7 @@ function OfflineCanvas({ roomId }: { roomId: string }) {
           assetUrls={assetUrls}
           shapeUtils={canvasShapeUtils}
           components={canvasComponents}
+          overrides={canvasOverrides}
           onMount={onMount}
         />
       </div>
@@ -200,6 +237,7 @@ function OnlineCanvas({ roomId }: { roomId: string }) {
           assetUrls={assetUrls}
           shapeUtils={shapeUtils}
           components={canvasComponents}
+          overrides={canvasOverrides}
           onMount={onMount}
         />
       </div>

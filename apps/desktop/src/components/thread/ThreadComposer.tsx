@@ -14,6 +14,7 @@ import {
   type AiModel,
 } from "@/components/ui/ai-model-select";
 import type { CanvasAnchor } from "@/lib/thread";
+import { useQaSource } from "@/lib/qa-source";
 
 export interface ThreadComposerProps {
   /** Canvas nodes currently selected — the message will be anchored to them. */
@@ -39,6 +40,7 @@ export function ThreadComposer({
   onModelSelectionChange,
 }: ThreadComposerProps) {
   const [text, setText] = React.useState("");
+  useQaSource("composer", () => ({ text, anchors, disabled, modelSelection }));
   const canSend = !disabled && text.trim().length > 0;
 
   function send() {

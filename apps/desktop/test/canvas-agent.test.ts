@@ -3,12 +3,14 @@ import { test } from "node:test";
 import { canvasToolDefinitions, executeCanvasTool, buildCanvasPrompt, shouldActOnLine } from "../src/lib/canvas-agent";
 import { hackathonConversation } from "../src/lib/conversation-script";
 
-test("MCP exposes the seven validated canvas tools with calendar, map, and native geo schemas", () => {
-  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "removeNodes", "updateNode"]);
+test("MCP exposes the eight validated canvas tools with native geo, focus, and grouping schemas", () => {
+  assert.deepEqual(canvasToolDefinitions.map(({ name }) => name).sort(), ["addNode", "arrange", "connectNodes", "focusNodes", "getCanvas", "groupNodes", "removeNodes", "updateNode"]);
   const add = canvasToolDefinitions.find(({ name }) => name === "addNode")!;
   assert.match(JSON.stringify(add.inputSchema), /calendar/);
   assert.match(JSON.stringify(add.inputSchema), /map/);
   assert.match(JSON.stringify(add.inputSchema), /geo/);
+  const group = canvasToolDefinitions.find(({ name }) => name === "groupNodes")!;
+  assert.match(JSON.stringify(group.inputSchema), /shapeIds/);
   assert.equal(add.inputSchema.type, "object");
   const focus = canvasToolDefinitions.find(({ name }) => name === "focusNodes")!;
   assert.match(JSON.stringify(focus.inputSchema), /shapeIds/);
@@ -53,4 +55,5 @@ test("conversation triggers request calendar, map and sponsors without duplicate
   assert.match(prompt, /getCanvas/);
   assert.match(prompt, /focusNodes/);
   assert.match(prompt, /native tldraw geo shapes/);
+  assert.match(prompt, /groupNodes/);
 });

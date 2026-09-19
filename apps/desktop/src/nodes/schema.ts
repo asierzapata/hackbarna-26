@@ -226,6 +226,9 @@ export const arrangeInput = z.object({
 export const focusNodesInput = z.object({
   shapeIds: z.array(z.string()).min(1).describe("Existing shape IDs to fit in the camera; every ID must be on the current page"),
 });
+export const groupNodesInput = z.object({
+  shapeIds: z.array(z.string()).min(2).describe("Existing canvas node IDs to place in one group"),
+});
 export const getCanvasInput = z.object({
   scope: z.enum(["summary", "selection", "viewport", "full"]).default("summary"),
   shapeIds: z.array(z.string()).optional(),
@@ -237,6 +240,7 @@ export type RemoveNodesInput = z.infer<typeof removeNodesInput>;
 export type ConnectNodesInput = z.infer<typeof connectNodesInput>;
 export type ArrangeInput = z.infer<typeof arrangeInput>;
 export type FocusNodesInput = z.infer<typeof focusNodesInput>;
+export type GroupNodesInput = z.infer<typeof groupNodesInput>;
 export type GetCanvasInput = z.infer<typeof getCanvasInput>;
 
 export const toolSchemas = {
@@ -246,5 +250,6 @@ export const toolSchemas = {
   connectNodes: connectNodesInput,
   arrange: arrangeInput,
   focusNodes: focusNodesInput,
+  groupNodes: groupNodesInput,
   getCanvas: getCanvasInput,
 };

@@ -12,6 +12,7 @@ import { useValue, type Editor, type TLShapeId } from "tldraw";
 
 import type { CanvasAnchor } from "@/lib/thread";
 import { isKanShape } from "@/nodes/shapes/types";
+import { useQaSource } from "@/lib/qa-source";
 
 interface CanvasContextValue {
   editor: Editor | null;
@@ -34,6 +35,7 @@ function shapeLabel(editor: Editor, id: TLShapeId): string {
       ? shape.props.name || shape.props.domain
       : shape.props.title || id;
   }
+  if (shape?.type === "frame") return shape.props.name || "Group";
   if (shape?.type !== "kan-node") return id;
   const draft = (shape.props as { draft?: { type: string; title?: string; label?: string } })
     .draft;
@@ -44,6 +46,14 @@ const CanvasContext = React.createContext<CanvasContextValue | null>(null);
 
 export function CanvasProvider({ children }: { children: React.ReactNode }) {
   const [editor, setEditor] = React.useState<Editor | null>(null);
+  useQaSource("canvas", () => editor ? {
+    snapshot: editor.store.getStoreSnapshot(),
+    pageId: editor.getCurrentPageId(),
+    selectedShapeIds: editor.getSelectedShapeIds(),
+    camera: editor.getCamera(),
+    tool: editor.getCurrentToolId(),
+    instance: editor.getInstanceState(),
+  } : { ready: false });
 
   const jumpToNode = React.useCallback(
     (anchor: CanvasAnchor) => {

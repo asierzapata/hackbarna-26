@@ -44,8 +44,8 @@ export function NodeCard({
   contentClassName,
 }: {
   type: Exclude<NodeType, "geo">;
-  title: string;
-  description?: string;
+  title: ReactNode;
+  description?: ReactNode;
   headerMeta?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
@@ -70,7 +70,10 @@ export function NodeCard({
           <Badge variant="outline" data-node-badge>{type}</Badge>
         </div>
         {description ? (
-          <CardDescription className="col-span-2 truncate" title={description}>
+          <CardDescription
+            className="col-span-2 truncate"
+            title={typeof description === "string" ? description : undefined}
+          >
             {description}
           </CardDescription>
         ) : null}
