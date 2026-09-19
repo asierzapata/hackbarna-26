@@ -1,26 +1,35 @@
 /**
- * Devin agent runner, seen from the webview.
+ * The agent runner, seen from the webview.
  *
- * The ACP client itself lives in Rust (`src-tauri/src/devin.rs`); this is the
+ * The ACP client itself lives in Rust (`src-tauri/src/agent.rs`); this is the
  * thin side: three commands and one event stream. Nothing here knows about the
- * protocol beyond the shape of a `session/update`.
+ * protocol beyond the shape of a `session/update`, or about the difference
+ * between the providers beyond their names.
  *
- * Connecting is deliberately lazy — no `devin acp` process is spawned until
- * someone presses the button in the header.
+ * Connecting is deliberately lazy — no agent process is spawned until someone
+ * signs in from the header. Exactly one provider is connected at a time.
  */
 import * as React from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-export type DevinState =
-  | "idle"
-  | "connecting"
-  | "needs_login"
-  | "ready"
-  | "unavailable";
+/** Providers, keyed the way the Rust side deserializes them. */
+export type Provider = "devin" | "openai";
 
-export interface DevinStatus {
-  state: DevinState;
+/** Which credentials to sign in with. */
+export type AuthMode = "subscription" | "api_key";
+
+export const providerLabels: Record<Provider, string> = {
+  devin: "Devin",
+  openai: "OpenAI",
+};
+
+export type AgentState = "idle" | "connecting" | "ready" | "unavailable";
+
+export interface AgentStatus {
+  state: AgentState;
+  provider?: Provider | null;
+  providerLabel?: string | null;
   agent?: string | null;
   message?: string | null;
 }
@@ -34,7 +43,7 @@ type SessionUpdate =
   | { sessionUpdate: string };
 
 /** A tool call as the thread wants it: `kind` and `title` may arrive apart. */
-export interface DevinToolCall {
+export interface AgentToolCall {
   id: string;
   title?: string;
   kind?: string;
@@ -45,26 +54,31 @@ export interface DevinToolCall {
 export interface PromptHandlers {
   /** A chunk of the agent's reply. Append, don't replace. */
   onText?: (text: string) => void;
-  onTool?: (call: DevinToolCall) => void;
+  onTool?: (call: AgentToolCall) => void;
 }
 
-interface DevinApi {
-  status: DevinStatus;
-  /** Start the agent and report whether it needs a login. */
-  connect: () => Promise<void>;
-  /** Run the agent's browser auth flow, then open a session. */
-  login: () => Promise<void>;
-  /** Stop the agent. Credentials are untouched, so reconnecting is one click. */
-  disconnect: () => Promise<void>;
+interface AgentApi {
+  status: AgentStatus;
+  /**
+   * Start a provider and open a session with the chosen credentials. The key is
+   * only read for `api_key` mode and is never persisted — on either side.
+   */
+  signIn: (
+    provider: Provider,
+    mode: AuthMode,
+    apiKey?: string
+  ) => Promise<void>;
+  /** Stop the agent. Stored subscription credentials are untouched. */
+  signOut: () => Promise<void>;
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
   busy: boolean;
 }
 
-const DevinContext = React.createContext<DevinApi | null>(null);
+const AgentContext = React.createContext<AgentApi | null>(null);
 
-export function DevinProvider({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = React.useState<DevinStatus>(() =>
+export function AgentProvider({ children }: { children: React.ReactNode }) {
+  const [status, setStatus] = React.useState<AgentStatus>(() =>
     isTauri()
       ? { state: "idle" }
       : // The browser dev server has no Tauri IPC, so there is nothing to talk to.
@@ -78,7 +92,7 @@ export function DevinProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     if (!isTauri()) return;
 
-    const updates = listen<SessionUpdate>("devin:update", ({ payload }) => {
+    const updates = listen<SessionUpdate>("agent:update", ({ payload }) => {
       const active = handlers.current;
       if (!active) return;
 
@@ -90,7 +104,7 @@ export function DevinProvider({ children }: { children: React.ReactNode }) {
         }
         case "tool_call":
         case "tool_call_update": {
-          const call = payload as Omit<DevinToolCall, "id" | "status"> & {
+          const call = payload as Omit<AgentToolCall, "id" | "status"> & {
             toolCallId: string;
             status?: string;
           };
@@ -105,13 +119,13 @@ export function DevinProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    const closed = listen("devin:closed", () => {
+    const closed = listen("agent:closed", () => {
       handlers.current = null;
       // Losing a live connection is worth reporting; following our own
-      // disconnect (which already reset the status) is not.
+      // sign-out (which already reset the status) is not.
       setStatus((prev) =>
         prev.state === "ready"
-          ? { state: "idle", message: "Agent stopped" }
+          ? { state: "idle", message: "The agent stopped" }
           : { state: "idle" }
       );
     });
@@ -122,32 +136,28 @@ export function DevinProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const run = React.useCallback(
-    async (command: "devin_connect" | "devin_login") => {
-      setStatus((prev) => ({ ...prev, state: "connecting" }));
-      try {
-        setStatus(await invoke<DevinStatus>(command));
-      } catch (error) {
-        setStatus({ state: "unavailable", message: String(error) });
-      }
-    },
-    []
-  );
-
-  const api: DevinApi = {
+  const api: AgentApi = {
     status,
     busy,
-    connect: () => run("devin_connect"),
-    login: () => run("devin_login"),
-    disconnect: async () => {
+    signIn: async (provider, mode, apiKey) => {
+      setStatus({ state: "connecting", provider, providerLabel: providerLabels[provider] });
+      try {
+        setStatus(
+          await invoke<AgentStatus>("agent_sign_in", { provider, mode, apiKey })
+        );
+      } catch (error) {
+        setStatus({ state: "unavailable", provider, message: String(error) });
+      }
+    },
+    signOut: async () => {
       setStatus({ state: "idle" });
-      await invoke("devin_disconnect");
+      await invoke("agent_sign_out");
     },
     prompt: async (text, next) => {
       handlers.current = next;
       setBusy(true);
       try {
-        await invoke<string>("devin_prompt", { text });
+        await invoke<string>("agent_prompt", { text });
       } finally {
         handlers.current = null;
         setBusy(false);
@@ -155,11 +165,11 @@ export function DevinProvider({ children }: { children: React.ReactNode }) {
     },
   };
 
-  return <DevinContext.Provider value={api}>{children}</DevinContext.Provider>;
+  return <AgentContext.Provider value={api}>{children}</AgentContext.Provider>;
 }
 
-export function useDevin() {
-  const api = React.useContext(DevinContext);
-  if (!api) throw new Error("useDevin must be used inside <DevinProvider>");
+export function useAgent() {
+  const api = React.useContext(AgentContext);
+  if (!api) throw new Error("useAgent must be used inside <AgentProvider>");
   return api;
 }

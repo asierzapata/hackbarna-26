@@ -4,7 +4,7 @@ import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
 import { ChatPanel } from "../components/ChatPanel";
 import { CallBar } from "../components/CallBar";
-import { DevinProvider } from "../components/devin-context";
+import { AgentProvider } from "../components/agent-context";
 
 export const Route = createFileRoute("/")({
   component: WorkspacePage,
@@ -25,7 +25,7 @@ function WorkspacePage() {
 
   // The header button and the thread share one agent connection.
   return (
-    <DevinProvider>
+    <AgentProvider>
       <div className="workspace">
         <HeaderBar />
         <main className="workspace__body">
@@ -36,6 +36,6 @@ function WorkspacePage() {
           {threadOpen ? <ChatPanel onClose={() => setThreadOpen(false)} /> : null}
         </main>
       </div>
-    </DevinProvider>
+    </AgentProvider>
   );
 }

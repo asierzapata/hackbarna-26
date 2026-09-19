@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import { ThreadPanel } from "./thread";
-import { useDevin, type DevinToolCall } from "./devin-context";
+import { useAgent, type AgentToolCall } from "./agent-context";
 import type {
   AgentEntry,
   AgentStep,
@@ -27,7 +27,7 @@ const stepStates: Record<string, AgentStep["state"]> = {
 };
 
 /** Folds a tool call into the step list, in place if we have seen its id. */
-function mergeStep(steps: AgentStep[], call: DevinToolCall): AgentStep[] {
+function mergeStep(steps: AgentStep[], call: AgentToolCall): AgentStep[] {
   const index = steps.findIndex((step) => step.id === call.id);
   const previous = index === -1 ? undefined : steps[index];
   const step: AgentStep = {
@@ -48,7 +48,7 @@ function mergeStep(steps: AgentStep[], call: DevinToolCall): AgentStep[] {
 export function ChatPanel({ onClose }: { onClose?: () => void }) {
   const [entries, setEntries] = React.useState<ThreadEntry[]>(demoEntries);
   const [micActive, setMicActive] = React.useState(false);
-  const devin = useDevin();
+  const agent = useAgent();
 
   /** Patches one agent entry in place while its turn streams. */
   function patchAgent(id: string, fn: (entry: AgentEntry) => AgentEntry) {
@@ -60,11 +60,11 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
   }
 
   /**
-   * One prompt turn against the host's Devin. Text arrives in chunks, so the
+   * One prompt turn against the host's agent. Text arrives in chunks, so the
    * entry is appended empty and filled as it streams.
    */
-  async function askDevin(text: string) {
-    const id = `devin-${Date.now()}`;
+  async function askAgent(text: string) {
+    const id = `agent-${Date.now()}`;
     const startedAt = Date.now();
 
     setEntries((prev) => [
@@ -74,14 +74,14 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
         kind: "agent",
         at: new Date().toISOString(),
         authorId: AGENT,
-        model: devin.status.agent ?? "Devin",
+        model: agent.status.agent ?? agent.status.providerLabel ?? "Agent",
         text: "",
         streaming: true,
       },
     ]);
 
     try {
-      await devin.prompt(text, {
+      await agent.prompt(text, {
         onText: (chunk) =>
           patchAgent(id, (entry) => ({ ...entry, text: entry.text + chunk })),
         onTool: (call) =>
@@ -93,7 +93,7 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
     } catch (error) {
       patchAgent(id, (entry) => ({
         ...entry,
-        text: entry.text || `Devin could not answer: ${error}`,
+        text: entry.text || `The agent could not answer: ${error}`,
       }));
     } finally {
       patchAgent(id, (entry) => ({
@@ -123,8 +123,8 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
     };
     setEntries((prev) => [...prev, message]);
 
-    // Connected Devin answers every message; until then the thread is local.
-    if (devin.status.state === "ready") void askDevin(text);
+    // A connected agent answers every message; until then the thread is local.
+    if (agent.status.state === "ready") void askAgent(text);
   }
 
   function resolveSuggestion(suggestion: SuggestionEntry, accepted: boolean) {
@@ -158,7 +158,7 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
         onSend: handleSend,
         micActive,
         onToggleMic: () => setMicActive((on) => !on),
-        disabled: devin.busy,
+        disabled: agent.busy,
       }}
     />
   );
