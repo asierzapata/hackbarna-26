@@ -1,0 +1,1881 @@
+import type { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
+import type { WebSocket } from "ws";
+import {
+  NodeSqliteWrapper,
+  SQLiteSyncStorage,
+  TLSocketRoom,
+  type TLSyncForwardDiff,
+  type TLRecordAuthorizer,
+} from "@tldraw/sync-core";
+import { type TLBaseShape } from "@tldraw/tlschema";
+import { type UnknownRecord } from "@tldraw/store";
+import { getIndexAbove, type IndexKey } from "@tldraw/utils";
+import { createKanSchema, KAN_NODE_HEIGHT, KAN_NODE_TYPE, KAN_NODE_WIDTH } from "@kan/nodes";
+import { RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { generateRoomCode } from "./util";
+import {
+  EXPLICIT_TRIGGER,
+  HUMAN_EDIT_DEBOUNCE_MS,
+  PROACTIVE_COOLDOWN_MS,
+  explicitMention,
+  triggerDecision,
+  type ClassificationState,
+} from "./decision-policy";
+import { queryDemoData } from "./demo-data";
+import type { Classifier } from "./classifier";
+import type { VideoProvider } from "./video";
+import { badRequest, conflict, forbidden, notFound, unavailable, badGateway, unauthorized } from "./errors";
+import { hashSecret, nowIso, randomToken, sha256, uuid, verifySecret } from "./util";
+import { tx } from "./db";
+
+export interface Timings {
+  tickMs: number;
+  offerMs: number;
+  leaseMs: number;
+  presenceTtlMs: number;
+  debounceMs: number;
+  cooldownMs: number;
+  ticketTtlMs: number;
+  roomIdleMs: number;
+}
+
+export const DEFAULT_TIMINGS: Timings = {
+  tickMs: 1000,
+  offerMs: 5000,
+  leaseMs: 30_000,
+  presenceTtlMs: 20_000,
+  debounceMs: HUMAN_EDIT_DEBOUNCE_MS,
+  cooldownMs: PROACTIVE_COOLDOWN_MS,
+  ticketTtlMs: 30_000,
+  roomIdleMs: 60_000,
+};
+
+export interface SessionInfo {
+  sessionId: string;
+  userId: string;
+  ws: WebSocket | null;
+  ready: boolean;
+  agentId: string;
+  busy: boolean;
+  lastSeen: number;
+}
+
+interface PendingEdit {
+  userId: string;
+  dueAt: number;
+  added: Map<string, string>;
+  changed: Set<string>;
+  deleted: Set<string>;
+}
+
+interface RoomHandle {
+  roomId: string;
+  storage: SQLiteSyncStorage<UnknownRecord>;
+  socketRoom: TLSocketRoom<UnknownRecord, { userId: string }>;
+  sessions: Map<string, SessionInfo>;
+  lastPushUserId: string | null;
+  pendingEdits: Map<string, PendingEdit>;
+  videoSessionPromise: Promise<string> | null;
+  lastActivity: number;
+}
+
+const DOC_TYPE_NAMES = new Set(["document", "page", "shape", "binding", "asset"]);
+const ASSET_SRC_RE = /^\/assets\/([0-9a-f-]{36})$/;
+const MAX_SEND_BUFFER = 8 * 1024 * 1024;
+
+export interface EngineOptions {
+  db: DatabaseSync;
+  now?: () => number;
+  timings?: Partial<Timings>;
+  classifier?: Classifier | null;
+  video?: VideoProvider | null;
+  maxSendBuffer?: number;
+}
+
+export class Engine {
+  readonly db: DatabaseSync;
+  readonly timings: Timings;
+  readonly classifier: Classifier | null;
+  readonly video: VideoProvider | null;
+  readonly maxSendBuffer: number;
+  private readonly _now: () => number;
+  private readonly schema = createKanSchema();
+  private readonly rooms = new Map<string, RoomHandle>();
+  private readonly classifierChains = new Map<string, Promise<void>>();
+  private readonly lastAssigned = new Map<string, number>();
+  private interval: ReturnType<typeof setInterval> | null = null;
+  private broadcastQueue: RoomEvent[] = [];
+  private transactionDepth = 0;
+  private stopping = false;
+
+  private atomic<T>(fn: () => T): T {
+    const mark = this.broadcastQueue.length;
+    this.transactionDepth++;
+    try { return fn(); } catch (error) {
+      this.broadcastQueue.length = mark;
+      throw error;
+    } finally { this.transactionDepth--; }
+  }
+
+  private transaction<T>(fn: () => T): T {
+    if (this.transactionDepth) return fn();
+    return this.atomic(() => tx(this.db, fn));
+  }
+
+  constructor(opts: EngineOptions) {
+    this.db = opts.db;
+    this._now = opts.now ?? Date.now;
+    this.timings = { ...DEFAULT_TIMINGS, ...opts.timings };
+    this.classifier = opts.classifier ?? null;
+    this.video = opts.video ?? null;
+    this.maxSendBuffer = opts.maxSendBuffer ?? MAX_SEND_BUFFER;
+  }
+
+  now() {
+    return this._now();
+  }
+
+  start() {
+    const pending = this.db.prepare("SELECT e.data FROM pending_classification p JOIN entries e ON e.room_id=p.room_id AND e.id=p.entry_id ORDER BY e.room_id,e.seq").all() as { data: string }[];
+    for (const row of pending) { const cause = JSON.parse(row.data) as Entry; this.enqueueClassification(cause.roomId, cause); }
+    if (this.timings.tickMs > 0 && !this.interval) {
+      this.interval = setInterval(() => {
+        try {
+          this.tick();
+        } catch {
+          // scheduler errors must not kill the process
+        }
+      }, this.timings.tickMs);
+      this.interval.unref?.();
+    }
+  }
+
+  async stop() {
+    this.stopping = true;
+    await Promise.allSettled([...this.classifierChains.values(), ...[...this.rooms.values()].flatMap((h) => h.videoSessionPromise ? [h.videoSessionPromise] : [])]);
+    if (this.interval) clearInterval(this.interval);
+    this.interval = null;
+    for (const h of this.rooms.values()) {
+      for (const s of h.sessions.values()) {
+        try {
+          s.ws?.close();
+        } catch {}
+      }
+      try {
+        h.socketRoom.close();
+      } catch {}
+    }
+    this.rooms.clear();
+  }
+
+  // ---------- auth ----------
+
+  registerUser(input: { userId: string; secret: string; name: string }) {
+    const existing = this.db.prepare("SELECT id,name,secret_hash FROM users WHERE id=?").get(input.userId) as
+      | { id: string; name: string; secret_hash: string }
+      | undefined;
+    if (existing) {
+      if (!verifySecret(input.secret, existing.secret_hash)) throw conflict("user id already registered");
+      return { user: { id: existing.id, name: existing.name }, created: false };
+    }
+    const at = nowIso(this.now());
+    this.db
+      .prepare("INSERT INTO users (id,name,secret_hash,created_at) VALUES (?,?,?,?)")
+      .run(input.userId, input.name, hashSecret(input.secret), at);
+    return { user: { id: input.userId, name: input.name }, created: true };
+  }
+
+  private verifiedCache = new Map<string, number>();
+
+  authenticate(header: string | undefined | null): { id: string; name: string } {
+    if (!header?.startsWith("Bearer ")) throw unauthorized();
+    const token = header.slice(7);
+    const dot = token.indexOf(".");
+    if (dot <= 0) throw unauthorized("malformed credential");
+    const userId = token.slice(0, dot);
+    const secret = token.slice(dot + 1);
+    if (!RegisterInput.shape.userId.safeParse(userId).success || !RegisterInput.shape.secret.safeParse(secret).success) throw unauthorized("malformed credential");
+    const cacheKey = sha256(token);
+    const cached = this.verifiedCache.get(cacheKey);
+    if (cached && cached > this.now()) {
+      const u = this.db.prepare("SELECT id,name FROM users WHERE id=?").get(userId) as { id: string; name: string } | undefined;
+      if (u) return u;
+    }
+    const row = this.db.prepare("SELECT id,name,secret_hash FROM users WHERE id=?").get(userId) as
+      | { id: string; name: string; secret_hash: string }
+      | undefined;
+    if (!row || !verifySecret(secret, row.secret_hash)) throw unauthorized("invalid credential");
+    if (this.verifiedCache.size > 5000) this.verifiedCache.clear();
+    this.verifiedCache.set(cacheKey, this.now() + 60_000);
+    return { id: row.id, name: row.name };
+  }
+
+  requireMember(roomId: string, userId: string) {
+    const m = this.db.prepare("SELECT 1 FROM members WHERE room_id=? AND user_id=?").get(roomId, userId);
+    if (!m) {
+      const room = this.db.prepare("SELECT id FROM rooms WHERE id=?").get(roomId);
+      if (!room) throw notFound("room not found");
+      throw forbidden("not a member of this room");
+    }
+  }
+
+  private getRoomRow(roomId: string) {
+    const row = this.db.prepare("SELECT * FROM rooms WHERE id=?").get(roomId) as Record<string, unknown> | undefined;
+    if (!row) throw notFound("room not found");
+    return row;
+  }
+
+  private rowToRoom(row: Record<string, unknown>): Room {
+    return {
+      id: row.id as string,
+      localCanvasId: row.local_canvas_id as string,
+      name: row.name as string,
+      code: row.code as string,
+      createdBy: row.created_by as string,
+      createdAt: row.created_at as string,
+      updatedAt: row.updated_at as string,
+    };
+  }
+
+  // ---------- entries & events ----------
+
+  private nextSeq(roomId: string): number {
+    const r = this.db.prepare("SELECT COALESCE(MAX(seq),0)+1 AS s FROM entries WHERE room_id=?").get(roomId) as {
+      s: number;
+    };
+    return r.s;
+  }
+
+  private nextCursor(roomId: string): number {
+    const r = this.db.prepare("SELECT COALESCE(MAX(cursor),0)+1 AS c FROM events WHERE room_id=?").get(roomId) as {
+      c: number;
+    };
+    return r.c;
+  }
+
+  private insertEntry(roomId: string, entry: Entry): RoomEvent {
+    const at = entry.at;
+    this.db
+      .prepare("INSERT INTO entries (room_id,seq,id,kind,author_id,data,at) VALUES (?,?,?,?,?,?,?)")
+      .run(roomId, entry.seq, entry.id, entry.kind, entryAuthorId(entry), JSON.stringify(entry), at);
+    return this.insertEvent(roomId, entry.id, at);
+  }
+
+  private insertEvent(roomId: string, entryId: string, at: string): RoomEvent {
+    const cursor = this.nextCursor(roomId);
+    const entry = this.getEntry(roomId, entryId)!;
+    this.db
+      .prepare("INSERT INTO events (room_id,cursor,type,entry_id,at,data) VALUES (?,?,?,?,?,?)")
+      .run(roomId, cursor, "entry.upsert", entryId, at, JSON.stringify(entry));
+    this.db.prepare("UPDATE rooms SET updated_at=? WHERE id=?").run(nowIso(this.now()), roomId);
+    const event: RoomEvent = { cursor, roomId, at, type: "entry.upsert", entry };
+    this.broadcastQueue.push(event);
+    return event;
+  }
+
+  updateEntry(entry: Entry): RoomEvent {
+    this.db
+      .prepare("UPDATE entries SET data=?, at=? WHERE room_id=? AND id=?")
+      .run(JSON.stringify(entry), entry.at, entry.roomId, entry.id);
+    return this.insertEvent(entry.roomId, entry.id, entry.at);
+  }
+
+  getEntry(roomId: string, entryId: string): Entry | null {
+    const row = this.db.prepare("SELECT data FROM entries WHERE room_id=? AND id=?").get(roomId, entryId) as
+      | { data: string }
+      | undefined;
+    return row ? (JSON.parse(row.data) as Entry) : null;
+  }
+
+  private flushBroadcasts() {
+    if (this.transactionDepth) return;
+    const events = this.broadcastQueue;
+    this.broadcastQueue = [];
+    for (const ev of events) {
+      const handle = this.rooms.get(ev.roomId);
+      if (!handle) continue;
+      for (const s of handle.sessions.values()) {
+        if (s.ws) this.sendSafe(s.ws, { type: "event", event: ev });
+      }
+    }
+  }
+
+  sendSafe(ws: WebSocket, msg: import("@kan/protocol").ServerMessage): boolean {
+    try {
+      if (ws.readyState !== ws.OPEN) return false;
+      const data = JSON.stringify(msg);
+      if (ws.bufferedAmount + Buffer.byteLength(data) > this.maxSendBuffer) {
+        ws.close(1013, "reconnect from last received cursor");
+        return false;
+      }
+      ws.send(data);
+      return true;
+    } catch { ws.close(1013, "transport unavailable"); return false; }
+  }
+
+  broadcastPresence(roomId: string) {
+    const handle = this.rooms.get(roomId);
+    if (!handle) return;
+    const executors = [...handle.sessions.values()].map((s) => ({
+      sessionId: s.sessionId,
+      userId: s.userId,
+      ready: s.ready,
+      agentId: s.agentId,
+      busy: s.busy,
+    }));
+    for (const s of handle.sessions.values()) {
+      if (s.ws) this.sendSafe(s.ws, { type: "presence", ...this.roomDetail(roomId), executors });
+    }
+  }
+
+  thread(roomId: string, afterSeq: number, limit: number) {
+    const rows = this.db
+      .prepare("SELECT data FROM entries WHERE room_id=? AND seq>? ORDER BY seq LIMIT ?")
+      .all(roomId, afterSeq, limit + 1) as { data: string }[];
+    const hasMore = rows.length > limit;
+    return { entries: rows.slice(0, limit).map((r) => JSON.parse(r.data) as Entry), hasMore };
+  }
+
+  eventsSince(roomId: string, since: number, limit: number, highwater?: number) {
+    const current = (this.db.prepare("SELECT COALESCE(MAX(cursor),0) c FROM events WHERE room_id=?").get(roomId) as {
+      c: number;
+    }).c;
+    if (!Number.isInteger(since) || since < 0 || since > current) {
+      throw badRequest("invalid cursor: must be an integer between 0 and the current room cursor");
+    }
+    const rows = this.db
+      .prepare(
+        `SELECT cursor, at, data FROM events WHERE room_id=? AND cursor>? AND cursor<=? ORDER BY cursor LIMIT ?`,
+      )
+      .all(roomId, since, highwater ?? current, limit + 1) as { cursor: number; at: string; data: string }[];
+    const hasMore = rows.length > limit;
+    const slice = rows.slice(0, limit);
+    const events: RoomEvent[] = slice.map((r) => ({
+      cursor: r.cursor,
+      roomId,
+      at: r.at,
+      type: "entry.upsert",
+      entry: JSON.parse(r.data) as Entry,
+    }));
+    return { events, nextCursor: slice.length ? slice[slice.length - 1].cursor : since, hasMore, currentCursor: current };
+  }
+
+  // ---------- rooms ----------
+
+  publishRoom(
+    user: { id: string; name: string },
+    input: {
+      localCanvasId: string;
+      name: string;
+      records?: unknown[];
+      messages?: { id: string; text: string; at: string; anchors?: string[]; attachments?: string[] }[];
+      assetIds?: string[];
+    },
+  ): { room: Room; created: boolean } {
+    const existing = this.db
+      .prepare("SELECT * FROM rooms WHERE created_by=? AND local_canvas_id=?")
+      .get(user.id, input.localCanvasId) as Record<string, unknown> | undefined;
+    if (existing) return { room: this.rowToRoom(existing), created: false };
+
+    const records = this.validateRecords(input.records ?? [], user.id, input.assetIds ?? []);
+    if (!records.some((r) => (r as { typeName?: string }).typeName === "page")) records.push(defaultPageRecord());
+    if (!records.some((r) => (r as { typeName?: string }).typeName === "document")) records.unshift(defaultDocumentRecord());
+    this.validateGraph(records);
+    const messageIds = new Set<string>();
+    for (const m of input.messages ?? []) {
+      if (messageIds.has(m.id)) throw badRequest("duplicate imported message id");
+      messageIds.add(m.id);
+    }
+
+    for (const assetId of input.assetIds ?? []) {
+      const a = this.db.prepare("SELECT owner_id FROM assets WHERE id=?").get(assetId) as { owner_id: string } | undefined;
+      if (!a || a.owner_id !== user.id) throw badRequest(`asset ${assetId} is not an owned upload`);
+    }
+    for (const m of input.messages ?? []) {
+      for (const assetId of m.attachments ?? []) {
+        const a = this.db.prepare("SELECT owner_id FROM assets WHERE id=?").get(assetId) as
+          | { owner_id: string }
+          | undefined;
+        if (!a || a.owner_id !== user.id) throw badRequest(`attachment ${assetId} is not an owned upload`);
+      }
+    }
+
+    const roomId = uuid();
+    const at = nowIso(this.now());
+    const handle = this.getRoomHandle(roomId);
+
+    const room: Room = {
+      id: roomId,
+      localCanvasId: input.localCanvasId,
+      name: input.name,
+      code: "",
+      createdBy: user.id,
+      createdAt: at,
+      updatedAt: at,
+    };
+
+    try {
+      handle.storage.transaction((txn) => {
+      // inside this callback the underlying SQLite transaction is open on the same db
+      let code = "";
+      for (let i = 0; i < 20; i++) {
+        code = generateRoomCode();
+        const clash = this.db.prepare("SELECT 1 FROM rooms WHERE code=?").get(code);
+        if (!clash) break;
+        if (i === 19) throw new Error("could not allocate room code");
+      }
+      room.code = code;
+      this.db
+        .prepare(
+          "INSERT INTO rooms (id,local_canvas_id,name,code,created_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+        )
+        .run(roomId, input.localCanvasId, input.name, code, user.id, at, at);
+      this.db
+        .prepare("INSERT INTO members (room_id,user_id,joined_at,last_opened_at) VALUES (?,?,?,?)")
+        .run(roomId, user.id, at, at);
+      for (const assetId of input.assetIds ?? []) {
+        this.db.prepare("INSERT OR IGNORE INTO asset_rooms (room_id,asset_id) VALUES (?,?)").run(roomId, assetId);
+      }
+      let seq = 0;
+      for (const m of input.messages ?? []) {
+        for (const assetId of m.attachments ?? []) {
+          this.db.prepare("INSERT OR IGNORE INTO asset_rooms (room_id,asset_id) VALUES (?,?)").run(roomId, assetId);
+        }
+        seq += 1;
+        const entry: Entry = {
+          id: m.id,
+          roomId,
+          seq,
+          at: m.at,
+          kind: "message",
+          authorId: user.id,
+          text: m.text,
+          anchors: m.anchors ?? [],
+          attachments: m.attachments ?? [],
+        };
+        this.insertEntry(roomId, entry);
+      }
+      for (const rec of records) {
+        txn.set((rec as { id: string }).id, rec as UnknownRecord);
+      }
+      });
+    } catch (error) {
+      handle.socketRoom.close();
+      this.rooms.delete(roomId);
+      throw error;
+    }
+    this.flushBroadcasts();
+    return { room, created: true };
+  }
+
+  private validateGraph(records: unknown[]) {
+    if (records.length > 5000) throw badRequest("too many records");
+    const map = new Map<string, Record<string, unknown>>();
+    let documents = 0, pages = 0;
+    for (const raw of records) {
+      if (!SnapshotRecordSchema.safeParse(raw).success || !raw || typeof raw !== "object") throw badRequest("invalid bounded record");
+      const rec = raw as Record<string, unknown>;
+      const id = rec.id, type = rec.typeName;
+      if (typeof id !== "string" || typeof type !== "string" || !DOC_TYPE_NAMES.has(type) || map.has(id)) throw badRequest("invalid or duplicate record");
+      if (type === "shape" && !ShapeIdSchema.safeParse(id).success) throw badRequest("invalid shape id");
+      try { this.schema.types[type as keyof typeof this.schema.types].validator.validate(rec); } catch { throw badRequest("record failed schema validation"); }
+      const validateUrls = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        for (const [key, child] of Object.entries(value)) {
+          if (["url", "href", "src"].includes(key) && typeof child === "string" && child) {
+            let protocol: string;
+            try { protocol = new URL(child, "https://kan.invalid").protocol; } catch { throw badRequest("invalid URL"); }
+            if (!["https:", "http:", "mailto:", "tel:"].includes(protocol)) throw badRequest("unsafe URL scheme");
+          } else validateUrls(child);
+        }
+      };
+      validateUrls(rec.props);
+      map.set(id, rec);
+      if (type === "document") documents++;
+      if (type === "page") pages++;
+    }
+    if (documents !== 1 || pages < 1) throw badRequest("snapshot requires one document and at least one page");
+    for (const rec of map.values()) {
+      if (rec.typeName === "shape") {
+        const visited = new Set([rec.id]);
+        let parent = map.get(rec.parentId as string);
+        while (parent?.typeName === "shape") {
+          if (visited.has(parent.id)) throw badRequest("shape parent cycle");
+          visited.add(parent.id);
+          parent = map.get(parent.parentId as string);
+        }
+        if (parent?.typeName !== "page") throw badRequest("shape parent missing");
+        if (rec.type === "image" || rec.type === "video") {
+          const assetId = (rec.props as Record<string, unknown>).assetId;
+          if (typeof assetId !== "string" || map.get(assetId)?.typeName !== "asset") throw badRequest("shape asset missing");
+        }
+      }
+      if (rec.typeName === "binding" && (map.get(rec.fromId as string)?.typeName !== "shape" || map.get(rec.toId as string)?.typeName !== "shape")) throw badRequest("binding endpoint missing");
+      if (rec.typeName === "asset") {
+        const src = (rec.props as Record<string, unknown>).src;
+        if (typeof src !== "string" || !ASSET_SRC_RE.test(src)) throw badRequest("invalid asset source");
+      }
+    }
+  }
+
+  private validateRecords(records: unknown[], userId: string, assetIds: string[]): unknown[] {
+    const owned = new Set(assetIds);
+    const out: unknown[] = [];
+    for (const raw of records) {
+      if (!raw || typeof raw !== "object") throw badRequest("record is not an object");
+      const rec = raw as Record<string, unknown>;
+      const typeName = rec.typeName;
+      const id = rec.id;
+      if (typeof typeName !== "string" || typeof id !== "string") throw badRequest("record missing typeName/id");
+      if (!DOC_TYPE_NAMES.has(typeName)) {
+        throw badRequest(`record type ${typeName} is not allowed in published snapshots`);
+      }
+      if (!id.startsWith(`${typeName}:`)) throw badRequest("record id does not match its typeName");
+      if (typeName === "asset") {
+        const props = rec.props as Record<string, unknown> | undefined;
+        const src = props?.src;
+        if (typeof src === "string" && src.length > 0) {
+          const match = ASSET_SRC_RE.exec(src);
+          if (!match || !owned.has(match[1])) {
+            throw badRequest("asset records must reference owned uploads at /assets/<id>");
+          }
+        }
+      }
+      let validated: unknown;
+      try {
+        validated = (this.schema.types as Record<string, { validator: { validate(v: unknown): unknown } }>)[
+          typeName
+        ].validator.validate(rec);
+      } catch {
+        throw badRequest(`record ${id} failed schema validation`);
+      }
+      if (typeName === "shape") {
+        validated = stripProvenance(validated as Record<string, unknown>);
+      }
+      out.push(validated);
+    }
+    return out;
+  }
+
+  roomDetail(roomId: string) {
+    const row = this.getRoomRow(roomId);
+    const members = this.db
+      .prepare(
+        "SELECT m.user_id AS id, u.name AS name, m.last_opened_at AS lastOpenedAt FROM members m JOIN users u ON u.id=m.user_id WHERE m.room_id=?",
+      )
+      .all(roomId) as { id: string; name: string; lastOpenedAt: string | null }[];
+    return { room: this.rowToRoom(row), members: members.map((m) => ({ id: m.id, name: m.name })), };
+  }
+
+  joinRoom(userId: string, code: string) {
+    const normalized = code.replace(/-/g, "").toUpperCase();
+    if (!/^[0-9A-HJKMNP-TV-Z]{10}$/.test(normalized)) throw badRequest("invalid room code");
+    const row = this.db.prepare("SELECT * FROM rooms WHERE code=?").get(normalized) as Record<string, unknown> | undefined;
+    if (!row) throw notFound("no room for that code");
+    this.db
+      .prepare("INSERT INTO members (room_id,user_id,joined_at,last_opened_at) VALUES (?,?,?,?) ON CONFLICT(room_id,user_id) DO UPDATE SET last_opened_at=excluded.last_opened_at")
+      .run(row.id as string, userId, nowIso(this.now()), nowIso(this.now()));
+    this.broadcastPresence(row.id as string);
+    return { room: this.rowToRoom(row) };
+  }
+
+  renameUser(userId: string, name: string) {
+    this.db.prepare("UPDATE users SET name=? WHERE id=?").run(name, userId);
+    const rooms = this.db.prepare("SELECT room_id FROM members WHERE user_id=?").all(userId) as { room_id: string }[];
+    for (const room of rooms) this.broadcastPresence(room.room_id);
+  }
+
+  listRooms(userId: string) {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, m.last_opened_at AS lastOpenedAt FROM rooms r JOIN members m ON m.room_id=r.id WHERE m.user_id=? ORDER BY MAX(r.updated_at,COALESCE(m.last_opened_at,'')) DESC`,
+      )
+      .all(userId) as (Record<string, unknown> & { lastOpenedAt: string | null })[];
+    return rows.map((r) => ({ ...this.rowToRoom(r), lastOpenedAt: r.lastOpenedAt }));
+  }
+
+  renameRoom(user: { id: string; name: string }, roomId: string, name: string) {
+    this.requireMember(roomId, user.id);
+    const at = nowIso(this.now());
+    this.transaction( () => {
+      this.db.prepare("UPDATE rooms SET name=?, updated_at=? WHERE id=?").run(name, at, roomId);
+      const entry: Entry = {
+        id: uuid(),
+        roomId,
+        seq: this.nextSeq(roomId),
+        at,
+        kind: "system",
+        text: `${user.name} renamed the room to "${name}"`,
+        authorId: user.id,
+        shapeIds: [],
+      };
+      this.insertEntry(roomId, entry);
+    });
+    this.flushBroadcasts();
+    this.broadcastPresence(roomId);
+    return { room: this.rowToRoom(this.getRoomRow(roomId)) };
+  }
+
+  openRoom(userId: string, roomId: string) {
+    this.requireMember(roomId, userId);
+    this.db
+      .prepare("UPDATE members SET last_opened_at=? WHERE room_id=? AND user_id=?")
+      .run(nowIso(this.now()), roomId, userId);
+    return { ok: true };
+  }
+
+  // ---------- assets ----------
+
+  createAsset(userId: string, contentType: string, data: Buffer) {
+    const id = uuid();
+    this.db
+      .prepare("INSERT INTO assets (id,owner_id,room_id,content_type,size,data,created_at) VALUES (?,?,NULL,?,?,?,?)")
+      .run(id, userId, contentType, data.byteLength, data, nowIso(this.now()));
+    return { id };
+  }
+
+  getAsset(assetId: string, userId: string) {
+    const a = this.db.prepare("SELECT * FROM assets WHERE id=?").get(assetId) as
+      | { owner_id: string; room_id: string | null; content_type: string; data: Buffer }
+      | undefined;
+    if (!a) throw notFound("asset not found");
+    if (a.owner_id !== userId && !this.db.prepare("SELECT 1 FROM asset_rooms ar JOIN members m ON m.room_id=ar.room_id WHERE ar.asset_id=? AND m.user_id=?").get(assetId, userId)) throw forbidden("not allowed to read this asset");
+    return a;
+  }
+
+  // ---------- messages ----------
+
+  postMessage(
+    user: { id: string; name: string },
+    roomId: string,
+    input: { id: string; text: string; anchors?: string[]; attachments?: string[] },
+  ) {
+    this.requireMember(roomId, user.id);
+    const prior = this.db.prepare("SELECT data FROM entries WHERE room_id=? AND id=?").get(roomId, input.id) as
+      | { data: string }
+      | undefined;
+    if (prior) {
+      const e = JSON.parse(prior.data) as Entry;
+      const same =
+        e.kind === "message" &&
+        e.authorId === user.id &&
+        e.text === input.text &&
+        JSON.stringify(e.anchors) === JSON.stringify(input.anchors ?? []) &&
+        JSON.stringify(e.attachments) === JSON.stringify(input.attachments ?? []);
+      if (!same) throw conflict("message id already used with a different payload");
+      return { entry: e, created: false };
+    }
+    for (const assetId of input.attachments ?? []) {
+      const a = this.db.prepare("SELECT owner_id FROM assets WHERE id=?").get(assetId) as { owner_id: string } | undefined;
+      if (!a || a.owner_id !== user.id) throw badRequest(`attachment ${assetId} is not an owned upload`);
+    }
+    const entry: Entry = {
+      id: input.id,
+      roomId,
+      seq: 0,
+      at: nowIso(this.now()),
+      kind: "message",
+      authorId: user.id,
+      text: input.text,
+      anchors: input.anchors ?? [],
+      attachments: input.attachments ?? [],
+    };
+    this.transaction( () => {
+      entry.seq = this.nextSeq(roomId);
+      for (const assetId of input.attachments ?? []) {
+        this.db.prepare("INSERT OR IGNORE INTO asset_rooms (room_id,asset_id) VALUES (?,?)").run(roomId, assetId);
+      }
+      this.insertEntry(roomId, entry);
+      this.db.prepare("INSERT OR IGNORE INTO pending_classification (room_id,entry_id) VALUES (?,?)").run(roomId, entry.id);
+    });
+    this.flushBroadcasts();
+    this.enqueueClassification(roomId, entry);
+    return { entry, created: true };
+  }
+
+  // ---------- tickets ----------
+
+  createTicket(userId: string, roomId: string, channel: "sync" | "events") {
+    this.requireMember(roomId, userId);
+    const ticket = randomToken(32);
+    const expiresAt = this.now() + this.timings.ticketTtlMs;
+    this.db
+      .prepare("INSERT INTO tickets (hash,room_id,user_id,channel,expires_at,used) VALUES (?,?,?,?,?,0)")
+      .run(sha256(ticket), roomId, userId, channel, expiresAt);
+    return { ticket, expiresAt };
+  }
+
+  consumeTicket(roomId: string, channel: string, ticket: string): { userId: string } {
+    const row = this.db.prepare("SELECT * FROM tickets WHERE hash=?").get(sha256(ticket)) as
+      | { room_id: string; user_id: string; channel: string; expires_at: number; used: number }
+      | undefined;
+    if (!row) throw unauthorized("invalid ticket");
+    if (row.room_id !== roomId || row.channel !== channel) throw unauthorized("ticket scope mismatch");
+    if (row.used) throw unauthorized("ticket already used");
+    if (row.expires_at <= this.now()) throw unauthorized("ticket expired");
+    this.db.prepare("UPDATE tickets SET used=1 WHERE hash=?").run(sha256(ticket));
+    return { userId: row.user_id };
+  }
+
+  // ---------- room handle / canvas ----------
+
+  getRoomHandle(roomId: string): RoomHandle {
+    const cached = this.rooms.get(roomId);
+    if (cached) {
+      cached.lastActivity = this.now();
+      return cached;
+    }
+    const tablePrefix = `sync_${roomId.replace(/[^a-zA-Z0-9]/g, "_")}_`;
+    const wrapper = new NodeSqliteWrapper(this.db as never, { tablePrefix });
+    const storage = new SQLiteSyncStorage<UnknownRecord>({ sql: wrapper });
+    const handle: RoomHandle = {
+      roomId,
+      storage,
+      socketRoom: null as never,
+      sessions: new Map(),
+      lastPushUserId: null,
+      pendingEdits: new Map(),
+      videoSessionPromise: null,
+      lastActivity: this.now(),
+    };
+    const authorizer: TLRecordAuthorizer<UnknownRecord, { userId: string }> = ({ session, type, next, prev }) => {
+      handle.lastPushUserId = session.meta.userId;
+      if (type === "create" && next) return stripProvenance(next as unknown as Record<string, unknown>) as unknown as UnknownRecord;
+      if (type === "update" && next && prev) {
+        const n = next as unknown as Record<string, unknown>;
+        const p = prev as unknown as Record<string, unknown>;
+        const nMeta = (n.meta ?? {}) as Record<string, unknown>;
+        const pMeta = (p.meta ?? {}) as Record<string, unknown>;
+        if (!isDeepStrictEqual(nMeta.provenance, pMeta.provenance)) return null;
+        return next;
+      }
+      return next ?? prev;
+    };
+    const socketRoom = new TLSocketRoom<UnknownRecord, { userId: string }>({
+      schema: this.schema,
+      storage,
+      log: { error: () => console.error("room-server sync_error"), warn: () => console.warn("room-server sync_rejected") },
+      authorizeRecord: {
+        asset: ({ session, next, prev }: Parameters<TLRecordAuthorizer<UnknownRecord, { userId: string }>>[0]) => {
+          if (!next) return prev;
+          const src = ((next as unknown as { props?: { src?: unknown } }).props)?.src;
+          const match = typeof src === "string" ? ASSET_SRC_RE.exec(src) : null;
+          if (!match || !this.db.prepare("SELECT 1 FROM assets a WHERE a.id=? AND (a.owner_id=? OR EXISTS(SELECT 1 FROM asset_rooms ar WHERE ar.asset_id=a.id AND ar.room_id=?))").get(match[1], session.meta.userId, roomId)) return null;
+          this.db.prepare("INSERT OR IGNORE INTO asset_rooms (asset_id,room_id) VALUES (?,?)").run(match[1], roomId);
+          return next;
+        },
+        shape: authorizer,
+        binding: (({ session, next, prev }: Parameters<TLRecordAuthorizer<UnknownRecord, { userId: string }>>[0]) => {
+          handle.lastPushUserId = session.meta.userId;
+          return next ?? prev;
+        }),
+      },
+      onAfterReceiveMessage: () => { handle.lastPushUserId = null; },
+      onCommittedChanges: ({ diff }) => this.onCanvasCommitted(handle, diff),
+    });
+    handle.socketRoom = socketRoom;
+    const storageTransaction = storage.transaction.bind(storage);
+    storage.transaction = (fn, options) => this.atomic(() => storageTransaction((txn) => {
+      const result = fn(txn);
+      const records = [...txn.entries()].map(([, record]) => record);
+      if (records.length || this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) this.validateGraph(records);
+      return result;
+    }, options));
+    this.rooms.set(roomId, handle);
+    return handle;
+  }
+
+  private onCanvasCommitted(handle: RoomHandle, diff: TLSyncForwardDiff<UnknownRecord>) {
+    if (this.stopping) return;
+    this.db.prepare("UPDATE rooms SET updated_at=? WHERE id=?").run(nowIso(this.now()), handle.roomId);
+    const userId = handle.lastPushUserId;
+    handle.lastPushUserId = null;
+    if (!userId) return;
+    let pending = handle.pendingEdits.get(userId);
+    if (!pending) {
+      pending = { userId, dueAt: 0, added: new Map(), changed: new Set(), deleted: new Set() };
+      handle.pendingEdits.set(userId, pending);
+    }
+    pending.dueAt = this.now() + this.timings.debounceMs;
+    for (const [id, put] of Object.entries(diff.puts)) {
+      if (!id.startsWith("shape:") || (Array.isArray(put) && isDeepStrictEqual(put[0], put[1]))) continue;
+      const after = Array.isArray(put) ? put[1] : put;
+      if (Array.isArray(put)) {
+        if (!pending.added.has(id)) pending.changed.add(id);
+      } else {
+        pending.changed.delete(id);
+        pending.deleted.delete(id);
+        pending.added.set(id, shapeLabel(after));
+      }
+    }
+    for (const id of diff.deletes) {
+      if (!id.startsWith("shape:")) continue;
+      pending.added.delete(id);
+      pending.changed.delete(id);
+      pending.deleted.add(id);
+    }
+  }
+
+  private flushPendingEdits(roomId: string) {
+    const handle = this.rooms.get(roomId);
+    if (!handle) return;
+    const now = this.now();
+    for (const [userId, pending] of [...handle.pendingEdits]) {
+      if (pending.dueAt > now) continue;
+      handle.pendingEdits.delete(userId);
+      const user = this.db.prepare("SELECT name FROM users WHERE id=?").get(userId) as { name: string } | undefined;
+      const parts: string[] = [];
+      for (const [id, label] of [...pending.added].slice(0, 8)) parts.push(`added ${label ? `'${label}' ` : ""}(${id})`);
+      for (const id of [...pending.changed].slice(0, 8)) parts.push(`changed ${id}`);
+      if (pending.deleted.size) parts.push(`deleted ${pending.deleted.size === 1 ? [...pending.deleted][0] : `${pending.deleted.size} items`}`);
+      if (!parts.length) continue;
+      const entry: Entry = {
+        id: uuid(),
+        roomId,
+        seq: 0,
+        at: nowIso(now),
+        kind: "system",
+        text: `${user?.name ?? "A participant"} edited the canvas: ${parts.join(", ")}`.slice(0, 2000),
+        authorId: userId,
+        shapeIds: [...pending.added.keys(), ...pending.changed, ...pending.deleted].slice(0, 200),
+      };
+      this.transaction( () => {
+        entry.seq = this.nextSeq(roomId);
+        this.insertEntry(roomId, entry);
+        this.db.prepare("INSERT OR IGNORE INTO pending_classification (room_id,entry_id) VALUES (?,?)").run(roomId, entry.id);
+      });
+      this.flushBroadcasts();
+      this.enqueueClassification(roomId, entry);
+    }
+  }
+
+  canvasRecords(roomId: string): unknown[] {
+    const handle = this.getRoomHandle(roomId);
+    return handle.storage.getSnapshot().documents.map((d) => d.state);
+  }
+
+  canvasSummary(roomId: string) {
+    const records = this.canvasRecords(roomId);
+    const shapes = records.filter((r) => (r as { typeName?: string }).typeName === "shape") as TLBaseShape<
+      string,
+      Record<string, unknown>
+    >[];
+    shapes.sort((a, b) => a.id.localeCompare(b.id));
+    const bounded = shapes.slice(0, 500).map((s) => ({
+      id: s.id,
+      type: s.type,
+      label: shapeLabel(s),
+      x: s.x,
+      y: s.y,
+      parentId: s.parentId,
+    }));
+    return { shapes: bounded, counts: { shapes: shapes.length, records: records.length } };
+  }
+
+  // ---------- classification ----------
+
+  enqueueClassification(roomId: string, cause: Entry) {
+    const prev = this.classifierChains.get(roomId) ?? Promise.resolve();
+    const next = prev.then(() => this.processCause(roomId, cause));
+    void next.catch(() => console.error("room-server classification_persistence_error"));
+    this.classifierChains.set(roomId, next);
+  }
+
+  classifierIdle(roomId: string): Promise<void> {
+    return this.classifierChains.get(roomId) ?? Promise.resolve();
+  }
+
+  private async processCause(roomId: string, cause: Entry) {
+    if (this.stopping || (cause.kind !== "message" && cause.kind !== "system")) return;
+    if (!this.db.prepare("SELECT 1 FROM pending_classification WHERE room_id=? AND entry_id=?").get(roomId, cause.id)) return;
+    const state = this.buildClassificationState(roomId, cause);
+    const stateHash = sha256(JSON.stringify(state));
+    const explicit = cause.kind === "message" && explicitMention(cause.text);
+    let output: unknown = null;
+    let status = explicit ? "explicit" : this.classifier ? "evaluated" : "skipped";
+    let plan = explicit ? EXPLICIT_TRIGGER : null as ReturnType<typeof triggerDecision>;
+    const anchors = [...causeAnchors(cause)];
+    if (!explicit && this.classifier) {
+      try {
+        const decision = await this.classifier.decide(state);
+        output = decision;
+        plan = triggerDecision(decision);
+        if (decision.relatedShapeId && !anchors.includes(decision.relatedShapeId)) anchors.push(decision.relatedShapeId);
+      } catch {
+        status = "failed";
+        output = { error: "classifier_unavailable" };
+      }
+    }
+    if (this.stopping) return;
+    this.transaction(() => {
+      let triggerId: string | null = null;
+      if (plan && !(plan.mode === "propose" && this.inCooldown(roomId))) {
+        triggerId = this.createTrigger(roomId, cause, plan, anchors.slice(0, 64)).id;
+        if (plan.mode === "propose") this.db.prepare("UPDATE rooms SET last_propose_at=? WHERE id=?").run(this.now(), roomId);
+      }
+      this.recordDecision(roomId, cause, stateHash, status, output, triggerId);
+      this.db.prepare("DELETE FROM pending_classification WHERE room_id=? AND entry_id=?").run(roomId, cause.id);
+    });
+    this.flushBroadcasts();
+    this.tick();
+  }
+
+  private inCooldown(roomId: string): boolean {
+    const row = this.db.prepare("SELECT last_propose_at FROM rooms WHERE id=?").get(roomId) as
+      | { last_propose_at: number }
+      | undefined;
+    return !!row && row.last_propose_at > 0 && this.now() - row.last_propose_at < this.timings.cooldownMs;
+  }
+
+  private recordDecision(roomId: string, cause: Entry, stateHash: string, status: string, output: unknown, triggerId: string | null) {
+    this.db.prepare("INSERT INTO decisions (id,room_id,entry_id,state_hash,status,output,trigger_id,created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(uuid(), roomId, cause.id, stateHash, status, output ? JSON.stringify(output) : null, triggerId, nowIso(this.now()));
+  }
+
+  private buildClassificationState(roomId: string, cause: Entry): ClassificationState {
+    const recent = this.db
+      .prepare("SELECT data FROM entries WHERE room_id=? ORDER BY seq DESC LIMIT 10")
+      .all(roomId) as { data: string }[];
+    const recentEntries = recent.map((r) => JSON.parse(r.data)).reverse();
+    const summary = this.canvasSummary(roomId);
+    const shapes = summary.shapes.slice(0, 50).map((s) => ({ id: s.id, label: (s.label ?? "").slice(0, 240) }));
+    const openSuggestions = this.db
+      .prepare("SELECT data FROM entries WHERE room_id=? AND kind='suggestion' AND json_extract(data,'$.status')='open' ORDER BY seq DESC LIMIT 20")
+      .all(roomId)
+      .map((r) => JSON.parse((r as { data: string }).data))
+      .filter((e: Entry) => e.kind === "suggestion" && e.status === "open");
+    const state: ClassificationState = {
+      cause: {
+        id: cause.id,
+        kind: cause.kind as "message" | "system",
+        text: cause.kind === "message" || cause.kind === "system" ? cause.text : "",
+        authorId: entryAuthorId(cause) ?? "",
+      },
+      recentEntries,
+      shapes,
+      openSuggestions,
+    };
+    return state;
+  }
+
+  private createTrigger(
+    roomId: string,
+    cause: Entry,
+    plan: { mode: "act" | "propose"; intent: "answer" | "capture" | "update" | "lookup"; confidence: number; reason: string },
+    anchors?: string[],
+  ): Trigger {
+    const at = nowIso(this.now());
+    const trigger: Trigger = {
+      id: uuid(),
+      causeEntryIds: [cause.id],
+      requestedBy: entryAuthorId(cause) ?? "",
+      reason: plan.reason,
+      intent: plan.intent,
+      mode: plan.mode,
+      anchors: anchors ?? causeAnchors(cause),
+      confidence: plan.confidence,
+      status: "pending",
+      assigneeSessionId: null,
+      offerExpiresAt: null,
+      attempt: 0,
+      runId: null,
+    };
+    const entry: Entry = { id: uuid(), roomId, seq: 0, at, kind: "trigger", trigger };
+    this.transaction( () => {
+      entry.seq = this.nextSeq(roomId);
+      this.insertEntry(roomId, entry);
+      this.db
+        .prepare("INSERT INTO triggers (id,room_id,entry_id,status,data,offered_ids,created_at) VALUES (?,?,?,?,?,?,?)")
+        .run(trigger.id, roomId, entry.id, "pending", JSON.stringify(trigger), "[]", at);
+    });
+    this.flushBroadcasts();
+    if (!this.transactionDepth) this.tick();
+    return trigger;
+  }
+
+  private loadTrigger(triggerId: string): { trigger: Trigger; row: { room_id: string; entry_id: string; offered_ids: string } } {
+    const row = this.db.prepare("SELECT * FROM triggers WHERE id=?").get(triggerId) as
+      | { room_id: string; entry_id: string; data: string; offered_ids: string }
+      | undefined;
+    if (!row) throw notFound("trigger not found");
+    return { trigger: JSON.parse(row.data) as Trigger, row };
+  }
+
+  listTriggers(roomId: string): Trigger[] {
+    const rows = this.db.prepare("SELECT data FROM triggers WHERE room_id=? ORDER BY created_at").all(roomId) as {
+      data: string;
+    }[];
+    return rows.map((r) => JSON.parse(r.data) as Trigger);
+  }
+
+  // ---------- presence / sessions ----------
+
+  addSession(roomId: string, userId: string, ws: WebSocket): SessionInfo {
+    const handle = this.getRoomHandle(roomId);
+    const session: SessionInfo = {
+      sessionId: `sess_${uuid()}`,
+      userId,
+      ws,
+      ready: false,
+      agentId: "",
+      busy: false,
+      lastSeen: this.now(),
+    };
+    handle.sessions.set(session.sessionId, session);
+    return session;
+  }
+
+  removeSession(roomId: string, sessionId: string) {
+    const handle = this.rooms.get(roomId);
+    if (!handle) return;
+    const session = handle.sessions.get(sessionId);
+    if (!session) return;
+    handle.sessions.delete(sessionId);
+    session.ws?.close(1001, "session ended");
+    // release any non-expired offer held by this session
+    const rows = this.db
+      .prepare("SELECT id,data,entry_id,offered_ids FROM triggers WHERE room_id=? AND status='offered'")
+      .all(roomId) as { id: string; data: string; entry_id: string; offered_ids: string }[];
+    for (const row of rows) {
+      const t = JSON.parse(row.data) as Trigger;
+      if (t.assigneeSessionId === sessionId) this.reofferOrEscalate(roomId, t, row, sessionId);
+    }
+    this.flushBroadcasts();
+    this.broadcastPresence(roomId);
+  }
+
+  setExecutorReady(roomId: string, sessionId: string, ready: boolean, agentId: string) {
+    const handle = this.rooms.get(roomId);
+    const session = handle?.sessions.get(sessionId);
+    if (!session) return;
+    session.ready = ready;
+    if (agentId) session.agentId = agentId;
+    session.lastSeen = this.now();
+    this.broadcastPresence(roomId);
+  }
+
+  heartbeatSession(roomId: string, sessionId: string) {
+    const session = this.rooms.get(roomId)?.sessions.get(sessionId);
+    if (session) session.lastSeen = this.now();
+  }
+
+  // ---------- scheduler ----------
+
+  tick() {
+    if (this.stopping) return;
+    const now = this.now();
+    this.db.prepare("DELETE FROM tickets WHERE expires_at<=?").run(now);
+    // presence expiry + debounce flush + room idle eviction
+    for (const [roomId, handle] of [...this.rooms]) {
+      let presenceChanged = false;
+      for (const [sid, s] of [...handle.sessions]) {
+        if (now - s.lastSeen >= this.timings.presenceTtlMs) {
+          this.removeSession(roomId, sid);
+          presenceChanged = true;
+        }
+      }
+      if (presenceChanged) this.broadcastPresence(roomId);
+      this.flushPendingEdits(roomId);
+      const clients =
+        handle.sessions.size + ((handle.socketRoom as unknown as { getNumActiveSessions?: () => number }).getNumActiveSessions?.() ?? 0);
+      if (clients === 0 && !handle.videoSessionPromise && now - handle.lastActivity > this.timings.roomIdleMs) {
+        try {
+          handle.socketRoom.close();
+        } catch {}
+        this.rooms.delete(roomId);
+      }
+    }
+
+    // expire running leases
+    const staleRuns = this.db
+      .prepare("SELECT * FROM runs WHERE status='running' AND lease_expires_at<=?")
+      .all(now) as { run_id: string; room_id: string; trigger_id: string; entry_id: string; session_id: string }[];
+    for (const run of staleRuns) {
+      this.transaction( () => {
+        this.db.prepare("UPDATE runs SET status='failed' WHERE run_id=?").run(run.run_id);
+        const { trigger, row } = this.loadTrigger(run.trigger_id);
+        if (trigger.runId === run.run_id) {
+          trigger.status = "failed";
+          this.saveTriggerInTx(trigger, row);
+        }
+        const entry = this.getEntry(run.room_id, run.entry_id);
+        if (entry && entry.kind === "agent_turn" && entry.status === "running") {
+          entry.status = "failed";
+          entry.at = nowIso(now);
+          this.updateEntry(entry);
+        }
+      });
+      this.setBusy(run.room_id, run.session_id, false);
+    }
+    this.flushBroadcasts();
+
+    // expire offers
+    const expiredOffers = this.db
+      .prepare("SELECT id,room_id,entry_id,data,offered_ids FROM triggers WHERE status='offered'")
+      .all() as { id: string; room_id: string; entry_id: string; data: string; offered_ids: string }[];
+    for (const row of expiredOffers) {
+      const t = JSON.parse(row.data) as Trigger;
+      if (t.offerExpiresAt !== null && t.offerExpiresAt <= now) {
+        this.reofferOrEscalate(row.room_id, t, row, t.assigneeSessionId);
+      }
+    }
+    this.flushBroadcasts();
+
+    // offer pending / needs_claim triggers
+    const pendingRows = this.db
+      .prepare("SELECT id,room_id,entry_id,data,offered_ids FROM triggers WHERE status IN ('pending','needs_claim') ORDER BY created_at")
+      .all() as { id: string; room_id: string; entry_id: string; data: string; offered_ids: string }[];
+    const runningRooms = new Set(
+      (this.db.prepare("SELECT room_id FROM triggers WHERE status='running'").all() as { room_id: string }[]).map(
+        (r) => r.room_id,
+      ),
+    );
+    const offeredRooms = new Set(
+      (this.db.prepare("SELECT room_id FROM triggers WHERE status='offered'").all() as { room_id: string }[]).map(
+        (r) => r.room_id,
+      ),
+    );
+    for (const row of pendingRows) {
+      if (runningRooms.has(row.room_id) || offeredRooms.has(row.room_id)) continue;
+      const t = JSON.parse(row.data) as Trigger;
+      const offeredIds = JSON.parse(row.offered_ids) as string[];
+      const candidate = this.pickCandidate(row.room_id, t.requestedBy, offeredIds);
+      if (candidate) {
+        t.status = "offered";
+        t.assigneeSessionId = candidate.sessionId;
+        t.offerExpiresAt = now + this.timings.offerMs;
+        offeredIds.push(candidate.sessionId);
+        this.lastAssigned.set(candidate.sessionId, now);
+        this.saveTriggerAndBroadcast(t, row, offeredIds);
+        offeredRooms.add(row.room_id);
+      } else if (t.status === "pending") {
+        t.status = "needs_claim";
+        this.saveTriggerAndBroadcast(t, row, offeredIds);
+      }
+    }
+    this.flushBroadcasts();
+  }
+
+  private saveTriggerInTx(trigger: Trigger, row: { entry_id: string; offered_ids: string }, offeredIds?: string[]) {
+    this.db
+      .prepare("UPDATE triggers SET status=?, data=?, offered_ids=? WHERE id=?")
+      .run(trigger.status, JSON.stringify(trigger), JSON.stringify(offeredIds ?? JSON.parse(row.offered_ids)), trigger.id);
+    const roomId = (this.db.prepare("SELECT room_id FROM triggers WHERE id=?").get(trigger.id) as { room_id: string })
+      .room_id;
+    const entry = this.getEntry(roomId, row.entry_id);
+    if (entry && entry.kind === "trigger") {
+      entry.trigger = trigger;
+      entry.at = nowIso(this.now());
+      this.updateEntry(entry);
+    }
+  }
+
+  private saveTriggerAndBroadcast(trigger: Trigger, row: { room_id: string; entry_id: string; offered_ids: string }, offeredIds: string[]) {
+    this.transaction( () => this.saveTriggerInTx(trigger, row, offeredIds));
+    this.flushBroadcasts();
+  }
+
+  private pickCandidate(roomId: string, requestedBy: string, exclude: string[]): SessionInfo | null {
+    const handle = this.rooms.get(roomId);
+    if (!handle) return null;
+    const candidates = [...handle.sessions.values()].filter(
+      (s) => s.ready && !s.busy && !exclude.includes(s.sessionId) && this.now() - s.lastSeen < this.timings.presenceTtlMs,
+    );
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => {
+      const aReq = a.userId === requestedBy ? 0 : 1;
+      const bReq = b.userId === requestedBy ? 0 : 1;
+      if (aReq !== bReq) return aReq - bReq;
+      return (this.lastAssigned.get(a.sessionId) ?? 0) - (this.lastAssigned.get(b.sessionId) ?? 0);
+    });
+    return candidates[0];
+  }
+
+  private reofferOrEscalate(roomId: string, t: Trigger, row: { entry_id: string; offered_ids: string }, lostSessionId: string | null) {
+    const offeredIds = JSON.parse(row.offered_ids) as string[];
+    if (lostSessionId && !offeredIds.includes(lostSessionId)) offeredIds.push(lostSessionId);
+    const candidate = this.pickCandidate(roomId, t.requestedBy, offeredIds);
+    if (candidate) {
+      t.status = "offered";
+      t.assigneeSessionId = candidate.sessionId;
+      t.offerExpiresAt = this.now() + this.timings.offerMs;
+      offeredIds.push(candidate.sessionId);
+      this.lastAssigned.set(candidate.sessionId, this.now());
+    } else {
+      t.status = "needs_claim";
+      t.assigneeSessionId = null;
+      t.offerExpiresAt = null;
+    }
+    this.transaction( () => this.saveTriggerInTx(t, row, offeredIds));
+  }
+
+  private setBusy(roomId: string, sessionId: string, busy: boolean) {
+    const s = this.rooms.get(roomId)?.sessions.get(sessionId);
+    if (s) {
+      s.busy = busy;
+      this.broadcastPresence(roomId);
+    }
+  }
+
+  // ---------- claim / runs ----------
+
+  claimTrigger(userId: string, roomId: string, triggerId: string, input: { sessionId: string; manual?: boolean }): Lease {
+    this.requireMember(roomId, userId);
+    const handle = this.rooms.get(roomId);
+    const session = handle?.sessions.get(input.sessionId);
+    if (!session || session.userId !== userId) throw forbidden("session does not belong to you");
+    if (!session.ready || this.now() - session.lastSeen >= this.timings.presenceTtlMs) {
+      throw conflict("session is not a ready executor");
+    }
+    const { trigger, row } = this.loadTrigger(triggerId);
+    if (row.room_id !== roomId) throw notFound("trigger not found");
+    const offeredIds = JSON.parse(row.offered_ids) as string[];
+    const now = this.now();
+    const allowed =
+      (trigger.status === "offered" &&
+        trigger.assigneeSessionId === session.sessionId &&
+        trigger.offerExpiresAt !== null &&
+        trigger.offerExpiresAt > now) ||
+      (trigger.status === "needs_claim" && input.manual === true) ||
+      (trigger.status === "pending" && userId === trigger.requestedBy);
+    if (!allowed) {
+      if (trigger.status === "offered" || trigger.status === "running") throw conflict("trigger already assigned");
+      throw conflict("trigger is not claimable");
+    }
+    const running = this.db
+      .prepare("SELECT 1 FROM triggers WHERE room_id=? AND status='running'")
+      .get(roomId);
+    if (running) throw conflict("another run is already active in this room");
+
+    const runId = uuid();
+    const leaseToken = randomToken(32);
+    const attempt = trigger.attempt + 1;
+    const expiresAt = now + this.timings.leaseMs;
+    const agentEntry: Entry = {
+      id: uuid(),
+      roomId,
+      seq: 0,
+      at: nowIso(now),
+      kind: "agent_turn",
+      triggerId,
+      runId,
+      byUserId: userId,
+      agentId: session.agentId || "unknown",
+      text: "",
+      status: "running",
+      steps: [],
+      touchedShapeIds: [],
+    };
+    this.transaction( () => {
+      agentEntry.seq = this.nextSeq(roomId);
+      this.insertEntry(roomId, agentEntry);
+      this.db
+        .prepare(
+          "INSERT INTO runs (run_id,room_id,trigger_id,attempt,lease_hash,lease_expires_at,entry_id,session_id,user_id,agent_id,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .run(runId, roomId, triggerId, attempt, sha256(leaseToken), expiresAt, agentEntry.id, session.sessionId, userId, session.agentId, "running", nowIso(now));
+      trigger.status = "running";
+      trigger.assigneeSessionId = session.sessionId;
+      trigger.offerExpiresAt = null;
+      trigger.attempt = attempt;
+      trigger.runId = runId;
+      this.saveTriggerInTx(trigger, row, offeredIds);
+    });
+    this.flushBroadcasts();
+    this.setBusy(roomId, session.sessionId, true);
+    return { runId, triggerId, attempt, leaseToken, expiresAt, entryId: agentEntry.id };
+  }
+
+  retryTrigger(userId: string, roomId: string, triggerId: string, requestId: string) {
+    this.requireMember(roomId, userId);
+    const idem = this.getIdem<{ trigger: Trigger }>(roomId, "retry", requestId);
+    if (idem) return idem;
+    const { trigger, row } = this.loadTrigger(triggerId);
+    if (row.room_id !== roomId) throw notFound("trigger not found");
+    if (trigger.status === "running" || trigger.status === "offered" || trigger.status === "pending") {
+      throw conflict("trigger is already active");
+    }
+    const result = this.transaction( () => {
+      // block any late previous run
+      this.db
+        .prepare("UPDATE runs SET status='superseded' WHERE trigger_id=? AND status='running'")
+        .run(triggerId);
+      trigger.status = "pending";
+      trigger.assigneeSessionId = null;
+      trigger.offerExpiresAt = null;
+      trigger.runId = null;
+      this.saveTriggerInTx(trigger, { entry_id: row.entry_id, offered_ids: "[]" }, []);
+      const out = { trigger };
+      this.putIdem(roomId, "retry", requestId, out);
+      return out;
+    });
+    this.flushBroadcasts();
+    return result;
+  }
+
+  private leaseAuth(roomId: string, runId: string, header: string | undefined) {
+    if (!header?.startsWith("Bearer ")) throw unauthorized();
+    const token = header.slice(7);
+    const run = this.db.prepare("SELECT * FROM runs WHERE run_id=? AND room_id=?").get(runId, roomId) as
+      | {
+          run_id: string;
+          trigger_id: string;
+          attempt: number;
+          lease_hash: string;
+          lease_expires_at: number;
+          entry_id: string;
+          session_id: string;
+          user_id: string;
+          agent_id: string;
+          status: string;
+        }
+      | undefined;
+    if (!run || run.lease_hash !== sha256(token)) throw unauthorized("invalid lease");
+    return run;
+  }
+
+  private activeLease(roomId: string, runId: string, header: string | undefined) {
+    const run = this.leaseAuth(roomId, runId, header);
+    const { trigger } = this.loadTrigger(run.trigger_id);
+    if (run.status !== "running" || run.lease_expires_at <= this.now() || trigger.runId !== runId || trigger.attempt !== run.attempt) {
+      throw forbidden("lease is stale or expired");
+    }
+    return { run, trigger };
+  }
+
+  heartbeatRun(roomId: string, runId: string, header: string | undefined) {
+    const { run } = this.activeLease(roomId, runId, header);
+    const expiresAt = this.now() + this.timings.leaseMs;
+    this.db.prepare("UPDATE runs SET lease_expires_at=? WHERE run_id=?").run(expiresAt, run.run_id);
+    return { expiresAt };
+  }
+
+  runContext(roomId: string, runId: string, header: string | undefined) {
+    const { trigger } = this.activeLease(roomId, runId, header);
+    const causeEntries = trigger.causeEntryIds
+      .map((id) => this.getEntry(roomId, id))
+      .filter(Boolean);
+    const recent = this.db
+      .prepare("SELECT data FROM entries WHERE room_id=? ORDER BY seq DESC LIMIT 20")
+      .all(roomId) as { data: string }[];
+    return {
+      trigger,
+      causeEntries,
+      recentEntries: recent.map((r) => JSON.parse(r.data)).reverse(),
+      canvas: this.canvasSummary(roomId),
+    };
+  }
+
+  runCanvas(roomId: string, runId: string, header: string | undefined, input: { scope: "summary" | "selection" | "full"; shapeIds?: string[] }) {
+    this.activeLease(roomId, runId, header);
+    if (input.scope === "summary") return this.canvasSummary(roomId);
+    const records = this.canvasRecords(roomId);
+    const selected = input.scope === "full" ? records : records.filter((r) => input.shapeIds?.includes((r as { id: string }).id));
+    if (Buffer.byteLength(JSON.stringify(selected)) > 8 * 1024 * 1024) throw badRequest("canvas response too large; use selection");
+    return { records: selected };
+  }
+
+  patchRun(
+    roomId: string,
+    runId: string,
+    header: string | undefined,
+    input: { id: string; text?: string; steps?: unknown[]; status?: "done" | "failed" },
+  ) {
+    const run = this.leaseAuth(roomId, runId, header);
+    const idem = this.getIdem<{ entry: Entry }>(roomId, `run-patch:${runId}`, input.id);
+    if (idem) return idem;
+    const { trigger } = this.activeLease(roomId, runId, header);
+    const entry = this.getEntry(roomId, run.entry_id);
+    if (!entry || entry.kind !== "agent_turn") throw notFound("agent entry missing");
+    const result = this.transaction( () => {
+      if (input.text !== undefined) entry.text = input.text;
+      if (input.steps !== undefined) entry.steps = input.steps;
+      if (input.status !== undefined) {
+        entry.status = input.status;
+        trigger.status = input.status === "done" ? "done" : "failed";
+        const row = this.db.prepare("SELECT entry_id, offered_ids FROM triggers WHERE id=?").get(trigger.id) as {
+          entry_id: string;
+          offered_ids: string;
+        };
+        this.saveTriggerInTx(trigger, row);
+        this.db.prepare("UPDATE runs SET status=? WHERE run_id=?").run(input.status === "done" ? "done" : "failed", runId);
+      }
+      entry.at = nowIso(this.now());
+      this.updateEntry(entry);
+      const out = { entry };
+      this.putIdem(roomId, `run-patch:${runId}`, input.id, out);
+      return out;
+    });
+    this.flushBroadcasts();
+    if (input.status) this.setBusy(roomId, run.session_id, false);
+    return result;
+  }
+
+  // ---------- mutations ----------
+
+  mutate(
+    roomId: string,
+    runId: string,
+    header: string | undefined,
+    input: { id: string; operations: Mutation[] },
+  ): { shapeIds: string[] } {
+    const { run, trigger } = this.activeLease(roomId, runId, header);
+    if (trigger.mode !== "act") throw forbidden("propose-mode runs cannot mutate the canvas");
+    const idem = this.getIdem<{ shapeIds: string[] }>(roomId, `mutate:${runId}`, input.id);
+    if (idem) return idem as { shapeIds: string[] };
+    const handle = this.getRoomHandle(roomId);
+    handle.lastPushUserId = null;
+    const agentEntry = this.getEntry(roomId, run.entry_id);
+    if (!agentEntry || agentEntry.kind !== "agent_turn") throw notFound("agent entry missing");
+    const provenance = { entryId: agentEntry.id, runId, agentId: run.agent_id, byUserId: run.user_id };
+    const shapeIds: string[] = [];
+    const result = handle.storage.transaction((txn) => {
+      const puts = this.planMutations(roomId, `${runId}:${input.id}`, input.operations, provenance, shapeIds);
+      for (const rec of puts) txn.set((rec as { id: string }).id, rec as UnknownRecord);
+      const touched = new Set(agentEntry.touchedShapeIds);
+      for (const id of shapeIds) touched.add(id);
+      if (touched.size > 500) throw badRequest("run exceeds touched shape limit");
+      agentEntry.touchedShapeIds = [...touched];
+      agentEntry.at = nowIso(this.now());
+      this.updateEntry(agentEntry);
+      this.putIdem(roomId, `mutate:${runId}`, input.id, { shapeIds });
+      return { shapeIds };
+    });
+    this.flushBroadcasts();
+    return result.result as { shapeIds: string[] };
+  }
+
+  private planMutations(
+    roomId: string,
+    requestId: string,
+    operations: Mutation[],
+    provenance: Record<string, unknown>,
+    shapeIds: string[],
+  ): unknown[] {
+    const handle = this.getRoomHandle(roomId);
+    const snapshot = handle.storage.getSnapshot();
+    const current = new Map<string, UnknownRecord>();
+    for (const d of snapshot.documents) current.set(d.state.id, d.state);
+    const pageId = [...current.values()].find((r) => (r as { typeName?: string }).typeName === "page")?.id as
+      | string
+      | undefined;
+    if (!pageId) throw badRequest("room has no page");
+    const puts: UnknownRecord[] = [];
+    const planned = new Map<string, UnknownRecord>();
+    const get = (id: string) => planned.get(id) ?? current.get(id);
+    let maxIndex: IndexKey = "a0" as IndexKey;
+    for (const r of current.values()) {
+      const rec = r as { typeName?: string; index?: string };
+      if (rec.typeName === "shape" && typeof rec.index === "string" && rec.index > maxIndex) maxIndex = rec.index as IndexKey;
+    }
+
+    operations.forEach((op, i) => {
+      if (op.type === "add") {
+        const id = (op.shapeId ?? `shape:${deterministicId(`add`, runKey(requestId, i))}`) as `shape:${string}`;
+        if (get(id)) throw conflict(`shape ${id} already exists`);
+        let x = op.x ?? 0;
+        let y = op.y ?? 0;
+        let targetPageId = pageId;
+        if (op.nearShapeId) {
+          const near = get(op.nearShapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
+          if (!near || (near as { typeName?: string }).typeName !== "shape") throw badRequest(`nearShapeId ${op.nearShapeId} not found`);
+          if (!near.parentId.startsWith("page:") || near.rotation !== 0) throw badRequest("unsupported near coordinate space");
+          targetPageId = near.parentId;
+          if (op.x === undefined) x = near.x + ((near.props?.w as number) ?? 200) + 80;
+          if (op.y === undefined) y = near.y;
+        }
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw badRequest("coordinates must be finite");
+        maxIndex = getIndexAbove(maxIndex);
+        const shape: UnknownRecord = {
+          id,
+          typeName: "shape",
+          type: KAN_NODE_TYPE,
+          x,
+          y,
+          rotation: 0,
+          index: maxIndex,
+          parentId: targetPageId,
+          isLocked: false,
+          opacity: 1,
+          props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: op.draft },
+          meta: { provenance },
+        } as unknown as UnknownRecord;
+        planned.set(id, shape);
+        puts.push(shape);
+        shapeIds.push(id);
+      } else if (op.type === "update") {
+        const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
+        if (!existing || existing.typeName !== "shape") throw badRequest(`shape ${op.shapeId} not found`);
+        if (existing.type !== KAN_NODE_TYPE) throw badRequest("only kan-node shapes can be updated");
+        const next = {
+          ...existing,
+          props: { ...existing.props, draft: op.draft },
+          meta: { ...existing.meta, provenance },
+        } as unknown as UnknownRecord;
+        planned.set(op.shapeId, next);
+        puts.push(next);
+        shapeIds.push(op.shapeId);
+      } else if (op.type === "connect") {
+        const from = get(op.from) as TLBaseShape<string, Record<string, unknown>> | undefined;
+        const to = get(op.to) as TLBaseShape<string, Record<string, unknown>> | undefined;
+        if (!from || (from as { typeName?: string }).typeName !== "shape") throw badRequest(`connect source ${op.from} not found`);
+        if (!to || (to as { typeName?: string }).typeName !== "shape") throw badRequest(`connect target ${op.to} not found`);
+        if (!from.parentId.startsWith("page:") || from.parentId !== to.parentId || from.rotation !== 0 || to.rotation !== 0) throw badRequest("unsupported connect coordinate space");
+        const arrowId = `shape:${deterministicId("connect", runKey(requestId, i))}` as `shape:${string}`;
+        if (get(arrowId)) throw conflict(`shape ${arrowId} already exists`);
+        maxIndex = getIndexAbove(maxIndex);
+        const start = centerOf(from);
+        const end = centerOf(to);
+        const arrow = {
+          id: arrowId,
+          typeName: "shape",
+          type: "arrow",
+          x: start.x,
+          y: start.y,
+          rotation: 0,
+          index: maxIndex,
+          parentId: from.parentId,
+          isLocked: false,
+          opacity: 1,
+          props: {
+            kind: "arc",
+            labelColor: "black",
+            color: "black",
+            fill: "none",
+            dash: "draw",
+            size: "m",
+            arrowheadStart: "none",
+            arrowheadEnd: "arrow",
+            font: "draw",
+            start: { x: 0, y: 0 },
+            end: { x: end.x - start.x, y: end.y - start.y },
+            bend: 0,
+            richText: richTextOf(op.label ?? ""),
+            labelPosition: 0.5,
+            scale: 1,
+            elbowMidPoint: 0.5,
+          },
+          meta: { provenance },
+        } as unknown as UnknownRecord;
+        planned.set(arrowId, arrow);
+        puts.push(arrow);
+        for (const [terminal, targetId] of [
+          ["start", op.from],
+          ["end", op.to],
+        ] as const) {
+          const binding = {
+            id: `binding:${deterministicId(`bind-${terminal}`, runKey(requestId, i))}`,
+            typeName: "binding",
+            type: "arrow",
+            fromId: arrowId,
+            toId: targetId,
+            props: {
+              terminal,
+              normalizedAnchor: { x: 0.5, y: 0.5 },
+              isExact: false,
+              isPrecise: false,
+              snap: "none",
+            },
+            meta: {},
+          } as unknown as UnknownRecord;
+          planned.set(binding.id as string, binding);
+          puts.push(binding);
+        }
+        shapeIds.push(arrowId);
+      } else if (op.type === "arrange") {
+        const shapes = op.shapeIds.map((id) => {
+          const s = get(id) as TLBaseShape<string, Record<string, unknown>> | undefined;
+          if (!s || (s as { typeName?: string }).typeName !== "shape") throw badRequest(`shape ${id} not found`);
+          return s;
+        });
+        if (shapes.some((s) => s.parentId !== shapes[0].parentId)) throw badRequest("arrange requires siblings");
+        const gapX = 380;
+        const gapY = 280;
+        const cols = op.layout === "grid" ? Math.ceil(Math.sqrt(shapes.length)) : op.layout === "row" ? shapes.length : 1;
+        const originX = shapes[0].x;
+        const originY = shapes[0].y;
+        shapes.forEach((s, idx) => {
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          const next = { ...s, x: originX + col * gapX, y: originY + row * gapY, meta: { ...s.meta, provenance } } as unknown as UnknownRecord;
+          planned.set(s.id, next);
+          puts.push(next);
+          shapeIds.push(s.id);
+        });
+      }
+    });
+    for (const rec of puts) {
+      try { this.schema.types[rec.typeName as keyof typeof this.schema.types].validator.validate(rec); } catch { throw badRequest("planned record failed schema validation"); }
+    }
+    for (const rec of puts) current.set(rec.id, rec);
+    this.validateGraph([...current.values()]);
+    return puts;
+  }
+
+  // ---------- suggestions ----------
+
+  createSuggestion(
+    roomId: string,
+    runId: string,
+    header: string | undefined,
+    input: { id: string; draft: NodeDraft },
+  ) {
+    const { run, trigger } = this.activeLease(roomId, runId, header);
+    if (trigger.mode !== "propose") throw forbidden("only propose-mode runs can create suggestions");
+    const idem = this.getIdem<{ entry: Entry }>(roomId, `suggestion:${runId}`, input.id);
+    if (idem) return idem;
+    const at = nowIso(this.now());
+    const entry: Entry = {
+      id: input.id,
+      roomId,
+      seq: 0,
+      at,
+      kind: "suggestion",
+      triggerId: trigger.id,
+      runId,
+      draft: input.draft,
+      status: "open",
+      shapeId: null,
+    };
+    this.transaction( () => {
+      entry.seq = this.nextSeq(roomId);
+      this.insertEntry(roomId, entry);
+      this.putIdem(roomId, `suggestion:${runId}`, input.id, { entry });
+    });
+    this.flushBroadcasts();
+    return { entry };
+  }
+
+  resolveSuggestion(userId: string, roomId: string, entryId: string, resolution: "accepted" | "dismissed") {
+    this.requireMember(roomId, userId);
+    const entry = this.getEntry(roomId, entryId);
+    if (!entry || entry.kind !== "suggestion") throw notFound("suggestion not found");
+    if (entry.status !== "open") {
+      if (entry.status === resolution) return { entry, shapeId: entry.shapeId };
+      throw conflict(`suggestion already ${entry.status}`);
+    }
+    const at = nowIso(this.now());
+    if (resolution === "dismissed") {
+      this.transaction( () => {
+        entry.status = "dismissed";
+        entry.acceptedBy = null;
+        entry.at = at;
+        this.updateEntry(entry);
+      });
+      this.flushBroadcasts();
+      return { entry, shapeId: null };
+    }
+    // accepted: atomically create the node and update the entry
+    const run = this.db.prepare("SELECT * FROM runs WHERE run_id=?").get(entry.runId) as
+      | { agent_id: string; user_id: string; entry_id: string }
+      | undefined;
+    const provenance = {
+      entryId,
+      runId: entry.runId,
+      agentId: run?.agent_id ?? "unknown",
+      byUserId: run?.user_id ?? userId,
+      acceptedBy: userId,
+    };
+    const handle = this.getRoomHandle(roomId);
+    handle.lastPushUserId = null;
+    let shapeId = "";
+    handle.storage.transaction((txn) => {
+      const pageId = [...txn.entries()].find(([, r]) => (r as { typeName?: string }).typeName === "page")?.[0] as
+        | string
+        | undefined;
+      if (!pageId) throw badRequest("room has no page");
+      let maxIndex: IndexKey = "a0" as IndexKey;
+      for (const [, r] of txn.entries()) {
+        const rec = r as { typeName?: string; index?: string };
+        if (rec.typeName === "shape" && typeof rec.index === "string" && rec.index > maxIndex) {
+          maxIndex = rec.index as IndexKey;
+        }
+      }
+      shapeId = `shape:${deterministicId("suggest", `${entryId}:0`)}`;
+      const shape = {
+        id: shapeId,
+        typeName: "shape",
+        type: KAN_NODE_TYPE,
+        x: 120 + (entry.seq % 8) * 60,
+        y: 120 + (entry.seq % 8) * 60,
+        rotation: 0,
+        index: getIndexAbove(maxIndex),
+        parentId: pageId,
+        isLocked: false,
+        opacity: 1,
+        props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: entry.draft },
+        meta: { provenance },
+      } as unknown as UnknownRecord;
+      if (txn.get(shapeId)) throw conflict("suggestion shape already exists");
+      this.validateGraph([...txn.entries()].map(([, r]) => r).concat(shape));
+      const originEntry = run ? this.getEntry(roomId, run.entry_id) : null;
+      if (originEntry?.kind === "agent_turn") {
+        const touched = new Set([...originEntry.touchedShapeIds, shapeId]);
+        if (touched.size > 500) throw badRequest("run exceeds touched shape limit");
+        originEntry.touchedShapeIds = [...touched];
+        originEntry.at = at;
+        this.updateEntry(originEntry);
+      }
+      txn.set(shapeId, shape);
+      entry.status = "accepted";
+      entry.shapeId = shapeId;
+      entry.acceptedBy = userId;
+      entry.at = at;
+      this.updateEntry(entry);
+    });
+    this.flushBroadcasts();
+    return { entry, shapeId };
+  }
+
+  // ---------- data query / video ----------
+
+  dataQuery(roomId: string, header: string | undefined, input: { source: "demo-metrics"; metric: "throughput" | "latencyMs" | "errorRate"; from?: string; to?: string }) {
+    if (!header?.startsWith("Bearer ")) throw unauthorized();
+    const token = header.slice(7);
+    const run = this.db
+      .prepare("SELECT * FROM runs WHERE room_id=? AND lease_hash=? AND status='running' AND lease_expires_at>?")
+      .get(roomId, sha256(token), this.now());
+    if (!run) throw unauthorized("no active lease for this room");
+    return queryDemoData(input);
+  }
+
+  async videoToken(userId: string, roomId: string) {
+    this.requireMember(roomId, userId);
+    if (!this.video) throw unavailable("video is not configured");
+    const handle = this.getRoomHandle(roomId);
+    let sessionPromise = handle.videoSessionPromise;
+    const existing = this.db.prepare("SELECT video_session_id FROM rooms WHERE id=?").get(roomId) as
+      | { video_session_id: string | null }
+      | undefined;
+    if (!existing?.video_session_id) {
+      if (!sessionPromise) {
+        sessionPromise = (async () => {
+          try {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("timeout")), 5000); });
+            const s = await Promise.race([this.video!.createSession(), timeout]).finally(() => clearTimeout(timer));
+            this.db.prepare("UPDATE rooms SET video_session_id=? WHERE id=?").run(s.sessionId, roomId);
+            return s.sessionId;
+          } catch (e) {
+            handle.videoSessionPromise = null;
+            throw badGateway("video provider failed");
+          }
+        })();
+        handle.videoSessionPromise = sessionPromise;
+      }
+    } else {
+      sessionPromise = Promise.resolve(existing.video_session_id);
+    }
+    const sessionId = await sessionPromise.finally(() => { handle.videoSessionPromise = null; });
+    const user = this.db.prepare("SELECT name FROM users WHERE id=?").get(userId) as { name: string };
+    const expireTime = Math.floor(this.now() / 1000) + 1800;
+    try {
+      const token = this.video.generateClientToken(sessionId, {
+        role: "publisher",
+        expireTime,
+        data: JSON.stringify({ id: userId, name: user.name }),
+      });
+      return { applicationId: this.video.applicationId, sessionId, token, expiresAt: expireTime };
+    } catch { throw badGateway("video provider failed"); }
+  }
+
+  // ---------- idempotency ----------
+
+  private getIdem<T>(roomId: string, scope: string, requestId: string): T | null {
+    const row = this.db
+      .prepare("SELECT result FROM idem WHERE room_id=? AND scope=? AND request_id=?")
+      .get(roomId, scope, requestId) as { result: string } | undefined;
+    return row ? JSON.parse(row.result) as T : null;
+  }
+
+  private putIdem(roomId: string, scope: string, requestId: string, result: unknown) {
+    this.db
+      .prepare("INSERT INTO idem (room_id,scope,request_id,result) VALUES (?,?,?,?)")
+      .run(roomId, scope, requestId, JSON.stringify(result));
+  }
+}
+
+function entryAuthorId(entry: Entry): string | null {
+  if (entry.kind === "message" || entry.kind === "system") return entry.authorId;
+  if (entry.kind === "trigger") return entry.trigger.requestedBy;
+  if (entry.kind === "agent_turn") return entry.byUserId;
+  return null;
+}
+
+function causeAnchors(cause: Entry): string[] {
+  if (cause.kind === "message") return [...cause.anchors];
+  if (cause.kind === "system") return cause.shapeIds.filter((id) => /^shape:[A-Za-z0-9_-]{1,80}$/.test(id)).slice(0, 64);
+  return [];
+}
+
+function stripProvenance(rec: Record<string, unknown>): Record<string, unknown> {
+  const meta = (rec.meta ?? {}) as Record<string, unknown>;
+  if (!("provenance" in meta)) return rec;
+  const { provenance: _drop, ...rest } = meta;
+  return { ...rec, meta: rest };
+}
+
+function deterministicId(prefix: string, key: string): string {
+  const hex = sha256(`${prefix}:${key}`).slice(0, 24);
+  return `k${hex}`;
+}
+
+function runKey(requestId: string, index: number) {
+  return `${requestId}:${index}`;
+}
+
+function centerOf(shape: TLBaseShape<string, Record<string, unknown>>) {
+  return { x: shape.x + ((shape.props?.w as number) ?? 100) / 2, y: shape.y + ((shape.props?.h as number) ?? 100) / 2 };
+}
+
+function richTextOf(text: string) {
+  if (!text) return { type: "doc", content: [] };
+  return { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text }] }] };
+}
+
+function extractRichText(value: unknown): string {
+  try {
+    const parts: string[] = [];
+    const walk = (n: unknown) => {
+      if (!n || typeof n !== "object") return;
+      const node = n as { type?: string; text?: string; content?: unknown[] };
+      if (node.type === "text" && typeof node.text === "string") parts.push(node.text);
+      if (Array.isArray(node.content)) node.content.forEach(walk);
+    };
+    walk(value);
+    return parts.join(" ");
+  } catch {
+    return "";
+  }
+}
+
+function shapeLabel(shape: UnknownRecord): string {
+  const s = shape as TLBaseShape<string, Record<string, unknown>>;
+  const props = (s.props ?? {}) as Record<string, unknown>;
+  if (s.type === KAN_NODE_TYPE) {
+    const draft = props.draft as NodeDraft | undefined;
+    if (draft) {
+      const label =
+        draft.type === "concept" ? draft.label : draft.type === "table" || draft.type === "chart" || draft.type === "markdown" || draft.type === "decision" ? draft.title : "";
+      if (label) return label.slice(0, 240);
+    }
+  }
+  for (const key of ["label", "title", "name", "text"]) {
+    const v = props[key];
+    if (typeof v === "string" && v) return v.slice(0, 240);
+  }
+  const rich = extractRichText(props.richText);
+  if (rich) return rich.slice(0, 240);
+  const url = props.url;
+  if (typeof url === "string") return url.slice(0, 240);
+  return "";
+}
+
+function defaultDocumentRecord(): UnknownRecord {
+  return { id: "document:document", typeName: "document", name: "", gridSize: 10, meta: {} } as unknown as UnknownRecord;
+}
+
+function defaultPageRecord(): UnknownRecord {
+  return { id: "page:page", typeName: "page", name: "Page 1", index: "a1", meta: {} } as unknown as UnknownRecord;
+}

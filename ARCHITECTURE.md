@@ -1,10 +1,218 @@
 # Canvas assistant: backend architecture and implementation guide
 
-Author: Asier · Status: Drafting · Last update: 2026-09-19
+Author: Asier · Status: Backend implemented; desktop integration pending · Last update: 2026-09-19
 
 We are building a realtime collaborative infinite canvas with a shared thread and a live call, where an AI assistant follows the conversation and keeps the canvas up to date with rich nodes (charts, tables, decisions). The desktop shell (Tauri) already runs. This document covers everything behind it: the room server, the thread log, the trigger layer, and the agent runner, plus the contracts the desktop app needs to talk to them.
 
 The call runs on **Vonage Video**. For the first version the call is audio and video only: people talk, the canvas and the thread stay in sync, and the assistant is driven by typed messages and canvas edits. Transcription, and with it the assistant reacting to speech, is deferred to [Later additions](#later-additions-voice). The trigger layer is designed so that turning speech back on is adding one entry source, not reworking the pipeline.
+
+## Implemented backend contract (authoritative)
+
+This section describes the implemented server, shared schemas and standalone runner.
+It supersedes conflicting proposals below. Desktop migrations are recorded verbatim
+under [Evolving the current code](#evolving-the-current-code); their completion does
+not mean the desktop is connected to these room, executor or Vonage APIs yet.
+`packages/protocol/src/index.ts` is the authoritative wire contract, not the older
+TypeScript examples in this document. Model instructions, decision policy and demo
+rows remain in their existing source modules; this section is not a second policy.
+
+### Persistent documents, sharing and identity
+
+- A canvas is a persistent document; a room is its shared space, one document per
+  room. Members have equal rights. `createdBy` is attribution, not a host role.
+- The accepted desktop flow is private/local first, with no automatic server room
+  on launch. Upload assets, then publish with `POST /rooms` using
+  `{localCanvasId,name,records?,messages?,assetIds?}` (`CreateRoomInput`).
+- Publishing is idempotent per `(userId, localCanvasId)` and returns `{room,created}`;
+  a retry does not reseed an existing room. The desktop must retain its local copy
+  until acknowledgement. This local-to-shared UI flow remains integration work.
+- Publish only document records (`document`, `page`, `shape`, `binding`, `asset`)
+  and owned uploads. Imported human messages retain `id` and `at`, are attributed
+  to the publisher, and never trigger classification. No presence/user/session
+  records or arbitrary agent/system history can be imported through this input.
+- After shared-room disconnection, the desktop contract is a cached read-only view
+  or an explicit local fork, not a merged offline branch. Reconnect to the authority.
+- Generate an installation UUID, 32 random bytes encoded as 64 lowercase hex
+  characters, and a display name. `POST /users/register` takes `{userId,secret,name}`;
+  the same identity/secret registers idempotently. HTTP auth is `Bearer userId.secret`.
+- The server stores a salted scrypt digest, never the installation secret. Secure
+  native identity storage is future desktop integration. Losing it/reinstalling
+  creates a new identity, which can rejoin using the room code.
+- Codes contain ten Crockford Base32 characters; joins accept hyphens and normalize
+  case. Authenticated membership, not knowledge of a UUID alone, grants room access.
+- `GET /rooms` provides recent rooms and `lastOpenedAt`; join and `POST /rooms/:id/open`
+  update recent history. Joins/name changes broadcast membership names in presence.
+
+### Persistence, assets and the two sockets
+
+- Node >=24 runs Hono + `ws`, `TLSocketRoom` and `SQLiteSyncStorage` in one process,
+  backed by `node:sqlite` in WAL mode at `KAN_DATA_DIR/kan.sqlite` (default `./data`).
+  Keep one authority per room; multiple machines sharing that volume is unsupported.
+- Assets are SQLite blobs, limited to 10 MiB and `ALLOWED_ASSET_TYPES`. The
+  `asset_rooms` junction permits reuse without revoking another room's access.
+  Owners and members of any linked room can perform authenticated `GET /assets/:id`.
+- Published/native asset records use `/assets/<id>` for owned or already-linked
+  uploads, not local paths, remote sources, `blob:`, `file:`, `javascript:` or `data:`.
+  Native web embeds should use HTTP(S) only; the generic URL validator also permits
+  `mailto:`/`tel:` link fields, which are not web embed transports.
+- The desktop asset adapter still needs authenticated fetch plus temporary object
+  URLs for rendering; do not put permanent credential/token URLs in document state.
+- Snapshot graph/schema validation rejects duplicate IDs, missing parents/assets,
+  cycles and dangling bindings. Forged agent provenance is stripped on publication
+  or creation and rejected on native updates that would change existing provenance.
+- Migration 2 stores immutable event payloads, asset links and pending classifier
+  jobs. Legacy events are backfilled with the latest available entry payload;
+  historical versions never stored by the old schema cannot be reconstructed.
+- Obtain a fresh ticket for **each** socket/reconnect with
+  `POST /rooms/:id/socket-ticket {channel:"sync"|"events"}`. Tickets are single-use,
+  channel-bound and expire in 30 seconds. Only the ticket goes in the WS query,
+  never the installation credential or a run lease token.
+- `/sync/:roomId?ticket=...` is the native tldraw protocol. Separately,
+  `/events/:roomId?ticket=...&since=<cursor>` carries typed `EventsServerMessage`s.
+  There is no ordering guarantee between these two sockets.
+- Events use a durable cursor independent of an entry's room-local `seq`.
+  Every version is `entry.upsert`; upsert by entry ID and sort thread entries by
+  `seq`. Updated agent/trigger/suggestion entries keep their sequence number.
+- Replay is paged to a fixed highwater before `ready`, whose fields are
+  `sessionId,cursor,room,members,executors,triggers`. `presence` carries
+  `room,members,executors`; the executor fields are `sessionId,userId,ready,agentId,busy`.
+- Send `{type:"heartbeat"}` every 10 seconds. The current presence TTL is **20
+  seconds**, not 45; expiry closes the socket. Executor readiness uses
+  `{type:"executor.ready",ready,agentId}`. Defaults live in `engine.ts:DEFAULT_TIMINGS`.
+- Backpressure closes events sockets with 1013 instead of silently dropping events.
+  Reconnect with a fresh ticket and the last **received** cursor; do not advance
+  past replay on a failed connection. Future cursors fail before ticket consumption.
+- For thread content, HTTP accepts the authenticated client's human message only. The server
+  owns system narration, triggers and run entries; there is no arbitrary thread append.
+
+### HTTP surface
+
+`U` means installation bearer authentication (plus membership for room operations).
+`L` means a scoped run bearer lease, not the user's secret. `R` below abbreviates
+`/rooms/:id/runs/:runId`. JSON inputs are strict Zod schemas; consult the named
+schemas for exact optional fields, bounds and response entry types.
+
+| Route | Auth | Input / purpose |
+| --- | --- | --- |
+| `GET /health` | none | `{ok,classifier,video}` availability |
+| `POST /users/register` | identity proof | `RegisterInput {userId,secret,name}` |
+| `GET /me`, `PATCH /me` | U | Read identity; `PatchMeInput {name}` |
+| `GET /rooms`, `POST /rooms` | U | Recent rooms; publish `CreateRoomInput` |
+| `POST /rooms/join` | U | `JoinInput {code}` |
+| `GET /rooms/:id`, `PATCH /rooms/:id` | U | Room/members; `PatchRoomInput {name}` |
+| `POST /rooms/:id/open` | U | Record last opened time |
+| `POST /assets`, `GET /assets/:id` | U | Raw upload bytes with content type; authorized download |
+| `GET /rooms/:id/thread?afterSeq=0&limit=100` | U | Current entries, `hasMore` |
+| `GET /rooms/:id/events?since=0&limit=100` | U | Immutable events, `nextCursor`, `hasMore`, `currentCursor` |
+| `POST /rooms/:id/messages` | U | `PostMessageInput {id,text,anchors?,attachments?}` |
+| `POST /rooms/:id/socket-ticket` | U | `SocketTicketInput {channel}` |
+| `GET /rooms/:id/canvas`, `GET /rooms/:id/canvas/summary` | U | Document records / compact shape summary |
+| `GET /rooms/:id/triggers` | U | Latest state of triggers |
+| `POST /rooms/:id/triggers/:triggerId/claim` | U | `ClaimInput {sessionId,manual?}`; returns `{lease}` |
+| `POST /rooms/:id/triggers/:triggerId/retry` | U | `RetryInput {id}`; explicit new attempt |
+| `POST /rooms/:id/suggestions/:entryId/resolve` | U | `{resolution:"accepted"|"dismissed"}` |
+| `GET /rooms/:id/video-token` | U | Short-lived publisher credentials |
+| `GET R/context`, `POST R/heartbeat` | L | Trigger/cause/recent/canvas context; renew lease |
+| `GET R/canvas?scope=summary` | L | `summary|selection|full`; optional repeated `shapeIds` query fields |
+| `PATCH R` | L | `RunPatchInput {id,text?,steps?,status?:"done"|"failed"}` |
+| `POST R/mutate` | L | `MutateInput {id,operations}` |
+| `POST R/suggestions` | L | `SuggestionInput {id,draft}` |
+| `POST /rooms/:id/data/query` | L | `DataQueryInput {source,metric,from?,to?}` |
+
+Thread/events limits must be integers 1..100. Streaming HTTP byte caps and deadlines
+apply before collection. Origin/preflight checks share the WS allowlist; IP limits use
+the socket address, ignoring spoofable proxy headers. There are no `POST /thread` or `PATCH /thread/:entryId` routes.
+
+### Claims, mutations and node schema
+
+Ready, capable sessions are offered work: prefer the requester, then least recently assigned eligible sessions.
+Offers last 5 seconds; claims are atomic, conflicts return 409, and only one run may be running in a room.
+Manual claims still require the caller's own ready session; `manual:true` permits claiming `needs_claim`, not stealing a live offer.
+No eligible client means manual fallback, **not a paid server runner**. Statuses: `pending|offered|running|needs_claim|done|failed`.
+
+A lease lasts 30 seconds and the runner renews every 10. Expired partial runs become failed while retaining completed edits; only explicit retry starts another attempt.
+`LeaseSchema` supplies `runId,triggerId,attempt,leaseToken,expiresAt,entryId`.
+Mutations are schema/graph-validated, atomic and request-ID-idempotent. The server stamps `meta.provenance` and updates the originating agent turn's `touchedShapeIds` (max 500).
+Propose mode cannot mutate; accepting a suggestion creates one node and updates suggestion/provenance/originating turn in one transaction.
+
+`@kan/nodes` is the pure shared schema: `kanShapeProps`, `createKanSchema`, `KanNodeShape`, and constants for one `kan-node` type with `{w,h,draft}` props.
+The React `KanNodeUtil`/`shapeUtils` are in `apps/desktop/src/lib/canvas-shapes.tsx`, not the shared package; its chart view is currently a placeholder, not a complete Vega renderer.
+`NodeDraftSchema` supports markdown, decision, concept, table and chart. Table widths must agree; chart specs are bounded inline objects with no remote URL/href, expressions, calculate or string filters.
+Agent updates replace only a kan-node draft. Near placement requires a top-level, unrotated reference and uses its page; connect requires top-level unrotated endpoints on the same page.
+Arrange operates on siblings only, preserving content and rotations.
+
+### Classification and synthetic data
+
+The server uses AI SDK **7.0.105** `experimental_evaluate` through AI Gateway with `typesafe-ai/jev`; this deliberately new SDK dependency is intentional.
+The server can hold `AI_GATEWAY_API_KEY` for classification: the old "no model keys" claim is not accurate. Frontier execution still uses the configured local ACP agent.
+
+`decision-policy.ts` is the sole policy definition: probabilities are in 0..1, `captureScore` in 0..4.
+`intent:none` suppresses inferred triggers; addressed probability strictly >0.8 acts; otherwise worth-capturing strictly >0.7 plus score >=2 proposes (the third rubric level, not a 1-based score).
+Explicit `@assistant` bypasses the classifier. Human edits debounce for 2 seconds; proactive proposals cool down for 30.
+These thresholds are heuristics, not empirically calibrated confidence guarantees.
+
+Durable per-room cause jobs recover serially after restart. Context has the cause, last 10 entries, up to 50 shape labels and 20 **open** suggestions.
+Decisions hash the actual state; decision/trigger/job completion commits atomically without a provider await inside the transaction.
+Disabled/error classification records a decision but creates no inferred trigger; explicit mentions still work. No Haiku fallback exists.
+
+`demo-data.ts` is deliberately synthetic: seven fixed dates, 2026-09-12..2026-09-18.
+`source:"demo-metrics"` selects `throughput|latencyMs|errorRate`, with optional inclusive ISO `from`/`to` dates and no aggregation.
+There is no SQL, NLP query interpreter or real connector. The older 30-day/model-query design below is superseded.
+
+### Standalone runner and video boundary
+
+`apps/agent-runner` is a reusable `startRoomExecutor(...)` plus Node/tsx CLI, distinct from the existing Rust Devin client in `apps/desktop/src-tauri/src/devin.rs`.
+That desktop client is unchanged and not yet wired to room leases. This is not a Bun-compiled Tauri sidecar or localhost-WS bridge, and the browser is not wired to it.
+
+The runner uses ACP v1 SDK 1.4.0 and MCP SDK 1.26.0, preflights initialize/newSession without MCP before advertising automatic capability, then starts a fresh executable, scratch directory and ACP session per trigger.
+MCP is one `kan-canvas` stdio process with only a scoped lease, launched through Node and an absolute tsx loader/entry.
+Auto-claim requires explicit opt-in; manual mode advertises readiness only after local claim intent and never runs an unrequested trigger.
+Connection loss cancels, not replays, an active lease; fresh tickets/cursors reconcile latest state and retries are attempt-aware.
+
+Only assistant text and safe `{id,tool,status}` tool metadata are streamed; steps upsert by bounded tool-call ID, cap at 200 distinct IDs, and still update existing IDs at the cap.
+Tool labels use exact structured exposed names or `unknown`, never titles or raw I/O. `RunStep` is runner-local; `AgentStepSchema` remains bounded JSON.
+Text caps at 50,000 characters; periodic snapshots coalesce on a 250 ms interval, with a separate final status write. No thoughts.
+The existing `prompt.ts` and `tool-descriptions.ts` supply all model/tool instructions.
+ACP filesystem/terminal requests and unrecognized permissions are denied; the child gets only PATH/HOME/TMPDIR/USER/LOGNAME/LANG from the parent environment.
+This is **not an OS sandbox** and does not establish that every agent-internal shell tool is blocked. Real vendor compatibility remains unverified.
+`getCanvas` offers summary/selection/full, not viewport; act exposes reads/query plus add/update/connect/arrange, while propose exposes reads/query plus `proposeNode`. The server also enforces the run mode.
+
+Vonage uses server-side application ID/private key. One persisted session is created lazily per room, not during room creation.
+The response is `{applicationId,sessionId,token,expiresAt}`; publisher tokens last 1,800 seconds and carry JSON `{id,name}` connection data.
+`expiresAt` here is Unix **seconds**, unlike lease/ticket milliseconds. Unconfigured video returns 503; provider/token failures or session timeout return sanitized 502.
+The preserved native WebRTC probe below does not verify Vonage. No transcript route/schema exists yet; future voice needs authenticated trusted-source attribution, not arbitrary human appends of privileged entries.
+
+### Running and verification
+
+From the repository root with Node >=24: `npm run server` (default port 8787),
+`npm run runner`, `npm run typecheck:backend`, and `npm run test:backend`.
+Server configuration: `PORT` (1..65535), `KAN_DATA_DIR`, comma-separated
+`KAN_ALLOWED_ORIGINS`, `KAN_CLASSIFIER=disabled|jev`, `AI_GATEWAY_API_KEY`,
+`VONAGE_APPLICATION_ID`, `VONAGE_PRIVATE_KEY`. Missing Gateway key defaults to disabled;
+explicit `jev` without a key and a partial Vonage credential pair fail startup.
+Default allowed origins are `http://localhost:1420`, `tauri://localhost`,
+`http://tauri.localhost`; native clients without an Origin header are accepted.
+
+Runner configuration: `KAN_SERVER_URL`, `KAN_ROOM_ID`, `KAN_USER_ID`, `KAN_USER_SECRET`,
+`KAN_AGENT_COMMAND`; `KAN_AGENT_ARGS` is a JSON string array (default `[]`, never a shell),
+`KAN_AUTO_CLAIM` is `true|false` (default `false`). URLs require HTTPS except loopback HTTP.
+CLI stdin is bounded JSON lines: `{type:"claim",triggerId}` or `{type:"close"}`;
+stdout contains sanitized lifecycle/error JSON events. Streamed content goes to the room.
+The reusable API's session timeout defaults to 180 seconds; it is not a CLI env setting.
+
+Backend verification uses real HTTP/WS, genuine tldraw clients, restart/main CLI tests,
+and fake ACP subprocesses connected to the real MCP adapter, all with temporary data.
+No live Jev, Vonage or vendor ACP inference was exercised, nor Tauri runtime in this pass.
+A fresh desktop build passed earlier; compilation is not UI integration coverage.
+Fly.io remains a deployment target, not an executed deployment; no Docker setup is provided.
+
+## Original proposal and historical desktop notes
+
+The remainder is preserved as original design discussion and desktop migration history.
+Old host roles, paid server fallbacks, thread routes, transcript claims, sidecar packaging,
+and type/tool examples are superseded by the implemented contract above and
+`packages/protocol`. The desktop team's migration checkboxes and native WebRTC evidence
+remain verbatim; they are not new backend-pass verification claims.
 
 ## Two ideas that shape everything
 

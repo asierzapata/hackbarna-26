@@ -1,0 +1,312 @@
+import { z } from "zod";
+
+const uuid = z.uuid();
+const isoDate = z.iso.datetime();
+export const shapeId = z.string().regex(/^shape:[A-Za-z0-9_-]{1,80}$/);
+const isoDay = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((v) => {
+    const [y, m, d] = v.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }, "invalid calendar date");
+
+export const MAX_JSON_DEPTH = 12;
+export const MAX_JSON_BYTES = 64 * 1024;
+
+export function checkBoundedJson(value: unknown, maxDepth = MAX_JSON_DEPTH, maxKeys = 2000, maxString = 8192): boolean {
+  let keys = 0;
+  const seen = new Set<unknown>();
+  const walk = (v: unknown, depth: number): boolean => {
+    if (depth > maxDepth) return false;
+    if (v === null) return true;
+    const t = typeof v;
+    if (t === "string") return (v as string).length <= maxString;
+    if (t === "number") return Number.isFinite(v as number);
+    if (t === "boolean") return true;
+    if (t !== "object") return false;
+    if (seen.has(v)) return false;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      if (v.length > 1000) return false;
+      for (const item of v) if (!walk(item, depth + 1)) return false;
+      return true;
+    }
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      keys += 1;
+      if (keys > maxKeys) return false;
+      if (k.length > 256) return false;
+      if (!walk(val, depth + 1)) return false;
+    }
+    return true;
+  };
+  return walk(value, 0);
+}
+
+export function boundedJson(maxDepth = MAX_JSON_DEPTH, maxString = 8192, maxBytes = MAX_JSON_BYTES, maxKeys = 2000) {
+  return z
+    .unknown()
+    .refine((v) => checkBoundedJson(v, maxDepth, maxKeys, maxString), "json exceeds depth/size bounds")
+    .refine((v) => {
+      try {
+        return new TextEncoder().encode(JSON.stringify(v)).byteLength <= maxBytes;
+      } catch {
+        return false;
+      }
+    }, "json exceeds byte bound");
+}
+
+const FORBIDDEN_SPEC_KEYS = new Set(["url", "href", "expr", "calculate"]);
+export function checkChartSpec(value: unknown, depth = 0): boolean {
+  if (depth > 10 || value === null || typeof value !== "object") return depth <= 10;
+  if (Array.isArray(value)) return value.every((v) => checkChartSpec(v, depth + 1));
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (FORBIDDEN_SPEC_KEYS.has(k)) return false;
+    if (k === "filter" && typeof v === "string") return false;
+    if (!checkChartSpec(v, depth + 1)) return false;
+  }
+  return true;
+}
+
+const chartSpecSchema = boundedJson(10)
+  .refine((v) => v !== null && typeof v === "object" && !Array.isArray(v), "chart spec must be an object")
+  .refine(checkChartSpec, "chart spec contains forbidden keys");
+const chartDataRow = z.record(z.string(), z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]));
+
+export const NodeDraftSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("markdown"), title: z.string().min(1).max(200), body: z.string().max(50_000) }),
+  z.strictObject({
+    type: z.literal("decision"),
+    title: z.string().min(1).max(200),
+    bullets: z.array(z.string().min(1).max(500)).max(50),
+  }),
+  z.strictObject({ type: z.literal("concept"), label: z.string().min(1).max(120), glyph: z.string().max(8).optional() }),
+  z.strictObject({
+    type: z.literal("table"),
+    title: z.string().min(1).max(200),
+    columns: z.array(z.string().min(1).max(200)).min(1).max(20),
+    rows: z.array(z.array(z.string().max(1000)).max(20)).max(500),
+  }).refine((v) => v.rows.every((row) => row.length === v.columns.length), "row width must equal columns"),
+  z.strictObject({
+    type: z.literal("chart"),
+    title: z.string().min(1).max(200),
+    spec: chartSpecSchema,
+    data: z.array(chartDataRow).max(1000),
+    sourceNote: z.string().max(500).optional(),
+  }),
+]).refine((v) => boundedJson(12, 50_000, MAX_JSON_BYTES, 20_000).safeParse(v).success, "draft exceeds JSON bounds");
+export const SnapshotRecordSchema = boundedJson(16, 50_000, 96 * 1024, 20_000);
+export type NodeDraft = z.infer<typeof NodeDraftSchema>;
+
+export const UserSchema = z.strictObject({ id: uuid, name: z.string().min(1).max(80) });
+export type User = z.infer<typeof UserSchema>;
+
+export const RoomSchema = z.strictObject({
+  id: uuid,
+  localCanvasId: uuid,
+  name: z.string().min(1).max(120),
+  code: z.string(),
+  createdBy: uuid,
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type Room = z.infer<typeof RoomSchema>;
+
+export const TriggerStatusSchema = z.enum(["pending", "offered", "running", "needs_claim", "done", "failed"]);
+export const TriggerSchema = z.strictObject({
+  id: uuid,
+  causeEntryIds: z.array(z.string().max(80)).max(20),
+  requestedBy: uuid,
+  reason: z.string().max(1000),
+  intent: z.enum(["answer", "capture", "update", "lookup"]),
+  mode: z.enum(["act", "propose"]),
+  anchors: z.array(shapeId).max(64),
+  confidence: z.number().min(0).max(1),
+  status: TriggerStatusSchema,
+  assigneeSessionId: z.string().max(128).nullable(),
+  offerExpiresAt: z.number().int().nonnegative().nullable(),
+  attempt: z.number().int().nonnegative(),
+  runId: uuid.nullable(),
+});
+export type Trigger = z.infer<typeof TriggerSchema>;
+
+export const AgentStepSchema = boundedJson(8);
+const entryBase = { id: uuid, roomId: uuid, seq: z.number().int().positive(), at: isoDate };
+
+export const EntrySchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...entryBase,
+    kind: z.literal("message"),
+    authorId: uuid,
+    text: z.string().min(1).max(8000),
+    anchors: z.array(shapeId).max(64),
+    attachments: z.array(uuid).max(8),
+  }),
+  z.strictObject({
+    ...entryBase,
+    kind: z.literal("system"),
+    text: z.string().min(1).max(2000),
+    authorId: uuid,
+    shapeIds: z.array(shapeId).max(200),
+  }),
+  z.strictObject({ ...entryBase, kind: z.literal("trigger"), trigger: TriggerSchema }),
+  z.strictObject({
+    ...entryBase,
+    kind: z.literal("agent_turn"),
+    triggerId: uuid,
+    runId: uuid,
+    byUserId: uuid,
+    agentId: z.string().min(1).max(120),
+    text: z.string().max(50_000),
+    status: z.enum(["running", "done", "failed"]),
+    steps: z.array(AgentStepSchema).max(200),
+    touchedShapeIds: z.array(shapeId).max(500),
+  }),
+  z.strictObject({
+    ...entryBase,
+    kind: z.literal("suggestion"),
+    triggerId: uuid,
+    runId: uuid,
+    draft: NodeDraftSchema,
+    status: z.enum(["open", "accepted", "dismissed"]),
+    shapeId: shapeId.nullable(),
+    acceptedBy: uuid.nullable().optional(),
+  }),
+]);
+export type Entry = z.infer<typeof EntrySchema>;
+
+export const RoomEventSchema = z.strictObject({
+  cursor: z.number().int().nonnegative(),
+  roomId: uuid,
+  at: isoDate,
+  type: z.literal("entry.upsert"),
+  entry: EntrySchema,
+});
+export type RoomEvent = z.infer<typeof RoomEventSchema>;
+
+export const ExecutorPresenceSchema = z.strictObject({
+  sessionId: z.string().max(128),
+  userId: uuid,
+  ready: z.boolean(),
+  agentId: z.string().max(120),
+  busy: z.boolean(),
+});
+export type ExecutorPresence = z.infer<typeof ExecutorPresenceSchema>;
+
+export const LeaseSchema = z.strictObject({
+  runId: uuid,
+  triggerId: uuid,
+  attempt: z.number().int().nonnegative(),
+  leaseToken: z.string().min(32).max(256),
+  expiresAt: z.number().int().nonnegative(),
+  entryId: uuid,
+});
+export type Lease = z.infer<typeof LeaseSchema>;
+
+export const MutationSchema = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("add"),
+    draft: NodeDraftSchema,
+    shapeId: shapeId.optional(),
+    x: z.number().finite().optional(),
+    y: z.number().finite().optional(),
+    nearShapeId: shapeId.optional(),
+  }),
+  z.strictObject({ type: z.literal("update"), shapeId, draft: NodeDraftSchema }),
+  z.strictObject({
+    type: z.literal("connect"),
+    from: shapeId,
+    to: shapeId,
+    label: z.string().max(200).optional(),
+  }),
+  z.strictObject({
+    type: z.literal("arrange"),
+    shapeIds: z.array(shapeId).min(1).max(200),
+    layout: z.enum(["row", "column", "grid"]),
+  }),
+]);
+export type Mutation = z.infer<typeof MutationSchema>;
+
+export const CanvasReadInput = z.strictObject({ scope: z.enum(["summary", "selection", "full"]), shapeIds: z.array(shapeId).max(500).optional() });
+export const CanvasToolInputs = {
+  getCanvas: CanvasReadInput,
+  addNode: MutationSchema.options[0].omit({ type: true }).extend({ requestId: uuid.optional() }),
+  updateNode: MutationSchema.options[1].omit({ type: true }).extend({ requestId: uuid.optional() }),
+  connectNodes: MutationSchema.options[2].omit({ type: true }).extend({ requestId: uuid.optional() }),
+  arrange: MutationSchema.options[3].omit({ type: true }).extend({ requestId: uuid.optional() }),
+  proposeNode: z.strictObject({ draft: NodeDraftSchema, requestId: uuid.optional() }),
+};
+
+export const RegisterInput = z.strictObject({
+  userId: uuid,
+  secret: z.string().regex(/^[0-9a-f]{64}$/),
+  name: z.string().min(1).max(80),
+});
+export const PatchMeInput = z.strictObject({ name: z.string().min(1).max(80) });
+export const PatchRoomInput = z.strictObject({ name: z.string().min(1).max(120) });
+export const JoinInput = z.strictObject({ code: z.string().min(1).max(32) });
+export const ImportedMessageInput = z.strictObject({
+  id: uuid,
+  text: z.string().min(1).max(8000),
+  at: isoDate,
+  anchors: z.array(shapeId).max(64).optional(),
+  attachments: z.array(uuid).max(8).optional(),
+});
+export const CreateRoomInput = z.strictObject({
+  localCanvasId: uuid,
+  name: z.string().min(1).max(120),
+  records: z.array(SnapshotRecordSchema).max(5000).optional(),
+  messages: z.array(ImportedMessageInput).max(500).optional(),
+  assetIds: z.array(uuid).max(100).optional(),
+});
+export const PostMessageInput = z.strictObject({
+  id: uuid,
+  text: z.string().min(1).max(8000),
+  anchors: z.array(shapeId).max(64).optional(),
+  attachments: z.array(uuid).max(8).optional(),
+});
+export const SocketTicketInput = z.strictObject({ channel: z.enum(["sync", "events"]) });
+export const ClaimInput = z.strictObject({ sessionId: z.string().min(1).max(128), manual: z.boolean().optional() });
+export const RetryInput = z.strictObject({ id: uuid });
+export const MutateInput = z.strictObject({ id: uuid, operations: z.array(MutationSchema).min(1).max(100) });
+export const SuggestionInput = z.strictObject({ id: uuid, draft: NodeDraftSchema });
+export const ResolveSuggestionInput = z.strictObject({ resolution: z.enum(["accepted", "dismissed"]) });
+export const DataQueryInput = z
+  .strictObject({
+    source: z.literal("demo-metrics"),
+    metric: z.enum(["throughput", "latencyMs", "errorRate"]),
+    from: isoDay.optional(),
+    to: isoDay.optional(),
+  })
+  .refine((v) => !v.from || !v.to || v.from <= v.to, "from must be <= to");
+export const RunPatchInput = z.strictObject({
+  id: uuid,
+  text: z.string().max(50_000).optional(),
+  steps: z.array(boundedJson(8)).max(200).optional(),
+  status: z.enum(["done", "failed"]).optional(),
+});
+export const EventsClientMessage = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("executor.ready"), ready: z.boolean(), agentId: z.string().min(1).max(120) }),
+  z.strictObject({ type: z.literal("heartbeat") }),
+]);
+
+export const EventsServerMessage = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("event"), event: RoomEventSchema }),
+  z.strictObject({ type: z.literal("ready"), cursor: z.number().int().nonnegative(), sessionId: z.string(), room: RoomSchema, members: z.array(UserSchema), executors: z.array(ExecutorPresenceSchema), triggers: z.array(TriggerSchema) }),
+  z.strictObject({ type: z.literal("presence"), room: RoomSchema, members: z.array(UserSchema), executors: z.array(ExecutorPresenceSchema) }),
+  z.strictObject({ type: z.literal("error"), error: z.string() }),
+]);
+export type ServerMessage = z.infer<typeof EventsServerMessage>;
+
+export type DataQuery = z.infer<typeof DataQueryInput>;
+export const ALLOWED_ASSET_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/octet-stream",
+]);
+export const MAX_ASSET_BYTES = 10 * 1024 * 1024;
+export const ROOM_CODE_LENGTH = 10;

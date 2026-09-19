@@ -14,7 +14,7 @@ apps/desktop/        the Tauri app — src/, src-tauri/, index.html, vite.config
 apps/room-server/    the backend
 apps/agent-runner/
 packages/protocol/   zod wire schemas, shared
-packages/nodes/      tldraw custom shape utils + server-side schema
+packages/nodes/      pure shared tldraw schema (renderers live in apps/desktop)
 scripts/drive.mjs    WebDriver client, stays at the root
 ```
 
@@ -152,3 +152,33 @@ streaming `AgentEntry`.
 - `ui/spinner.tsx` is typed against the remixicon component, not
   `ComponentProps<"svg">`. Re-adding it via the shadcn CLI reintroduces a type
   error, because remixicon icons reject `children`.
+
+## Backend verification and integration
+
+The authoritative implemented contract is the new backend section of
+`ARCHITECTURE.md` and the schemas in `packages/protocol`, not its historical
+host/server-fallback or thread-route proposals. Use Node >=24 from the repo root:
+
+| Task | Command |
+| --- | --- |
+| Room server (default :8787) | `npm run server` |
+| Standalone scoped ACP executor | `npm run runner` |
+| Backend TypeScript | `npm run typecheck:backend` |
+| Backend runtime tests | `npm run test:backend` |
+
+`apps/agent-runner` is a separate Node/tsx executor, not a replacement for the
+existing Rust Devin integration above. Automatic claiming defaults off; configure
+its explicit local command and identity through the documented `KAN_*` variables.
+No real vendor agent or paid provider is needed for the backend tests: they use
+real HTTP/WS, genuine tldraw clients, fake ACP subprocesses with real MCP stdio,
+and private temporary directories. Check the actual test count and server output.
+A passing desktop build is not native UI coverage; desktop room/runner/video
+integration still requires the Tauri driver and the existing e2e guidance.
+
+`@kan/nodes` supplies the pure shared schema; the renderer is in
+`apps/desktop/src/lib/canvas-shapes.tsx`. Preserve parallel desktop work and keep
+wire-schema changes coordinated. SQLite files/WAL files and `/data/` are ignored;
+use temporary `KAN_DATA_DIR` fixtures for verification. Append migrations instead
+of deleting user data. Keep installation credentials in the parent; pass only
+scoped run leases to MCP, obtain fresh socket tickets on reconnect, and never log
+credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.

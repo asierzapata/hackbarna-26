@@ -1,0 +1,16 @@
+{
+  "name": "@kan/nodes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@kan/protocol": "0.1.0",
+    "@tldraw/store": "5.4.2",
+    "@tldraw/tlschema": "5.4.2",
+    "@tldraw/validate": "5.4.2",
+    "zod": "4.6.2"
+  }
+}
