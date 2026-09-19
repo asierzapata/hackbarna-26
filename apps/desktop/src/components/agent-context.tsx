@@ -12,6 +12,7 @@
 import * as React from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { canvasToolDefinitions } from "@/lib/canvas-agent";
 
 /** Providers, keyed the way the Rust side deserializes them. */
 export type Provider = "devin" | "openai";
@@ -55,6 +56,16 @@ export interface PromptHandlers {
   /** A chunk of the agent's reply. Append, don't replace. */
   onText?: (text: string) => void;
   onTool?: (call: AgentToolCall) => void;
+  canvas?: { id: string; execute: (name: string, input: unknown) => unknown };
+}
+
+interface CanvasToolRequest {
+  requestId: string;
+  turnId: string;
+  canvasId: string;
+  name: string;
+  arguments: unknown;
+  expiresAt: number;
 }
 
 interface AgentApi {
@@ -73,11 +84,12 @@ interface AgentApi {
   /** One prompt turn. Resolves when the turn ends. */
   prompt: (text: string, handlers: PromptHandlers) => Promise<void>;
   busy: boolean;
+  cancel: () => Promise<void>;
 }
 
 const AgentContext = React.createContext<AgentApi | null>(null);
 
-export function AgentProvider({ children }: { children: React.ReactNode }) {
+export function AgentProvider({ children, canvasId }: { children: React.ReactNode; canvasId?: string }) {
   const [status, setStatus] = React.useState<AgentStatus>(() =>
     isTauri()
       ? { state: "idle" }
@@ -88,13 +100,21 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
 
   // One listener for the whole app; the in-flight prompt claims it.
   const handlers = React.useRef<PromptHandlers | null>(null);
+  const turnId = React.useRef<string | null>(null);
+  const listenersReady = React.useRef<Promise<unknown>>(Promise.resolve());
 
   React.useEffect(() => {
     if (!isTauri()) return;
+    let mounted = true;
+    setStatus({ state: "idle" });
+    void invoke<AgentStatus>("agent_status", { canvasId }).then((remote) => {
+      if (mounted) setStatus((current) => current.state === "idle" ? remote : current);
+    });
 
-    const updates = listen<SessionUpdate>("agent:update", ({ payload }) => {
+    const updates = listen<{ turnId: string; update: SessionUpdate }>("agent:update", ({ payload: envelope }) => {
       const active = handlers.current;
-      if (!active) return;
+      if (!active || envelope.turnId !== turnId.current) return;
+      const payload = envelope.update;
 
       switch (payload.sessionUpdate) {
         case "agent_message_chunk": {
@@ -119,8 +139,24 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    const canvas = listen<CanvasToolRequest>("canvas:tool", ({ payload }) => {
+      const active = handlers.current?.canvas;
+      if (!mounted || !active || payload.turnId !== turnId.current || payload.canvasId !== active.id) return;
+      let result: unknown = null;
+      let error: string | undefined;
+      try {
+        if (Date.now() >= payload.expiresAt) throw new Error("Canvas tool request expired");
+        result = active.execute(payload.name, payload.arguments);
+      } catch (cause) {
+        error = cause instanceof Error ? cause.message : String(cause);
+      }
+      void invoke("agent_canvas_result", { requestId: payload.requestId, turnId: payload.turnId, result, error }).catch(() => {});
+    });
+
     const closed = listen("agent:closed", () => {
       handlers.current = null;
+      turnId.current = null;
+      setBusy(false);
       // Losing a live connection is worth reporting; following our own
       // sign-out (which already reset the status) is not.
       setStatus((prev) =>
@@ -130,11 +166,18 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       );
     });
 
+    listenersReady.current = Promise.all([updates, closed, canvas]);
     return () => {
+      mounted = false;
+      const activeId = turnId.current;
+      turnId.current = null;
+      handlers.current = null;
+      if (activeId) void invoke("agent_cancel", { turnId: activeId });
       void updates.then((un) => un());
       void closed.then((un) => un());
+      void canvas.then((un) => un());
     };
-  }, []);
+  }, [canvasId]);
 
   const api: AgentApi = {
     status,
@@ -143,7 +186,7 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setStatus({ state: "connecting", provider, providerLabel: providerLabels[provider] });
       try {
         setStatus(
-          await invoke<AgentStatus>("agent_sign_in", { provider, mode, apiKey })
+          await invoke<AgentStatus>("agent_sign_in", { provider, mode, apiKey, tools: canvasToolDefinitions, canvasId })
         );
       } catch (error) {
         setStatus({ state: "unavailable", provider, message: String(error) });
@@ -153,14 +196,27 @@ export function AgentProvider({ children }: { children: React.ReactNode }) {
       setStatus({ state: "idle" });
       await invoke("agent_sign_out");
     },
+    cancel: async () => {
+      const activeId = turnId.current;
+      handlers.current = null;
+      if (activeId) await invoke("agent_cancel", { turnId: activeId });
+    },
     prompt: async (text, next) => {
+      if (turnId.current) throw new Error("An agent turn is already running");
+      const id = crypto.randomUUID();
+      turnId.current = id;
       handlers.current = next;
       setBusy(true);
       try {
-        await invoke<string>("agent_prompt", { text });
+        await listenersReady.current;
+        if (turnId.current !== id || !handlers.current) throw new Error("Agent turn cancelled");
+        await invoke<string>("agent_prompt", { text, turnId: id, canvasId: next.canvas?.id });
       } finally {
-        handlers.current = null;
-        setBusy(false);
+        if (turnId.current === id) {
+          turnId.current = null;
+          handlers.current = null;
+          setBusy(false);
+        }
       }
     },
   };

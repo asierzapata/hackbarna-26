@@ -1,7 +1,12 @@
 mod agent;
+mod canvas_mcp;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if std::env::args().nth(1).as_deref() == Some("--canvas-mcp") {
+        if canvas_mcp::serve_stdio().is_err() { std::process::exit(1); }
+        return;
+    }
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(agent::Agent::default())
@@ -9,6 +14,9 @@ pub fn run() {
             agent::agent_sign_in,
             agent::agent_prompt,
             agent::agent_sign_out,
+            agent::agent_status,
+            agent::agent_cancel,
+            agent::agent_canvas_result,
         ]);
 
     // Automation server for e2e tests. Gated behind the `webdriver` feature so

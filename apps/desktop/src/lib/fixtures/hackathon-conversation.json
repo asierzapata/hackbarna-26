@@ -32,7 +32,7 @@
     },
     {
       "speaker": "juanjo",
-      "text": "nice, i'll put it on the calendar",
+      "text": "nice, kan, put that on a calendar with two separate days: Hackathon day 1 on 2026-09-19 and Hackathon day 2 on 2026-09-20",
       "trigger": { "label": "node:calendar", "confidence": 0.9 }
     },
     { "speaker": "enric", "text": "cool, venue next" },
@@ -45,7 +45,7 @@
     { "speaker": "juanjo", "text": "and they already said yes for this year too" },
     {
       "speaker": "enric",
-      "text": "okay, kan, can you show them both on the map please",
+      "text": "okay, kan, can you show them both on a map next to the calendar please? For this mock planning exercise use approximate pins: Glovo at latitude 41.403, longitude 2.194, and Norrsken at latitude 41.375, longitude 2.189. Label both positions as approximate.",
       "trigger": { "label": "action:show-map", "confidence": 0.97 }
     },
     { "speaker": "juanjo", "text": "haha nice, let's see them side by side" },
@@ -64,7 +64,7 @@
     { "speaker": "enric", "text": "don't forget preply, they signed as silver" },
     {
       "speaker": "juanjo",
-      "text": "true, adding preply to the list",
+      "text": "true, kan, add a sponsors table beside the map listing Vonage, Cognition, Nebius and Preply, with the contributions we just discussed",
       "trigger": { "label": "node:sponsors", "confidence": 0.85 }
     },
     { "speaker": "enric", "text": "solid lineup, i think we have a good start" },

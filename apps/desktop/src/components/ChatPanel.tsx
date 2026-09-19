@@ -21,6 +21,8 @@ import {
   defaultSelectionFor,
   type AiModelSelection,
 } from "@/components/ui/ai-model-select";
+import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
+import { createCanvasTools } from "@/nodes/tools";
 
 const DEFAULT_USER = "You";
 const AGENT = "assistant";
@@ -84,7 +86,12 @@ export function ChatPanel({
   onClose?: () => void;
 }) {
   const agent = useAgent();
-  const { jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
+  const { editor, jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
+  const canvasTools = React.useMemo(() => editor && !online ? createCanvasTools(editor) : null, [editor, online]);
+  const transcript = React.useRef<ConversationLine[]>([]);
+  const cancelRef = React.useRef(agent.cancel);
+  cancelRef.current = agent.cancel;
+  React.useEffect(() => () => { void cancelRef.current(); }, [roomId]);
 
   const transport = React.useMemo<RoomTransport>(
     () => (online && roomId ? createWsTransport(roomId) : createMockTransport()),
@@ -126,7 +133,9 @@ export function ChatPanel({
    * `PENDING_SEQ` for the same reason `askAgent` does: nothing has numbered
    * it, and voice has no wire kind yet (see `room-transport.ts`).
    */
-  function simulateLine(line: ConversationLine) {
+  async function simulateLine(line: ConversationLine, index: number) {
+    if (index === 0) transcript.current = [];
+    transcript.current.push(line);
     upsert({
       id: crypto.randomUUID(),
       seq: PENDING_SEQ,
@@ -136,6 +145,10 @@ export function ChatPanel({
       text: line.text,
       trigger: line.trigger,
     });
+    if (shouldActOnLine(line)) {
+      if (!canvasTools || agent.status.state !== "ready") throw new Error("Connect Devin on an offline canvas before running this conversation.");
+      await askAgent(line.text, modelSelection, [...transcript.current]);
+    }
   }
 
   /** Patches one agent entry in place while its turn streams. */
@@ -155,8 +168,12 @@ export function ChatPanel({
    * server exists there is nowhere to publish them. They carry `PENDING_SEQ`
    * so they sort after everything the room has numbered.
    */
-  async function askAgent(text: string, selectedModel: AiModelSelection) {
-    const id = `agent-${Date.now()}`;
+  async function askAgent(
+    text: string,
+    selectedModel: AiModelSelection,
+    context: ConversationLine[] = [],
+  ) {
+    const id = `agent-${crypto.randomUUID()}`;
     const startedAt = Date.now();
     const model = DEFAULT_AI_MODELS.find((item) => item.id === selectedModel.id);
 
@@ -172,7 +189,17 @@ export function ChatPanel({
     setStreamingIds((prev) => new Set(prev).add(id));
 
     try {
-      await agent.prompt(text, {
+      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context) : text, {
+        canvas: canvasTools && roomId ? {
+          id: roomId,
+          execute: (name, input) => {
+            const result = executeCanvasTool(canvasTools, name, name === "addNode" ? {
+              ...(input as object),
+              provenance: { entryId: id, runId: id, agentId: AGENT, byUserId: userId },
+            } : input);
+            return result;
+          },
+        } : undefined,
         onText: (chunk) =>
           patchAgent(id, (entry) => ({ ...entry, text: entry.text + chunk })),
         onTool: (call) =>
@@ -184,8 +211,9 @@ export function ChatPanel({
     } catch (error) {
       patchAgent(id, (entry) => ({
         ...entry,
-        text: entry.text || `The agent could not answer: ${error}`,
+        text: `${entry.text}${entry.text ? "\n\n" : ""}The agent could not complete this turn: ${error}`,
       }));
+      throw error;
     } finally {
       setStreamingIds((prev) => withoutId(prev, id));
       patchAgent(id, (entry) => ({ ...entry, durationMs: Date.now() - startedAt }));
@@ -229,7 +257,7 @@ export function ChatPanel({
     });
 
     // A connected agent answers every message; until then the thread is local.
-    if (agent.status.state === "ready") void askAgent(text, modelSelection);
+    if (agent.status.state === "ready") void askAgent(text, modelSelection).catch(() => {});
   }
 
   function resolveSuggestion(suggestion: SuggestionEntry, accepted: boolean) {
@@ -241,6 +269,7 @@ export function ChatPanel({
     return [
       { id: userId, name: userName, kind: "human" as const },
       ...demoParticipants.filter((p) => p.id !== "asier"),
+      ...hackathonConversation.participants.map((participant) => ({ ...participant, kind: "human" as const })),
     ];
   }, [userId, userName]);
 
@@ -259,7 +288,12 @@ export function ChatPanel({
       canvasNodeCount={shapeCount}
       view={view}
       toolbar={
-        <ConversationSimulator script={hackathonConversation} onLine={simulateLine} />
+        <ConversationSimulator
+          script={hackathonConversation}
+          onLine={simulateLine}
+          disabled={agent.status.state !== "ready" || !canvasTools || agent.busy}
+          onStop={() => void agent.cancel()}
+        />
       }
       onClose={onClose}
       onCopyLink={() => navigator.clipboard?.writeText(window.location.href)}

@@ -14,11 +14,12 @@ export const DEFAULT_CONVERSATION_DELAY_MS = 1000;
  */
 export function useConversationPlayer(
   script: ConversationScript,
-  onLine: (line: ConversationLine, index: number) => void
+  onLine: (line: ConversationLine, index: number) => void | Promise<void>
 ) {
   const [playing, setPlaying] = React.useState(false);
   const [delayMs, setDelayMs] = React.useState(DEFAULT_CONVERSATION_DELAY_MS);
   const [cursor, setCursor] = React.useState(0);
+  const [error, setError] = React.useState<string | null>(null);
 
   const delayRef = React.useRef(delayMs);
   delayRef.current = delayMs;
@@ -36,22 +37,31 @@ export function useConversationPlayer(
 
     // The first line lands immediately; every line after waits the current
     // slider delay, so pressing play doesn't feel like it stalled.
+    let cancelled = false;
     const timer = setTimeout(
-      () => {
-        onLineRef.current(script.lines[cursor], cursor);
-        setCursor((c) => c + 1);
+      async () => {
+        try {
+          await onLineRef.current(script.lines[cursor], cursor);
+          if (!cancelled) setCursor((c) => c + 1);
+        } catch (cause) {
+          if (!cancelled) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+            setPlaying(false);
+          }
+        }
       },
       cursor === 0 ? 0 : delayRef.current
     );
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [playing, cursor, total, script.lines]);
 
   const start = React.useCallback(() => {
+    setError(null);
     setCursor(0);
     setPlaying(true);
   }, []);
 
   const stop = React.useCallback(() => setPlaying(false), []);
 
-  return { playing, delayMs, setDelayMs, cursor, total, start, stop };
+  return { playing, delayMs, setDelayMs, cursor, total, start, stop, error };
 }

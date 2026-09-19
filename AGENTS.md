@@ -188,13 +188,18 @@ The agent never touches tldraw directly; it goes through the tool layer.
 
 The rich node tools currently operate on offline desktop canvases; they are
 not wired into the room server's MCP tools or shared `kan-node` wire schema.
-Online canvases retain only the shared renderer; publishing rich-node snapshots
-requires that follow-up schema integration. Offline canvases register both
-renderers, preserve duplicated initial records, and reuse `CanvasProvider`.
-Run `node scripts/canvas-tools.e2e.mjs` against the Tauri driver to verify an
-empty fresh offline canvas, all eight rich node types, tool actions, thread
-selection labels, and persistence. It also runs the date-node e2e suite, cleans
-its own test canvas, and restores the original page. Do not drive concurrently.
+The local Devin ACP path is wired to those offline tools through a loopback
+`kan-canvas` MCP bridge. The bridge is exposed only during an active prompt on
+the current offline canvas, validates every request with the same zod schemas,
+and approves only correlated canvas tool calls; filesystem and terminal calls
+remain denied. Online canvases retain only the shared renderer; publishing
+rich-node snapshots requires that follow-up schema integration. Offline canvases
+register both renderers, preserve duplicated initial records, and reuse
+`CanvasProvider`.
+Run `node scripts/canvas-tools.e2e.mjs` for tool-layer coverage, and
+`node scripts/local-agent.e2e.mjs` with Devin signed in to verify the real local
+agent creates the two-day calendar, venue map, and sponsors table. Both tests
+clean their own canvas and restore the original page. Do not drive concurrently.
 
 Keys: `apps/desktop/src/lib/config.ts` zod-parses `VITE_MAPTILER_KEY` and
 `VITE_BRANDFETCH_CLIENT_ID` from the root `.env.local` (see `.env.example`).

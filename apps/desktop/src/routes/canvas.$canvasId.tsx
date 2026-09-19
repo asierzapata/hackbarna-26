@@ -79,7 +79,7 @@ function CanvasPage() {
   }
 
   return (
-    <AgentProvider>
+    <AgentProvider canvasId={canvasId}>
       <CanvasProvider>
         <CanvasPageContent
           canvasEntry={canvasEntry}

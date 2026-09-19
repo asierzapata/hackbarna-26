@@ -42,6 +42,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::canvas_mcp::{AgentWorkspace, CanvasMcp};
+
 /// JSON-RPC error code for "authentication required" (ACP reserves -32000).
 const AUTH_REQUIRED: i64 = -32000;
 
@@ -219,6 +221,10 @@ struct Conn {
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     next_id: AtomicU64,
     session_id: Mutex<Option<String>>,
+    session_canvas: Mutex<Option<String>>,
+    prompt_lock: Mutex<()>,
+    canvas_mcp: Arc<CanvasMcp>,
+    workspace: AgentWorkspace,
     /// Auth methods advertised by `initialize`, as `(id, name)`.
     auth_methods: Mutex<Vec<(String, String)>>,
     /// Agent title from `initialize`, kept so a reconnect can still report it.
@@ -243,15 +249,18 @@ impl Conn {
         let (tx, rx) = channel();
         self.pending.lock().unwrap().insert(id, tx);
 
-        write_message(
+        if let Err(error) = write_message(
             &self.stdin,
             &json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }),
-        )?;
+        ) {
+            self.pending.lock().unwrap().remove(&id);
+            return Err(error);
+        }
 
         // The sender is dropped if the process dies, which unblocks us.
-        let reply = rx
-            .recv()
-            .map_err(|_| RpcError::transport("the agent exited before replying"))?;
+        let reply = rx.recv_timeout(std::time::Duration::from_secs(300));
+        self.pending.lock().unwrap().remove(&id);
+        let reply = reply.map_err(|_| RpcError::transport("the agent exited or timed out before replying"))?;
 
         if let Some(err) = reply.get("error") {
             return Err(RpcError {
@@ -305,6 +314,7 @@ fn reader_loop(
     stdout: ChildStdout,
     stdin: Arc<Mutex<ChildStdin>>,
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
+    canvas_mcp: Arc<CanvasMcp>,
 ) {
     for line in BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
@@ -326,7 +336,7 @@ fn reader_loop(
             // Request from the agent — must be answered or the turn stalls.
             (Some(method), Some(id)) => {
                 let result = match method {
-                    "session/request_permission" => Some(permission_reply(&msg)),
+                    "session/request_permission" => Some(permission_reply(&msg, &canvas_mcp)),
                     _ => None,
                 };
                 let reply = match result {
@@ -342,7 +352,13 @@ fn reader_loop(
             // Notification.
             (Some("session/update"), None) => {
                 if let Some(update) = msg.pointer("/params/update") {
-                    let _ = app.emit("agent:update", update);
+                    let session_id = msg.pointer("/params/sessionId").and_then(Value::as_str);
+                    if let Some(session_id) = session_id {
+                        canvas_mcp.record_tool_call(session_id, update);
+                    }
+                    if let Some(turn_id) = session_id.and_then(|id| canvas_mcp.active_turn(id)) {
+                        let _ = app.emit_to("main", "agent:update", json!({"turnId": turn_id, "update": update}));
+                    }
                 }
             }
             _ => {}
@@ -373,14 +389,18 @@ fn reader_loop(
 }
 
 /// Picks the option matching our policy, preferring a one-shot answer.
-fn permission_reply(msg: &Value) -> Value {
+fn permission_reply(msg: &Value, canvas: &CanvasMcp) -> Value {
     let options = msg
         .pointer("/params/options")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
 
-    let wanted: [&str; 2] = if AUTO_APPROVE_TOOLS {
+    let session_id = msg.pointer("/params/sessionId").and_then(Value::as_str);
+    let tool_call_id = msg.pointer("/params/toolCall/toolCallId").and_then(Value::as_str);
+    let tool_name = msg.pointer("/params/toolCall/name").and_then(Value::as_str);
+    let allowed_canvas = canvas.allows(session_id, tool_call_id, tool_name);
+    let wanted: [&str; 2] = if AUTO_APPROVE_TOOLS || allowed_canvas {
         ["allow_once", "allow_always"]
     } else {
         ["reject_once", "reject_always"]
@@ -452,14 +472,20 @@ fn open(
     provider: Provider,
     mode: AuthMode,
     api_key: Option<&str>,
+    tools: Vec<Value>,
+    canvas_id: Option<String>,
 ) -> Result<(Arc<Conn>, Option<String>), RpcError> {
     {
         let state = app.state::<Agent>();
         let mut slot = state.0.lock().unwrap();
+        if slot.as_ref().is_some_and(|conn| conn.prompt_lock.try_lock().is_err()) {
+            return Err(RpcError::transport("An agent turn is still running"));
+        }
         let reusable = slot.as_ref().is_some_and(|conn| {
             conn.provider == provider
                 && conn.mode == mode
                 && mode == AuthMode::Subscription
+                && *conn.session_canvas.lock().unwrap() == canvas_id
         });
         match slot.clone() {
             Some(conn) if reusable => {
@@ -473,8 +499,11 @@ fn open(
     }
 
     let spec = launch_spec(app, provider, api_key)?;
+    let canvas_mcp = CanvasMcp::start(app.clone(), tools).map_err(RpcError::transport)?;
+    let workspace = canvas_mcp.workspace(&scratch(app, "agent-workspaces")?, provider == Provider::Devin).map_err(RpcError::transport)?;
 
     let mut child = Command::new(&spec.program)
+        .current_dir(&workspace.0)
         .args(&spec.args)
         .envs(spec.env)
         // These CLIs log heavily to stderr and also write a log file; piping it
@@ -496,7 +525,8 @@ fn open(
         let app = app.clone();
         let stdin = stdin.clone();
         let pending = pending.clone();
-        std::thread::spawn(move || reader_loop(app, id, stdout, stdin, pending));
+        let canvas_mcp = canvas_mcp.clone();
+        std::thread::spawn(move || reader_loop(app, id, stdout, stdin, pending, canvas_mcp));
     }
 
     let conn = Arc::new(Conn {
@@ -507,6 +537,10 @@ fn open(
         pending,
         next_id: AtomicU64::new(1),
         session_id: Mutex::new(None),
+        session_canvas: Mutex::new(canvas_id),
+        prompt_lock: Mutex::new(()),
+        canvas_mcp,
+        workspace,
         auth_methods: Mutex::new(Vec::new()),
         agent: Mutex::new(None),
         child: Mutex::new(child),
@@ -553,7 +587,7 @@ fn open(
 
 /// Creates the session, running the provider's auth flow if it asks for one.
 fn start_session(
-    app: &AppHandle,
+    _app: &AppHandle,
     conn: &Conn,
     mode: AuthMode,
     agent: Option<String>,
@@ -563,11 +597,12 @@ fn start_session(
         return AgentStatus::ready(provider, agent);
     }
 
-    let cwd = match scratch(app, "agent-workspace") {
-        Ok(cwd) => cwd,
-        Err(e) => return AgentStatus::unavailable(provider, e.message),
+    let cwd = &conn.workspace.0;
+    let server = match conn.canvas_mcp.config() {
+        Ok(server) => server,
+        Err(error) => return AgentStatus::unavailable(provider, error),
     };
-    let params = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [] });
+    let params = json!({ "cwd": cwd.to_string_lossy(), "mcpServers": [server] });
 
     // An API key has to be selected explicitly, or an adapter with a stale
     // browser login in its home would quietly use that instead. A subscription
@@ -624,6 +659,8 @@ pub async fn agent_sign_in(
     provider: Provider,
     mode: AuthMode,
     api_key: Option<String>,
+    tools: Vec<Value>,
+    canvas_id: Option<String>,
 ) -> Result<AgentStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let key = match mode {
@@ -634,7 +671,7 @@ pub async fn agent_sign_in(
             AuthMode::Subscription => None,
         };
 
-        let status = match open(&app, provider, mode, key) {
+        let status = match open(&app, provider, mode, key, tools, canvas_id) {
             Ok((conn, agent)) => start_session(&app, &conn, mode, agent),
             Err(e) => AgentStatus::unavailable(provider, e.message),
         };
@@ -657,41 +694,55 @@ pub async fn agent_sign_in(
 /// Runs one prompt turn. Text streams back as `agent:update` events; this
 /// resolves with the stop reason when the turn ends.
 #[tauri::command]
-pub async fn agent_prompt(app: AppHandle, text: String) -> Result<String, String> {
+pub async fn agent_prompt(app: AppHandle, text: String, turn_id: String, canvas_id: Option<String>) -> Result<String, String> {
+    if text.len() > 128 * 1024 || turn_id.is_empty() || turn_id.len() > 128 || canvas_id.as_ref().is_some_and(|id| id.len() > 128) {
+        return Err("Invalid agent prompt".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = app
-            .state::<Agent>()
-            .0
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "no agent is connected".to_string())?;
+        let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or("no agent is connected")?;
+        let _turn = conn.prompt_lock.try_lock().map_err(|_| "An agent turn is already running")?;
+        if *conn.session_canvas.lock().unwrap() != canvas_id {
+            return Err("Connect the local agent for this canvas before sending a prompt".into());
+        }
+        let session_id = conn.session_id.lock().unwrap().clone().ok_or("the agent has no session")?;
+        conn.canvas_mcp.begin(turn_id.clone(), canvas_id, session_id.clone())?;
+        let result = conn.request("session/prompt", json!({
+            "sessionId": session_id,
+            "prompt": [{ "type": "text", "text": text }]
+        })).map_err(String::from);
+        let was_active = conn.canvas_mcp.finish(&turn_id);
+        if result.is_err() {
+            let _ = write_message(&conn.stdin, &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}));
+        }
+        if !was_active { return Err("Agent turn cancelled".into()); }
+        Ok(result?.get("stopReason").and_then(Value::as_str).unwrap_or("end_turn").to_string())
+    }).await.map_err(|error| error.to_string())?
+}
 
-        let session_id = conn
-            .session_id
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "the agent has no session".to_string())?;
+#[tauri::command]
+pub fn agent_canvas_result(app: AppHandle, request_id: String, turn_id: String, result: Value, error: Option<String>) -> Result<(), String> {
+    let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or("Agent disconnected")?;
+    if result.to_string().len() > 2 * 1024 * 1024 { return Err("Canvas result too large".into()); }
+    conn.canvas_mcp.complete(&request_id, &turn_id, error.map_or(Ok(result), Err))
+}
 
-        let result = conn
-            .request(
-                "session/prompt",
-                json!({
-                    "sessionId": session_id,
-                    "prompt": [{ "type": "text", "text": text }]
-                }),
-            )
-            .map_err(String::from)?;
+#[tauri::command]
+pub fn agent_cancel(app: AppHandle, turn_id: String) {
+    let conn = app.state::<Agent>().0.lock().unwrap().clone();
+    if let Some(conn) = conn {
+        if conn.canvas_mcp.finish(&turn_id) {
+            let session_id = conn.session_id.lock().unwrap().clone();
+            let _ = write_message(&conn.stdin, &json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}));
+        }
+    }
+}
 
-        Ok(result
-            .get("stopReason")
-            .and_then(Value::as_str)
-            .unwrap_or("end_turn")
-            .to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+#[tauri::command]
+pub fn agent_status(app: AppHandle, canvas_id: Option<String>) -> AgentStatus {
+    match app.state::<Agent>().0.lock().unwrap().as_ref() {
+        Some(conn) if conn.session_id.lock().unwrap().is_some() && *conn.session_canvas.lock().unwrap() == canvas_id => AgentStatus::ready(conn.provider, conn.agent.lock().unwrap().clone()),
+        _ => AgentStatus { state: "idle", provider: None, provider_label: None, agent: None, message: None },
+    }
 }
 
 /// Drops the connection; the child is killed with it, and the reader thread
@@ -709,7 +760,10 @@ pub fn agent_sign_out(app: AppHandle) {
 
     // Read what we need, then drop the Arc: its `Drop` waits for the child, so
     // the file cannot be rewritten underneath us afterwards.
-    let Some((provider, mode)) = conn.map(|conn| (conn.provider, conn.mode)) else {
+    let Some((provider, mode)) = conn.map(|conn| {
+        let _ = conn.canvas_mcp.rotate_session();
+        (conn.provider, conn.mode)
+    }) else {
         return;
     };
     if (provider, mode) == (Provider::Openai, AuthMode::ApiKey) {

@@ -17,7 +17,8 @@ beforeEach(() => {
   setupMockIndexedDB();
 });
 
-test("canvas catalog lifecycle and ordering", async () => {
+test("canvas catalog lifecycle and ordering", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-19T12:00:00Z") });
   clearMockIndexedDB();
 
   const c1 = await createOfflineCanvas({ name: "Canvas 1" });
@@ -25,6 +26,7 @@ test("canvas catalog lifecycle and ordering", async () => {
   assert.equal(c1.mode, "offline");
   assert.equal(c1.localPersistenceKey, `kan-room-${c1.id}`);
 
+  t.mock.timers.tick(1000);
   const c2 = await createOfflineCanvas({ name: "Canvas 2" });
   assert.equal(c2.name, "Canvas 2");
 
@@ -35,6 +37,7 @@ test("canvas catalog lifecycle and ordering", async () => {
   assert.equal(list[1].id, c1.id);
 
   // Touching canvas 1 moves it to the front
+  t.mock.timers.tick(1000);
   await touchCanvas(c1.id);
   const updatedList = await listLocalCanvases();
   assert.equal(updatedList[0].id, c1.id);
