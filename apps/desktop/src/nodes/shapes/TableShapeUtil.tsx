@@ -1,3 +1,4 @@
+import * as React from "react";
 import {
   BaseBoxShapeUtil,
   HTMLContainer,
@@ -6,6 +7,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { config } from "@/lib/config";
 import {
   Table,
   TableBody,
@@ -31,6 +33,66 @@ function displayValue(value: CellValue) {
   if (value === null) return "—";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
+}
+
+const knownCompanyDomains = [
+  ["vonage", "vonage.com"],
+  ["cognition", "cognition.ai"],
+  ["nebius", "nebius.ai"],
+  ["preply", "preply.com"],
+] as const;
+
+function companyDomain(value: CellValue) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return knownCompanyDomains.find(([name]) => normalized.includes(name))?.[1] ?? null;
+}
+
+function companyInitials(name: string) {
+  return name.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase();
+}
+
+function CompanyLogo({ domain, name }: { domain: string; name: string }) {
+  const hasBrandfetch = Boolean(config.brandfetchClientId);
+  const [source, setSource] = React.useState<"brandfetch" | "favicon" | "initials">(
+    hasBrandfetch ? "brandfetch" : "favicon",
+  );
+
+  React.useEffect(() => {
+    setSource(hasBrandfetch ? "brandfetch" : "favicon");
+  }, [domain, hasBrandfetch]);
+
+  const brandfetchUrl = config.brandfetchClientId
+    ? `https://cdn.brandfetch.io/domain/${domain}/w/512/h/512/fallback/lettermark?c=${encodeURIComponent(config.brandfetchClientId)}`
+    : "";
+  const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=128`;
+  const imageUrl = source === "brandfetch" ? brandfetchUrl : faviconUrl;
+  const displayName = name || domain;
+
+  return (
+    <span
+      className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted"
+      data-testid={`table-company-logo-${domain.replace(/\./g, "-")}`}
+    >
+      {source === "initials" ? (
+        <span className="font-heading text-[10px] font-semibold text-muted-foreground">
+          {companyInitials(displayName)}
+        </span>
+      ) : (
+        <img
+          className="size-full object-contain p-1"
+          src={imageUrl}
+          alt={`${displayName} logo`}
+          draggable={false}
+          onError={() =>
+            setSource((current) =>
+              current === "brandfetch" ? "favicon" : "initials",
+            )
+          }
+        />
+      )}
+    </span>
+  );
 }
 
 export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
@@ -89,6 +151,14 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
         return sortBy.dir === "asc" ? result : -result;
       });
     }
+    const namedLogoColumn = columns.findIndex((column) =>
+      /company|sponsor|partner|brand|name/i.test(column),
+    );
+    const logoColumnIndex = namedLogoColumn >= 0
+      ? namedLogoColumn
+      : rows.some((row) => companyDomain(row[0] ?? null))
+        ? 0
+        : -1;
 
     const update = (props: Partial<TableShape["props"]>) => {
       this.editor.updateShape({ id: shape.id, type: shape.type, props });
@@ -153,18 +223,35 @@ export class TableShapeUtil extends BaseBoxShapeUtil<TableShape> {
                       data-testid={`table-row-${originalIndex}`}
                       data-state={selected ? "selected" : undefined}
                       className={cn(
-                        "cursor-pointer",
+                        "h-12 cursor-pointer",
                         originalIndex === highlightRow && "bg-accent",
                         selected && "border-l-2 border-l-primary bg-primary/10",
                       )}
                       onPointerDown={stopEventPropagation}
                       onClick={() => toggleRow(originalIndex)}
                     >
-                      {columns.map((_, cellIndex) => (
-                        <TableCell key={cellIndex}>
-                          {displayValue(row[cellIndex] ?? null)}
-                        </TableCell>
-                      ))}
+                      {columns.map((_, cellIndex) => {
+                        const value = row[cellIndex] ?? null;
+                        const isLogoCell = cellIndex === logoColumnIndex;
+                        const name = displayValue(value);
+                        const domain = isLogoCell ? companyDomain(value) : null;
+
+                        return (
+                          <TableCell
+                            key={cellIndex}
+                            className={cn(isLogoCell ? "py-2" : "py-3")}
+                          >
+                            {domain ? (
+                              <div className="flex min-w-0 items-center gap-2">
+                                <CompanyLogo domain={domain} name={name} />
+                                <span className="truncate">{name}</span>
+                              </div>
+                            ) : (
+                              name
+                            )}
+                          </TableCell>
+                        );
+                      })}
                     </TableRow>
                   );
                 })}
