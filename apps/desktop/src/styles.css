@@ -171,6 +171,14 @@ body,
   background: var(--tl-color-selected);
 }
 
+.chat-reopen-button {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
 /* Call bar */
 .call-bar {
   display: flex;

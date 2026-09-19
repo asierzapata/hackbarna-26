@@ -38,7 +38,7 @@ export function ChatReopenButton({ onClick }: { onClick: () => void }) {
     <Button
       variant="outline"
       size="sm"
-      className="absolute bottom-3 right-3 z-30 shadow-md"
+      className="chat-reopen-button shadow-md"
       onClick={onClick}
     >
       Open chat
