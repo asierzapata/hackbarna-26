@@ -1,3 +1,5 @@
+mod devin;
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -8,7 +10,14 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet]);
+        .manage(devin::Devin::default())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            devin::devin_connect,
+            devin::devin_login,
+            devin::devin_prompt,
+            devin::devin_disconnect,
+        ]);
 
     // Automation server for e2e tests. Gated behind the `webdriver` feature so
     // it cannot reach a release bundle; see scripts/drive.mjs.
