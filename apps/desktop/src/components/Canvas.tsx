@@ -39,6 +39,7 @@ import {
   type CanvasTools,
 } from "@/nodes/tools";
 import { useCanvas } from "./canvas-context";
+import { CanvasThinkingOverlay } from "./CanvasThinkingOverlay";
 
 const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
@@ -100,6 +101,7 @@ const canvasComponents = {
   ActionsMenu: null,
   StylePanel: null,
   Toolbar: CanvasToolbar,
+  InFrontOfTheCanvas: CanvasThinkingOverlay,
 } satisfies TLComponents;
 
 const canvasOverrides: TLUiOverrides = {

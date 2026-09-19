@@ -449,9 +449,9 @@ export const ModelSelectorContent = React.forwardRef<HTMLDivElement, ModelSelect
                     <span className="min-w-0 flex-1"><ModelLabel model={model} selection={selection.id === model.id ? selection : defaultSelectionFor(model)} /></span>
                     {model.id === selection.id ? <CheckIcon className="size-3.5 shrink-0" aria-hidden /> : null}
                   </button>
-                  <button type="button" aria-label={`Edit ${model.label} settings`} onClick={() => { if (editingId === model.id) setEditingId(null); else { patchSelection({ ...defaultSelectionFor(model), id: model.id }); setEditingId(model.id) } }} className="mr-1 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100">
+                  {(model.efforts?.length || model.contexts?.length || model.supportsFast || model.supportsThinking) ? <button type="button" aria-label={`Edit ${model.label} settings`} onClick={() => { if (editingId === model.id) setEditingId(null); else { patchSelection({ ...defaultSelectionFor(model), id: model.id }); setEditingId(model.id) } }} className="mr-1 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100">
                     <PencilIcon className="size-3.5" aria-hidden />
-                  </button>
+                  </button> : null}
                 </div>
               )))}
             </div>

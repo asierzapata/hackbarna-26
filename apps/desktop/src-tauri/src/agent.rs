@@ -43,6 +43,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::canvas_mcp::{AgentWorkspace, CanvasMcp};
+use crate::agent_preferences::{self as preferences, Models, Preferences};
 
 /// JSON-RPC error code for "authentication required" (ACP reserves -32000).
 const AUTH_REQUIRED: i64 = -32000;
@@ -102,7 +103,7 @@ impl Provider {
 }
 
 /// Which credentials the user picked in the Sign In menu.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthMode {
     /// The agent's own login: stored CLI credentials, or a browser flow.
@@ -193,7 +194,7 @@ fn launch_spec(
             // other's credentials.
             env.push((
                 "CODEX_HOME".to_string(),
-                scratch(app, "codex-home")?.to_string_lossy().into_owned(),
+                scratch(app, if api_key.is_some() { "codex-api-home" } else { "codex-home" })?.to_string_lossy().into_owned(),
             ));
             Ok(Launch {
                 program,
@@ -221,6 +222,7 @@ struct Conn {
     pending: Arc<Mutex<HashMap<u64, Sender<Value>>>>,
     next_id: AtomicU64,
     session_id: Mutex<Option<String>>,
+    models: Mutex<Models>,
     session_canvas: Mutex<Option<String>>,
     prompt_lock: Mutex<()>,
     canvas_mcp: Arc<CanvasMcp>,
@@ -425,6 +427,9 @@ fn permission_reply(msg: &Value, canvas: &CanvasMcp) -> Value {
 #[derive(Default)]
 pub struct Agent(Mutex<Option<Arc<Conn>>>);
 
+#[derive(Default)]
+pub struct AgentOperations(Mutex<()>);
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
@@ -437,6 +442,8 @@ pub struct AgentStatus {
     /// Agent title from `initialize`, e.g. "Devin Agent".
     agent: Option<String>,
     message: Option<String>,
+    models: Models,
+    mode: Option<AuthMode>,
 }
 
 impl AgentStatus {
@@ -447,16 +454,20 @@ impl AgentStatus {
             provider_label: Some(provider.label()),
             agent: None,
             message: Some(message.into()),
+            models: Models::default(),
+            mode: None,
         }
     }
 
-    fn ready(provider: Provider, agent: Option<String>) -> Self {
+    fn ready(conn: &Conn, agent: Option<String>) -> Self {
         Self {
             state: "ready",
-            provider: Some(provider),
-            provider_label: Some(provider.label()),
+            provider: Some(conn.provider),
+            provider_label: Some(conn.provider.label()),
             agent,
             message: None,
+            models: conn.models.lock().unwrap().clone(),
+            mode: Some(conn.mode),
         }
     }
 }
@@ -505,6 +516,9 @@ fn open(
     let mut child = Command::new(&spec.program)
         .current_dir(&workspace.0)
         .args(&spec.args)
+        .env_remove("WINDSURF_API_KEY")
+        .env_remove("CODEX_API_KEY")
+        .env_remove("OPENAI_API_KEY")
         .envs(spec.env)
         // These CLIs log heavily to stderr and also write a log file; piping it
         // without draining would eventually fill the pipe and wedge the agent.
@@ -537,6 +551,7 @@ fn open(
         pending,
         next_id: AtomicU64::new(1),
         session_id: Mutex::new(None),
+        models: Mutex::new(Models::default()),
         session_canvas: Mutex::new(canvas_id),
         prompt_lock: Mutex::new(()),
         canvas_mcp,
@@ -591,10 +606,11 @@ fn start_session(
     conn: &Conn,
     mode: AuthMode,
     agent: Option<String>,
+    interactive: bool,
 ) -> AgentStatus {
     let provider = conn.provider;
     if conn.session_id.lock().unwrap().is_some() {
-        return AgentStatus::ready(provider, agent);
+        return AgentStatus::ready(conn, agent);
     }
 
     let cwd = &conn.workspace.0;
@@ -619,6 +635,9 @@ fn start_session(
     match conn.request("session/new", params.clone()) {
         Ok(result) => finish(conn, result, agent),
         Err(e) if e.code == AUTH_REQUIRED => {
+            if !interactive {
+                return AgentStatus::unavailable(provider, "Your saved login needs attention. Sign in again to reconnect.");
+            }
             let Some(method) = conn.auth_method(mode) else {
                 return AgentStatus::unavailable(
                     provider,
@@ -641,11 +660,97 @@ fn finish(conn: &Conn, result: Value, agent: Option<String>) -> AgentStatus {
     match result.get("sessionId").and_then(Value::as_str) {
         Some(id) => {
             *conn.session_id.lock().unwrap() = Some(id.to_string());
-            AgentStatus::ready(conn.provider, agent)
+            *conn.models.lock().unwrap() = Models::parse(&result);
+            AgentStatus::ready(conn, agent)
         }
         None => AgentStatus::unavailable(conn.provider, "agent returned no sessionId"),
     }
 }
+
+fn set_model(conn: &Conn, model_id: &str) -> Result<(), String> {
+    let _turn = conn.prompt_lock.try_lock().map_err(|_| "Wait for the agent to finish before changing models")?;
+    let models = conn.models.lock().unwrap().clone();
+    if !models.available.iter().any(|model| model.id == model_id) {
+        return Err("This model is not available from the connected provider".into());
+    }
+    if models.current.as_deref() == Some(model_id) { return Ok(()); }
+    let session_id = conn.session_id.lock().unwrap().clone().ok_or("No agent session")?;
+    if let Some(config_id) = models.config_id {
+        let response = conn.request("session/set_config_option", json!({ "sessionId": session_id, "configId": config_id, "value": model_id, "type": "id" })).map_err(String::from)?;
+        let updated = Models::parse(&response);
+        if updated.current.as_deref() != Some(model_id) { return Err("The provider did not confirm the selected model".into()); }
+        *conn.models.lock().unwrap() = updated;
+    } else {
+        conn.request("session/set_model", json!({ "sessionId": session_id, "modelId": model_id })).map_err(String::from)?;
+        conn.models.lock().unwrap().current = Some(model_id.into());
+    }
+    Ok(())
+}
+
+fn connect(app: &AppHandle, provider: Provider, mode: AuthMode, key: Option<&str>, tools: Vec<Value>, canvas_id: Option<String>, interactive: bool, saved: &Preferences) -> AgentStatus {
+    let (conn, agent) = match open(app, provider, mode, key, tools, canvas_id) {
+        Ok(connection) => connection,
+        Err(error) => return AgentStatus::unavailable(provider, error.message),
+    };
+    let status = start_session(app, &conn, mode, agent.clone(), interactive);
+    if status.state != "ready" {
+        *app.state::<Agent>().0.lock().unwrap() = None;
+        return status;
+    }
+    if saved.provider == Some(provider) {
+        if let Some(model_id) = &saved.model_id {
+            if conn.models.lock().unwrap().available.iter().any(|model| &model.id == model_id) {
+                if let Err(error) = set_model(&conn, model_id) {
+                    *app.state::<Agent>().0.lock().unwrap() = None;
+                    return AgentStatus::unavailable(provider, error);
+                }
+            }
+        }
+    }
+    let mut status = AgentStatus::ready(&conn, agent);
+    if saved.provider == Some(provider) && saved.model_id.is_some() && saved.model_id != status.models.current {
+        status.message = Some("Your saved model is no longer available. Using the provider's default; choose another model below.".into());
+    }
+    status
+}
+
+#[tauri::command]
+pub async fn agent_restore(app: AppHandle, tools: Vec<Value>, canvas_id: Option<String>) -> Result<AgentStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let operations = app.state::<AgentOperations>();
+        let _operation = operations.0.lock().unwrap();
+        let current = agent_status(app.clone(), canvas_id.clone());
+        if current.state == "ready" { return Ok(current); }
+        let saved = preferences::load(&app)?;
+        if !saved.auto_connect { return Ok(current); }
+        let (Some(provider), Some(mode)) = (saved.provider, saved.mode) else { return Ok(current); };
+        let key = if mode == AuthMode::ApiKey {
+            match preferences::read_key(&app, provider) {
+                Ok(key) => Some(key),
+                Err(error) => return Ok(AgentStatus::unavailable(provider, error)),
+            }
+        } else { None };
+        Ok(connect(&app, provider, mode, key.as_deref(), tools, canvas_id, false, &saved))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn agent_set_model(app: AppHandle, model_id: String) -> Result<AgentStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let operations = app.state::<AgentOperations>();
+        let _operation = operations.0.lock().unwrap();
+        let conn = app.state::<Agent>().0.lock().unwrap().clone().ok_or("No agent is connected")?;
+        let mut saved = preferences::load(&app)?;
+        set_model(&conn, &model_id)?;
+        saved.model_id = Some(model_id);
+        preferences::save(&app, &saved)?;
+        let agent = conn.agent.lock().unwrap().clone();
+        Ok(AgentStatus::ready(&conn, agent))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn agent_preferences(app: AppHandle) -> Result<Preferences, String> { preferences::load(&app) }
 
 /* ------------------------------------------------------------ the commands */
 
@@ -663,18 +768,29 @@ pub async fn agent_sign_in(
     canvas_id: Option<String>,
 ) -> Result<AgentStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let operations = app.state::<AgentOperations>();
+        let _operation = operations.0.lock().unwrap();
         let key = match mode {
             AuthMode::ApiKey => match api_key.as_deref().map(str::trim) {
-                Some(key) if !key.is_empty() => Some(key),
-                _ => return AgentStatus::unavailable(provider, "no API key given"),
+                Some(key) if !key.is_empty() && key.len() <= 16384 => Some(key),
+                _ => return AgentStatus::unavailable(provider, "Enter a valid API key"),
             },
             AuthMode::Subscription => None,
         };
-
-        let status = match open(&app, provider, mode, key, tools, canvas_id) {
-            Ok((conn, agent)) => start_session(&app, &conn, mode, agent),
-            Err(e) => AgentStatus::unavailable(provider, e.message),
+        let saved = match preferences::load(&app) {
+            Ok(saved) => saved,
+            Err(error) => return AgentStatus::unavailable(provider, error),
         };
+        let mut status = connect(&app, provider, mode, key, tools, canvas_id, true, &saved);
+        if status.state == "ready" {
+            let persist = key.map_or(Ok(()), |key| preferences::write_key(&app, provider, key)).and_then(|_| {
+                preferences::save(&app, &Preferences { provider: Some(provider), mode: Some(mode), model_id: status.models.current.clone(), auto_connect: true })
+            });
+            if let Err(error) = persist {
+                *app.state::<Agent>().0.lock().unwrap() = None;
+                status = AgentStatus::unavailable(provider, error);
+            }
+        }
 
         // A child that could not open a session is useless, and leaving it in
         // the slot would make the next attempt reuse it and fail the same way.
@@ -740,8 +856,8 @@ pub fn agent_cancel(app: AppHandle, turn_id: String) {
 #[tauri::command]
 pub fn agent_status(app: AppHandle, canvas_id: Option<String>) -> AgentStatus {
     match app.state::<Agent>().0.lock().unwrap().as_ref() {
-        Some(conn) if conn.session_id.lock().unwrap().is_some() && *conn.session_canvas.lock().unwrap() == canvas_id => AgentStatus::ready(conn.provider, conn.agent.lock().unwrap().clone()),
-        _ => AgentStatus { state: "idle", provider: None, provider_label: None, agent: None, message: None },
+        Some(conn) if conn.session_id.lock().unwrap().is_some() && *conn.session_canvas.lock().unwrap() == canvas_id => AgentStatus::ready(conn, conn.agent.lock().unwrap().clone()),
+        _ => AgentStatus { state: "idle", provider: None, provider_label: None, agent: None, message: None, models: Models::default(), mode: None },
     }
 }
 
@@ -754,7 +870,22 @@ pub fn agent_status(app: AppHandle, canvas_id: Option<String>) -> AgentStatus {
 /// capability, so clearing those would mean `devin auth logout` or `codex
 /// logout`, which would log the user out of their terminal too.
 #[tauri::command]
-pub fn agent_sign_out(app: AppHandle) {
+pub async fn agent_sign_out(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let operations = app.state::<AgentOperations>();
+        let _operation = operations.0.lock().unwrap();
+        let mut saved = preferences::load(&app)?;
+        saved.auto_connect = false;
+        preferences::save(&app, &saved)?;
+        disconnect(&app);
+        preferences::delete_key(&app, Provider::Devin)?;
+        preferences::delete_key(&app, Provider::Openai)?;
+        forget_cached_api_key(&app);
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+fn disconnect(app: &AppHandle) {
     let state = app.state::<Agent>();
     let conn = state.0.lock().unwrap().take();
 
@@ -778,7 +909,12 @@ pub fn agent_sign_out(app: AppHandle) {
 /// Only a file in api-key mode is removed — in ChatGPT mode the same file holds
 /// the browser login, which is the user's to keep.
 fn forget_cached_api_key(app: &AppHandle) {
-    let Ok(path) = scratch(app, "codex-home").map(|dir| dir.join("auth.json")) else {
+    forget_cached_api_key_in(app, "codex-home");
+    forget_cached_api_key_in(app, "codex-api-home");
+}
+
+fn forget_cached_api_key_in(app: &AppHandle, home: &str) {
+    let Ok(path) = scratch(app, home).map(|dir| dir.join("auth.json")) else {
         return;
     };
     let cached_a_key = std::fs::read_to_string(&path)

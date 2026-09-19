@@ -5,6 +5,7 @@ import {
   type TLArrowBinding,
   type TLArrowShape,
   type TLFrameShape,
+  type TLGeoShape,
   type TLShape,
   type TLShapeId,
   type TLShapePartial,
@@ -337,9 +338,32 @@ export function createCanvasTools(editor: Editor) {
       const parsed = updateNodeInput.parse(input);
       const shape = editor.getShape(parsed.shapeId as TLShapeId);
       if (!shape) throw new Error(`Shape not found: ${parsed.shapeId}`);
+
       if (!isKanShape(shape)) {
-        throw new Error(`Shape ${parsed.shapeId} is not a Kan node`);
+        if (parsed.patch.type !== shape.type) {
+          throw new Error(
+            `Cannot apply ${parsed.patch.type} patch to ${shape.type} shape ${shape.id}`,
+          );
+        }
+        if (shape.type !== "geo" || parsed.patch.type !== "geo") {
+          throw new Error(`Shape ${parsed.shapeId} is not an editable normal box`);
+        }
+        const patch = parsed.patch;
+        const shapeUpdate: TLShapePartial<TLGeoShape> = {
+          id: shape.id,
+          type: "geo",
+          ...(patch.x !== undefined ? { x: patch.x } : {}),
+          ...(patch.y !== undefined ? { y: patch.y } : {}),
+          props: {
+            ...(patch.w !== undefined ? { w: patch.w } : {}),
+            ...(patch.h !== undefined ? { h: patch.h } : {}),
+            ...(patch.text !== undefined ? { richText: toRichText(patch.text) } : {}),
+          },
+        };
+        editor.run(() => editor.updateShape(shapeUpdate));
+        return { shapeId: shape.id };
       }
+
       const actualType = shape.type.slice(4);
       if (parsed.patch.type !== actualType) {
         throw new Error(
