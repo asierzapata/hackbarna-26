@@ -4,7 +4,7 @@ import { RiAlertLine, RiArrowLeftLine } from "@remixicon/react";
 
 import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
-import { ChatPanel } from "../components/ChatPanel";
+import { ChatPanel, ChatReopenButton } from "../components/ChatPanel";
 import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider, useCanvas } from "../components/canvas-context";
 import { SharingHintBanner } from "../components/SharingHintBanner";
@@ -167,7 +167,9 @@ function CanvasPageContent({
         </div>
         {threadOpen ? (
           <ChatPanel roomId={canvasId} onClose={() => setThreadOpen(false)} />
-        ) : null}
+        ) : (
+          <ChatReopenButton onClick={() => setThreadOpen(true)} />
+        )}
       </main>
 
       <PublishConfirmationDialog

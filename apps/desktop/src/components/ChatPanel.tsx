@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { ConversationSimulator, ThreadPanel } from "./thread";
+import { Button } from "./ui/button";
 import { useAgent, type AgentToolCall } from "./agent-context";
 import { useCanvas } from "./canvas-context";
 import type {
@@ -26,6 +27,19 @@ const stepStates: Record<string, AgentStep["state"]> = {
   completed: "done",
   failed: "error",
 };
+
+export function ChatReopenButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="absolute bottom-3 right-3 z-30 shadow-md"
+      onClick={onClick}
+    >
+      Open chat
+    </Button>
+  );
+}
 
 /** Folds a tool call into the step list, in place if we have seen its id. */
 function mergeStep(steps: AgentStep[], call: AgentToolCall): AgentStep[] {

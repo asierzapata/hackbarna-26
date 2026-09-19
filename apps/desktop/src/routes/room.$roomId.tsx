@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
-import { ChatPanel } from "../components/ChatPanel";
+import { ChatPanel, ChatReopenButton } from "../components/ChatPanel";
 import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider } from "../components/canvas-context";
 import { getServerRoom } from "@/lib/api-client";
@@ -90,13 +90,15 @@ function RoomPage() {
             roomCode={roomCode}
             onDuplicateOffline={handleDuplicateOffline}
           />
-          <main className="workspace__body">
+          <main className="workspace__body relative">
             <div className="workspace__canvas">
               <Canvas roomId={roomId} online />
             </div>
             {threadOpen ? (
               <ChatPanel roomId={roomId} online onClose={() => setThreadOpen(false)} />
-            ) : null}
+            ) : (
+              <ChatReopenButton onClick={() => setThreadOpen(true)} />
+            )}
           </main>
         </div>
       </CanvasProvider>
