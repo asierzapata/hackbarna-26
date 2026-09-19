@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAssistantController, parseAssistantResult, runAssistantTurn } from "../src/lib/assistant-controller";
+import { parseAssistantResult, runAssistantTurn } from "../src/lib/assistant-controller";
 
 test("structured result parser accepts silence and rejects unknown fields", () => {
   assert.deepEqual(parseAssistantResult({ kind: "silent" }), { kind: "silent" });
@@ -21,12 +21,4 @@ test("context executor cannot return an act plan and abort ignores late output",
   const pending = runAssistantTurn(executor, "context", {}, abort.signal);
   abort.abort();
   await assert.rejects(() => pending, /cancelled|contextual assistant turns cannot act/);
-});
-
-test("controller defaults to private, quiet assistance and publishes snapshots", () => {
-  const controller = createAssistantController();
-  assert.deepEqual(controller.snapshot(), { preferences: { scope: "own", background: false }, paused: false, running: false });
-  controller.setPreferences({ scope: "room", background: true });
-  controller.setPaused(true);
-  assert.deepEqual(controller.snapshot(), { preferences: { scope: "room", background: true }, paused: true, running: false });
 });

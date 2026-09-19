@@ -11,12 +11,6 @@ export interface AssistantExecutor {
   run(mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal): Promise<AssistantResult>;
 }
 
-export interface AssistantControllerSnapshot {
-  preferences: AssistantPreferences;
-  paused: boolean;
-  running: boolean;
-}
-
 let activeExecutor = false;
 
 export function parseAssistantResult(raw: unknown): AssistantResult {
@@ -95,23 +89,4 @@ export async function runAssistantTurn(executor: AssistantExecutor, mode: "act" 
   } finally {
     activeExecutor = false;
   }
-}
-
-export function createAssistantController(initial: AssistantPreferences = { scope: "own", background: false }) {
-  let executor: AssistantExecutor | null = null;
-  let preferences = initial;
-  let paused = false;
-  const listeners = new Set<(snapshot: AssistantControllerSnapshot) => void>();
-  const notify = () => { const snapshot = { preferences, paused, running: activeExecutor }; for (const listener of listeners) listener(snapshot); };
-  return {
-    configureExecutor(next: AssistantExecutor, nextPreferences = preferences) { executor = next; preferences = nextPreferences; notify(); },
-    setPreferences(next: AssistantPreferences) { preferences = next; notify(); },
-    setPaused(next: boolean) { paused = next; notify(); },
-    subscribe(listener: (snapshot: AssistantControllerSnapshot) => void) { listeners.add(listener); notify(); return () => listeners.delete(listener); },
-    async run(mode: "act" | "context" | "propose", context: unknown, signal: AbortSignal) {
-      if (!executor) throw new Error("no assistant executor configured");
-      return runAssistantTurn(executor, mode, context, signal);
-    },
-    snapshot() { return { preferences, paused, running: activeExecutor }; },
-  };
 }
