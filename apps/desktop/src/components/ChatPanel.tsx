@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import { ThreadPanel } from "./thread";
-import { useDevin, type DevinToolCall } from "./devin-context";
+import { useAgent, type AgentToolCall } from "./agent-context";
 import { useCanvas } from "./canvas-context";
 import type {
   AgentEntry,
@@ -25,7 +25,7 @@ const stepStates: Record<string, AgentStep["state"]> = {
 };
 
 /** Folds a tool call into the step list, in place if we have seen its id. */
-function mergeStep(steps: AgentStep[], call: DevinToolCall): AgentStep[] {
+function mergeStep(steps: AgentStep[], call: AgentToolCall): AgentStep[] {
   const index = steps.findIndex((step) => step.id === call.id);
   const previous = index === -1 ? undefined : steps[index];
   const step: AgentStep = {
@@ -59,7 +59,7 @@ export function ChatPanel({
   roomId?: string;
   onClose?: () => void;
 }) {
-  const devin = useDevin();
+  const agent = useAgent();
   const { jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
 
   const transport = React.useMemo<RoomTransport>(
@@ -104,15 +104,15 @@ export function ChatPanel({
   }
 
   /**
-   * One prompt turn against the host's Devin. Text arrives in chunks, so the
+   * One prompt turn against the host's agent. Text arrives in chunks, so the
    * entry is appended empty and filled as it streams.
    *
    * These turns are local: the agent runs on this machine, and until the room
    * server exists there is nowhere to publish them. They carry `PENDING_SEQ`
    * so they sort after everything the room has numbered.
    */
-  async function askDevin(text: string) {
-    const id = `devin-${Date.now()}`;
+  async function askAgent(text: string) {
+    const id = `agent-${Date.now()}`;
     const startedAt = Date.now();
 
     upsert({
@@ -121,13 +121,13 @@ export function ChatPanel({
       kind: "agent",
       at: new Date().toISOString(),
       authorId: AGENT,
-      model: devin.status.agent ?? "Devin",
+      model: agent.status.agent ?? agent.status.providerLabel ?? "Agent",
       text: "",
     });
     setStreamingIds((prev) => new Set(prev).add(id));
 
     try {
-      await devin.prompt(text, {
+      await agent.prompt(text, {
         onText: (chunk) =>
           patchAgent(id, (entry) => ({ ...entry, text: entry.text + chunk })),
         onTool: (call) =>
@@ -139,7 +139,7 @@ export function ChatPanel({
     } catch (error) {
       patchAgent(id, (entry) => ({
         ...entry,
-        text: entry.text || `Devin could not answer: ${error}`,
+        text: entry.text || `The agent could not answer: ${error}`,
       }));
     } finally {
       setStreamingIds((prev) => withoutId(prev, id));
@@ -171,8 +171,8 @@ export function ChatPanel({
       files,
     });
 
-    // Connected Devin answers every message; until then the thread is local.
-    if (devin.status.state === "ready") void askDevin(text);
+    // A connected agent answers every message; until then the thread is local.
+    if (agent.status.state === "ready") void askAgent(text);
   }
 
   function resolveSuggestion(suggestion: SuggestionEntry, accepted: boolean) {
@@ -204,7 +204,7 @@ export function ChatPanel({
         onSend: handleSend,
         micActive,
         onToggleMic: () => setMicActive((on) => !on),
-        disabled: devin.busy,
+        disabled: agent.busy,
       }}
     />
   );

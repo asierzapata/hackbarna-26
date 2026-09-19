@@ -108,35 +108,69 @@ already cost time. The short version:
   nowhere else.
 - Report what was actually observed. If a step was skipped, say so plainly.
 
-## Agent runner (Devin)
+## Agent runner (Devin, OpenAI)
 
-The ACP client lives in Rust (`apps/desktop/src-tauri/src/devin.rs`), inside the
-desktop app rather than in the `apps/agent-runner/` workspace: it spawns
-`devin acp`, speaks JSON-RPC over stdio, and forwards `session/update`
-notifications to the webview as `devin:update` events. The webview side is
-`apps/desktop/src/components/devin-context.tsx` (provider + `useDevin`), the
-header control is `DevinButton`, and `ChatPanel` turns a prompt turn into a
+The ACP client lives in Rust (`apps/desktop/src-tauri/src/agent.rs`), inside the
+desktop app rather than in the `apps/agent-runner/` workspace: it spawns an ACP
+server, speaks JSON-RPC over stdio, and forwards `session/update` notifications
+to the webview as `agent:update` events. The webview side is
+`apps/desktop/src/components/agent-context.tsx` (provider + `useAgent`), the
+header control is `SignInButton`, and `ChatPanel` turns a prompt turn into a
 streaming `AgentEntry`.
 
-- The CLI runs under the user's own Devin subscription; the app never holds a
-  model token. `devin auth login` credentials are picked up automatically, and
-  `authenticate` with the `devin-browser` method covers a logged-out machine.
-- A bundled macOS app inherits a stripped PATH, so the `devin` binary is probed
-  at `~/.local/bin`, Homebrew, and `/usr/local/bin`. `DEVIN_BIN` overrides.
-- The child's stderr goes to `Stdio::null()` on purpose — the CLI logs heavily
-  and an undrained pipe would eventually wedge the agent. Its own log file is at
-  `~/.local/share/devin/cli/logs/`.
+Two providers, one protocol — the difference between them is a command line and
+an env var, so everything below the launcher is shared:
+
+| Provider | Command | Subscription | API key |
+| --- | --- | --- | --- |
+| Devin | `devin acp` | `devin auth login` creds, else `authenticate` with `devin-browser` | `WINDSURF_API_KEY` |
+| OpenAI | `npx -y @agentclientprotocol/codex-acp` | `authenticate` with `chat-gpt` (opens a browser) | `CODEX_API_KEY` |
+
+`Sign In` opens a submenu per provider, each offering *With Subscription* or
+*With API Key*; the key is typed into a dialog. One `agent_sign_in(provider,
+mode, apiKey)` command covers all four combinations.
+
+- Both CLIs run under the user's own subscription; the app never holds a model
+  token. A typed key goes into the child's environment and has to be re-entered
+  after a restart. **Kan never writes it down, but the Codex adapter does** — it
+  caches whatever it authenticated with in `$CODEX_HOME/auth.json`
+  (`{"auth_mode":"apikey","OPENAI_API_KEY":…}`), so `agent_sign_out` deletes that
+  file when it is in api-key mode. Don't claim in UI copy that a key never
+  touches the disk; it does, just not by our hand. Devin persists nothing from
+  `WINDSURF_API_KEY` — verified, `credentials.toml` is untouched by a key
+  sign-in.
+- Exactly one provider is connected at a time. Signing into the other replaces
+  the connection, and a typed key always gets a fresh child, because a child's
+  environment is fixed at spawn.
+- **Don't take `authMethods[0]`.** The Codex adapter advertises `api-key` first
+  and `chat-gpt` second, so the first entry is the wrong one for a subscription.
+  `Conn::auth_method` matches on the shape of the id and name instead.
+- Devin advertises only `devin-browser` (no api-key method), so its key path
+  works purely through the env var and skips `authenticate`.
+- A bundled macOS app inherits a stripped PATH, so `devin` and `npx` are probed
+  at `$PATH`, `~/.local/bin`, the nvm prefixes, Homebrew and `/usr/local/bin`.
+  `DEVIN_BIN` and `NPX_BIN` override.
+- The child's stderr goes to `Stdio::null()` on purpose — these CLIs log heavily
+  and an undrained pipe would eventually wedge the agent. Devin's own log file
+  is at `~/.local/share/devin/cli/logs/`.
 - Sessions get a scratch cwd under the app data dir, not the repo.
-- `session/new` answers with `auth_required` (-32000) rather than failing when
-  the CLI has no credentials; that is what the button reads to decide its label.
-- Disconnect kills the child and forgets the session; credentials are untouched.
-  There is no real logout: `devin acp` does not advertise
-  `agentCapabilities.auth.logout`, so the ACP `logout` method is off the table
-  and clearing credentials would mean `devin auth logout` — which would log the
-  user out of their terminal too.
+- A sign-in that fails is dropped from the connection slot rather than left
+  there, or the next attempt would reuse the broken child and fail identically.
+  A dying reader thread only reports `agent:closed` when it still owns the slot,
+  so replacing a provider does not wipe the connection that replaced it.
+- Sign-out kills the child and forgets the session; stored subscription
+  credentials are untouched. There is no real logout: neither adapter advertises
+  `agentCapabilities.auth.logout`, and clearing credentials would mean `devin
+  auth logout` / `codex logout` — which would log the user out of their terminal
+  too.
 
 ## Gotchas
 
+- **The Devin CLI owns `~/.codex`.** It is a Codex fork, and its `auth.json`
+  there holds *Devin* tokens in Codex's format. The Codex adapter is therefore
+  spawned with `CODEX_HOME` pointed at a scratch dir under the app data dir, so
+  the two cannot read each other's credentials. Codex also refuses to start if
+  `CODEX_HOME` does not already exist, so we create it first.
 - `@tldraw/assets` is excluded from `optimizeDeps` in `vite.config.ts`. Its
   `?url` imports break Vite's dependency pre-bundler. Don't remove it.
 - tldraw assets are bundled locally rather than loaded from the tldraw CDN, so

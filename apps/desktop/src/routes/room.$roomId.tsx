@@ -5,7 +5,7 @@ import { HeaderBar } from "../components/HeaderBar";
 import { Canvas } from "../components/Canvas";
 import { ChatPanel } from "../components/ChatPanel";
 import { CallBar } from "../components/CallBar";
-import { DevinProvider } from "../components/devin-context";
+import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider } from "../components/canvas-context";
 
 export const Route = createFileRoute("/room/$roomId")({
@@ -30,7 +30,7 @@ function RoomPage() {
   // The header button and the thread share one agent connection; the canvas
   // provider is what lets the thread's anchor chips move the camera.
   return (
-    <DevinProvider>
+    <AgentProvider>
       <CanvasProvider>
         <div className="workspace">
           <HeaderBar />
@@ -45,6 +45,6 @@ function RoomPage() {
           </main>
         </div>
       </CanvasProvider>
-    </DevinProvider>
+    </AgentProvider>
   );
 }

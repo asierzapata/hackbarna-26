@@ -1,15 +1,14 @@
-mod devin;
+mod agent;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(devin::Devin::default())
+        .manage(agent::Agent::default())
         .invoke_handler(tauri::generate_handler![
-            devin::devin_connect,
-            devin::devin_login,
-            devin::devin_prompt,
-            devin::devin_disconnect,
+            agent::agent_sign_in,
+            agent::agent_prompt,
+            agent::agent_sign_out,
         ]);
 
     // Automation server for e2e tests. Gated behind the `webdriver` feature so
