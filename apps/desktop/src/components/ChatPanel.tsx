@@ -2,6 +2,7 @@ import * as React from "react";
 
 import { ThreadPanel } from "./thread";
 import { useDevin, type DevinToolCall } from "./devin-context";
+import { useCanvas } from "./canvas-context";
 import type {
   AgentEntry,
   AgentStep,
@@ -45,10 +46,17 @@ function mergeStep(steps: AgentStep[], call: DevinToolCall): AgentStep[] {
  * `onSend` for the room's publish call — `ThreadPanel` itself is transport
  * agnostic and only needs entries in, callbacks out.
  */
-export function ChatPanel({ onClose }: { onClose?: () => void }) {
+export function ChatPanel({
+  roomId,
+  onClose,
+}: {
+  roomId?: string;
+  onClose?: () => void;
+}) {
   const [entries, setEntries] = React.useState<ThreadEntry[]>(demoEntries);
   const [micActive, setMicActive] = React.useState(false);
   const devin = useDevin();
+  const { jumpToNode } = useCanvas();
 
   /** Patches one agent entry in place while its turn streams. */
   function patchAgent(id: string, fn: (entry: AgentEntry) => AgentEntry) {
@@ -144,7 +152,7 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
 
   return (
     <ThreadPanel
-      channel="#feature-kickoff"
+      channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={entries}
       participants={demoParticipants}
       currentUserId={CURRENT_USER}
@@ -152,6 +160,7 @@ export function ChatPanel({ onClose }: { onClose?: () => void }) {
       canvasNodeCount={42}
       onClose={onClose}
       onCopyLink={() => navigator.clipboard?.writeText(window.location.href)}
+      onJumpToNode={jumpToNode}
       onAcceptSuggestion={(suggestion) => resolveSuggestion(suggestion, true)}
       onDismissSuggestion={(suggestion) => resolveSuggestion(suggestion, false)}
       composer={{
