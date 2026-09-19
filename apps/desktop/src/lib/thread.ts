@@ -165,6 +165,8 @@ export interface ThreadViewState {
   interimIds?: ReadonlySet<string>;
   /** Steps rendered before the "N more steps" fold. */
   visibleSteps?: number;
+  /** Client insertion order for optimistic/local entries that have no server seq yet. */
+  entryOrder?: ReadonlyMap<string, number>;
 }
 
 const noIds: ReadonlySet<string> = new Set();
@@ -199,13 +201,24 @@ export function buildThreadRows(
   const streamingIds = view.streamingIds ?? noIds;
   const interimIds = view.interimIds ?? noIds;
   const visibleSteps = view.visibleSteps ?? 2;
+  const entryOrder = view.entryOrder;
 
   const rows: ThreadRow[] = [];
 
   // Sort before grouping: a transcript run is "consecutive lines", which is
-  // only meaningful once the stream is actually in order. Optimistic entries
-  // carry no server seq, so they sort last, which is where they belong.
-  const ordered = [...entries].sort((a, b) => a.seq - b.seq);
+  // only meaningful once the stream is actually in order. Local agent output
+  // has no server sequence, so preserve the client's insertion order whenever
+  // it is interleaved with server-numbered entries.
+  const ordered = [...entries].sort((a, b) => {
+    const aOrder = entryOrder?.get(a.id);
+    const bOrder = entryOrder?.get(b.id);
+    if (a.seq === PENDING_SEQ || b.seq === PENDING_SEQ) {
+      if (aOrder !== undefined && bOrder !== undefined) return aOrder - bOrder;
+      if (aOrder !== undefined) return -1;
+      if (bOrder !== undefined) return 1;
+    }
+    return a.seq - b.seq;
+  });
 
   for (const entry of ordered) {
     if (!matchesFilter(entry, filter)) continue;

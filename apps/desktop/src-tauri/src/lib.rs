@@ -1,4 +1,5 @@
 mod agent;
+mod agent_preferences;
 mod canvas_mcp;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -10,11 +11,15 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(agent::Agent::default())
+        .manage(agent::AgentOperations::default())
         .invoke_handler(tauri::generate_handler![
             agent::agent_sign_in,
             agent::agent_prompt,
             agent::agent_sign_out,
             agent::agent_status,
+            agent::agent_restore,
+            agent::agent_set_model,
+            agent::agent_preferences,
             agent::agent_cancel,
             agent::agent_canvas_result,
         ]);

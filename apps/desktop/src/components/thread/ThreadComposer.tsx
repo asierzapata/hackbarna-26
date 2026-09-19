@@ -1,21 +1,17 @@
 import * as React from "react";
-import {
-  RiCornerDownLeftLine,
-  RiImageAddLine,
-  RiMicLine,
-} from "@remixicon/react";
+import { RiCornerDownLeftLine } from "@remixicon/react";
 
 import { Badge } from "@/components/ui/badge";
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupButton,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
 import { Kbd } from "@/components/ui/kbd";
 import {
   ModelSelectorKit,
   type AiModelSelection,
+  type AiModel,
 } from "@/components/ui/ai-model-select";
 import type { CanvasAnchor } from "@/lib/thread";
 
@@ -24,12 +20,10 @@ export interface ThreadComposerProps {
   anchors?: CanvasAnchor[];
   placeholder?: string;
   disabled?: boolean;
-  /** `files` carries pasted or picked images. */
+  /** `files` remains part of the transport draft for compatibility; the composer no longer uploads files. */
   onSend?: (draft: { text: string; files: File[] }) => void;
-  onAttach?: (files: File[]) => void;
-  /** Toggle local mic capture; transcription lands back as transcript entries. */
-  onToggleMic?: () => void;
-  micActive?: boolean;
+  models?: AiModel[];
+  modelDisabled?: boolean;
   modelSelection?: AiModelSelection;
   onModelSelectionChange?: (selection: AiModelSelection) => void;
 }
@@ -39,29 +33,18 @@ export function ThreadComposer({
   placeholder = "Message, or @assistant to ask…  (select nodes to anchor)",
   disabled,
   onSend,
-  onAttach,
-  onToggleMic,
-  micActive,
   modelSelection,
+  models,
+  modelDisabled,
   onModelSelectionChange,
 }: ThreadComposerProps) {
   const [text, setText] = React.useState("");
-  const [files, setFiles] = React.useState<File[]>([]);
-  const fileInput = React.useRef<HTMLInputElement>(null);
-
-  const canSend = !disabled && (text.trim().length > 0 || files.length > 0);
+  const canSend = !disabled && text.trim().length > 0;
 
   function send() {
     if (!canSend) return;
-    onSend?.({ text: text.trim(), files });
+    onSend?.({ text: text.trim(), files: [] });
     setText("");
-    setFiles([]);
-  }
-
-  function addFiles(incoming: File[]) {
-    if (!incoming.length) return;
-    setFiles((prev) => [...prev, ...incoming]);
-    onAttach?.(incoming);
   }
 
   return (
@@ -94,70 +77,20 @@ export function ThreadComposer({
             send();
           }
         }}
-        onPaste={(event) => {
-          const pasted = Array.from(event.clipboardData.files);
-          if (pasted.length) {
-            event.preventDefault();
-            addFiles(pasted);
-          }
-        }}
       />
 
-      <InputGroupAddon align="block-end" className="justify-between">
-        <span className="flex items-center gap-1">
-          <InputGroupButton
-            size="icon-xs"
-            aria-label="Attach an image"
-            onClick={() => fileInput.current?.click()}
-          >
-            <RiImageAddLine />
-          </InputGroupButton>
-          <InputGroupButton
-            size="icon-xs"
-            aria-label={micActive ? "Stop transcribing" : "Start transcribing"}
-            aria-pressed={micActive}
-            className={micActive ? "text-agent" : undefined}
-            onClick={onToggleMic}
-          >
-            <RiMicLine />
-          </InputGroupButton>
-          {files.length ? (
-            <span className="text-muted-foreground">
-              {files.length} attached
-            </span>
-          ) : null}
-        </span>
-
-        {modelSelection ? (
+      {modelSelection ? (
+        <InputGroupAddon align="block-end" className="justify-end">
           <ModelSelectorKit
+            models={models ?? []}
+            disabled={modelDisabled}
             value={modelSelection}
             onValueChange={onModelSelectionChange}
             className="min-w-0"
             aria-label="Choose chat model"
           />
-        ) : null}
-
-        <InputGroupButton
-          variant="default"
-          size="xs"
-          disabled={!canSend}
-          onClick={send}
-        >
-          Send
-        </InputGroupButton>
-      </InputGroupAddon>
-
-      <input
-        ref={fileInput}
-        type="file"
-        accept="image/*"
-        multiple
-        hidden
-        onChange={(event) => {
-          addFiles(Array.from(event.target.files ?? []));
-          event.target.value = "";
-        }}
-      />
+        </InputGroupAddon>
+      ) : null}
     </InputGroup>
   );
 }

@@ -9,6 +9,7 @@ import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider, useCanvas } from "../components/canvas-context";
 import { SharingHintBanner } from "../components/SharingHintBanner";
 import { PublishConfirmationDialog } from "../components/PublishConfirmationDialog";
+import { WorkspacePanels } from "../components/WorkspacePanels";
 import { Spinner } from "../components/ui/spinner";
 import { getCanvasEntry, touchCanvas, type CanvasCatalogEntry } from "@/lib/canvas-repository";
 import { publishCanvas } from "@/lib/publish-canvas";
@@ -161,15 +162,23 @@ function CanvasPageContent({
         isPublishing={isPublishing}
       />
       <main className="workspace__body relative">
-        <div className="workspace__canvas relative">
-          <SharingHintBanner onMakeOnline={() => setPublishDialogOpen(true)} />
-          <Canvas roomId={canvasId} />
-        </div>
-        {threadOpen ? (
-          <ChatPanel roomId={canvasId} onClose={() => setThreadOpen(false)} />
-        ) : (
-          <ChatReopenButton onClick={() => setThreadOpen(true)} />
-        )}
+        <WorkspacePanels
+          chatOpen={threadOpen}
+          canvas={
+            <>
+              <SharingHintBanner onMakeOnline={() => setPublishDialogOpen(true)} />
+              <Canvas roomId={canvasId} />
+            </>
+          }
+          chat={
+            <ChatPanel
+              className="h-full w-full"
+              roomId={canvasId}
+              onClose={() => setThreadOpen(false)}
+            />
+          }
+        />
+        {!threadOpen ? <ChatReopenButton onClick={() => setThreadOpen(true)} /> : null}
       </main>
 
       <PublishConfirmationDialog

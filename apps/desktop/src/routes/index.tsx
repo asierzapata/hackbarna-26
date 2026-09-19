@@ -75,7 +75,7 @@ function CatalogPage() {
 
   const refreshCatalog = React.useCallback(async () => {
     const profile = await getInstallationProfile();
-    if (!profile || !profile.onboardingCompletedAt || !profile.name) {
+    if (!profile || !profile.onboardingCompletedAt || !profile.name || profile.onboardingVersion < 2) {
       void navigate({ to: "/onboarding", replace: true });
       return;
     }

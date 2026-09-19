@@ -286,3 +286,20 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 - Running-app regression: start `npm run tauri:drive`, then run
   `node scripts/date-nodes.e2e.mjs`. It creates and removes only its own test
   nodes and restores the camera. Avoid driving the same window concurrently.
+
+## Canvas thinking effect
+
+- `InteractiveCanvas` in `apps/desktop/src/components/ui/` is a parent-sized,
+  pointer-transparent soft-blue dot field. `CanvasThinkingOverlay` positions it
+  over the current local agent targets, without persisting activity in shapes.
+- A prompt captures the selected node IDs; successful scoped canvas tools retarget
+  the effect. Broad `getCanvas` reads do not light up the entire board. Completion,
+  cancellation, disconnection, and sign-out clear it. Reduced motion is static.
+- Unit checks: `npm run test -w @kan/desktop` includes target extraction tests.
+- From the canvas catalog in `npm run tauri:drive`, run
+  `node scripts/agent-thinking.e2e.mjs`. It mounts an isolated fixture, simulates
+  agent replies at the IPC fetch boundary, and sends real native canvas events.
+  It exercises the actual provider and canvas, but is not live-provider coverage.
+  Do not drive concurrently. The script cleans up its fixture and restores fetch
+  and media-query handling. Tauri's internal invoke is read-only; Vite context
+  imports must retain their HMR query strings to avoid duplicate providers.

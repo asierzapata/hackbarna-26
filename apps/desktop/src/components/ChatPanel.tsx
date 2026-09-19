@@ -16,11 +16,7 @@ import { createMockTransport, demoParticipants } from "@/lib/thread-fixtures";
 import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
-import {
-  DEFAULT_AI_MODELS,
-  defaultSelectionFor,
-  type AiModelSelection,
-} from "@/components/ui/ai-model-select";
+import { type AiModelSelection } from "@/components/ui/ai-model-select";
 import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
 import { createCanvasTools } from "@/nodes/tools";
 
@@ -80,10 +76,12 @@ export function ChatPanel({
   roomId,
   online = false,
   onClose,
+  className,
 }: {
   roomId?: string;
   online?: boolean;
   onClose?: () => void;
+  className?: string;
 }) {
   const agent = useAgent();
   const { editor, jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
@@ -99,19 +97,22 @@ export function ChatPanel({
   );
 
   const [entries, setEntries] = React.useState<ThreadEntry[]>([]);
+  const entryOrderRef = React.useRef(new Map<string, number>());
+  const nextEntryOrderRef = React.useRef(0);
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
   const [streamingIds, setStreamingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
-  const [micActive, setMicActive] = React.useState(false);
-  const [modelSelection, setModelSelection] = React.useState<AiModelSelection>(() =>
-    defaultSelectionFor(DEFAULT_AI_MODELS[0])
-  );
+  const models = agent.status.models?.available ?? [];
+  const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
 
   /** Upsert by id: a replay and a live append are the same operation. */
   const upsert = React.useCallback((entry: ThreadEntry) => {
+    if (!entryOrderRef.current.has(entry.id)) {
+      entryOrderRef.current.set(entry.id, nextEntryOrderRef.current++);
+    }
     setEntries((prev) => {
       const index = prev.findIndex((existing) => existing.id === entry.id);
       if (index === -1) return [...prev, entry];
@@ -175,7 +176,7 @@ export function ChatPanel({
   ) {
     const id = `agent-${crypto.randomUUID()}`;
     const startedAt = Date.now();
-    const model = DEFAULT_AI_MODELS.find((item) => item.id === selectedModel.id);
+    const model = models.find((item) => item.id === selectedModel.id);
 
     upsert({
       id,
@@ -189,9 +190,11 @@ export function ChatPanel({
     setStreamingIds((prev) => new Set(prev).add(id));
 
     try {
-      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context) : text, {
+      const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
+      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds) : text, {
         canvas: canvasTools && roomId ? {
           id: roomId,
+          shapeIds,
           execute: (name, input) => {
             const result = executeCanvasTool(canvasTools, name, name === "addNode" ? {
               ...(input as object),
@@ -274,12 +277,17 @@ export function ChatPanel({
   }, [userId, userName]);
 
   const view = React.useMemo(
-    () => ({ pendingIds, streamingIds }),
+    () => ({
+      pendingIds,
+      streamingIds,
+      entryOrder: entryOrderRef.current,
+    }),
     [pendingIds, streamingIds]
   );
 
   return (
     <ThreadPanel
+      className={className}
       channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={entries}
       participants={participants}
@@ -303,11 +311,11 @@ export function ChatPanel({
       onDismissSuggestion={(suggestion) => resolveSuggestion(suggestion, false)}
       composer={{
         onSend: handleSend,
-        micActive,
-        onToggleMic: () => setMicActive((on) => !on),
         disabled: agent.busy,
-        modelSelection,
-        onModelSelectionChange: setModelSelection,
+        modelSelection: models.length ? modelSelection : undefined,
+        models,
+        modelDisabled: agent.busy || agent.status.state !== "ready",
+        onModelSelectionChange: (selection) => { void agent.setModel(selection.id); },
       }}
     />
   );
