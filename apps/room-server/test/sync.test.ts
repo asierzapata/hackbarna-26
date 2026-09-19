@@ -5,6 +5,7 @@ import { Store } from "@tldraw/store";
 import { atom } from "@tldraw/state";
 import * as syncCore from "@tldraw/sync-core";
 import { createKanSchema } from "@kan/nodes";
+import { UserRecordType } from "@tldraw/tlschema";
 import { api, createRoom, registerUser, setup, sleep, ticket, EventsClient } from "./helpers";
 import { randomUUID } from "node:crypto";
 import { openDb } from "../src/db";
@@ -70,8 +71,9 @@ function textShape(id: string, text: string, meta: Record<string, unknown> = {})
   } as any;
 }
 
-test("two genuine tldraw clients exchange document edits; restart persists; rooms isolated", async () => {
+test("two genuine tldraw clients exchange document edits; restart persists; rooms isolated", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base, "a");
   const u2 = await registerUser(ctx.base, "b");
   const roomA = await createRoom(u1, ctx.base);
@@ -116,11 +118,11 @@ test("two genuine tldraw clients exchange document edits; restart persists; room
   c4.close();
   await server2.close();
   db2.close();
-  await ctx.cleanup();
 });
 
-test("forged provenance on client writes is stripped server-side", async () => {
+test("forged provenance on client writes is stripped server-side", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base);
   const room = await createRoom(u1, ctx.base);
   const c1 = await syncClient(ctx.server.port(), room.id, await ticket(u1, ctx.base, room.id, "sync"));
@@ -133,7 +135,6 @@ test("forged provenance on client writes is stripped server-side", async () => {
   assert.ok(rec);
   assert.equal((rec.meta as any)?.provenance, undefined);
   c1.close();
-  await ctx.cleanup();
 });
 
 test("human canvas edits produce debounced system entries attributed to the editor", async (t) => {
@@ -147,6 +148,7 @@ test("human canvas edits produce debounced system entries attributed to the edit
   await sleep(300);
   ctx.clock.advance(3000);
   ctx.server.engine.tick();
+  await ctx.server.engine.classifierIdle(room.id);
   const thread = await api(u1, ctx.base, `/rooms/${room.id}/thread`);
   const sys = thread.body.entries.find((e: any) => e.kind === "system");
   assert.ok(sys, "system entry written");
@@ -157,7 +159,6 @@ test("human canvas edits produce debounced system entries attributed to the edit
   // classifier saw it as a system cause (no agent loop: agent writes never reach here)
   assert.ok(ctx.classifier.calls.some((s) => s.cause.kind === "system"));
   c1.close();
-  await ctx.cleanup();
 });
 
 test("genuine tldraw receives server add update connect arrange; noop push cannot create feedback", async (t) => {
@@ -203,4 +204,40 @@ test("native sync rejects forged assets and links owned uploads for room members
   assert.ok(ctx.server.engine.canvasRecords(room.id).some((r: any) => r.id === "asset:owned"));
   ctx.server.engine.joinRoom(stranger.id, room.code);
   assert.equal(ctx.server.engine.getAsset(owned.id, stranger.id).data.byteLength, 1);
+});
+
+// An online room mints a tldraw `user` record per participant so the canvas can
+// show who is who. `user` is document-scoped, so it syncs and persists like a
+// shape — and the graph rules have no idea what it is. Every act-mode mutation
+// in a room with anyone in it was failing as "invalid or duplicate record",
+// rejected for a record the room itself had stored.
+test("a collaborator's user record does not make the room unmutable", async (t) => {
+  const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
+  const c1 = await syncClient(ctx.server.port(), room.id, await ticket(u, ctx.base, room.id, "sync")); t.after(() => c1.close());
+  const ev = new EventsClient(ctx.server.port(), room.id, await ticket(u, ctx.base, room.id, "events")); await ev.ready; t.after(() => ev.close());
+
+  c1.store.put([UserRecordType.create({ id: UserRecordType.createId(u.id), name: "Asier", color: "#5273c9" }) as never]);
+  await sleep(200);
+  assert.ok(ctx.server.engine.canvasRecords(room.id).some((r: any) => r.typeName === "user"), "the room stores the user record");
+
+  await api(u, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "@assistant capture this" }) });
+  await ctx.server.engine.classifierIdle(room.id);
+  ctx.server.engine.setExecutorReady(room.id, ev.sessionId, true, "test");
+  const trigger = ctx.server.engine.listTriggers(room.id)[0];
+  const lease = ctx.server.engine.claimTrigger(u.id, room.id, trigger.id, { sessionId: ev.sessionId, manual: true });
+  const auth = `Bearer ${lease.leaseToken}`;
+  const context = ctx.server.engine.runContext(room.id, lease.runId, auth);
+  const completed = ctx.server.engine.completeRun(room.id, lease.runId, auth, {
+    id: randomUUID(),
+    revision: context.revision,
+    result: { kind: "act", text: "Captured", sources: [{ kind: "entry", id: trigger.causeEntryIds[0] }], operations: [{ type: "add", draft: { type: "concept", label: "survives" } }] },
+  });
+
+  assert.equal(completed.entry.kind === "agent_turn" && completed.entry.status, "done");
+  const added = ctx.server.engine.canvasRecords(room.id).find((r: any) => r.props?.draft?.label === "survives") as any;
+  assert.ok(added, "the mutation reached the canvas");
+  assert.ok(await waitForRecord(c1.store, added.id), "and the collaborator sees it");
+  // Accepting a suggestion reads the same stored snapshot, so it has to survive too.
+  assert.ok(ctx.server.engine.canvasRecords(room.id).some((r: any) => r.typeName === "user"), "the user record is untouched");
 });

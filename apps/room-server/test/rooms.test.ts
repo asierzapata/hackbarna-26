@@ -4,8 +4,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { request } from "node:http";
 import { api, createRoom, registerUser, setup } from "./helpers";
 
-test("register is idempotent with correct secret, 409 with wrong", async () => {
+test("register is idempotent with correct secret, 409 with wrong", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const id = randomUUID();
   const secret = randomBytes(32).toString("hex");
   const r1 = await api(null, ctx.base, "/users/register", {
@@ -23,21 +24,21 @@ test("register is idempotent with correct secret, 409 with wrong", async () => {
     body: JSON.stringify({ userId: id, secret: randomBytes(32).toString("hex"), name: "A" }),
   });
   assert.equal(r3.status, 409);
-  await ctx.cleanup();
 });
 
-test("auth required, bearer format enforced", async () => {
+test("auth required, bearer format enforced", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   assert.equal((await api(null, ctx.base, "/me")).status, 401);
   const bad = await fetch(`${ctx.base}/me`, { headers: { authorization: `Bearer ${u.id}.deadbeef` } });
   assert.equal(bad.status, 401);
   assert.equal((await api(u, ctx.base, "/me")).status, 200);
-  await ctx.cleanup();
 });
 
-test("publish is idempotent per (user, localCanvasId) and never reseeds", async () => {
+test("publish is idempotent per (user, localCanvasId) and never reseeds", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const localCanvasId = randomUUID();
   const body = {
@@ -59,11 +60,11 @@ test("publish is idempotent per (user, localCanvasId) and never reseeds", async 
   // original message still there
   const thread = await api(u, ctx.base, `/rooms/${r1.body.room.id}/thread`);
   assert.equal(thread.body.entries.length, 1);
-  await ctx.cleanup();
 });
 
-test("room code join with hyphens, invalid codes rejected, membership enforced", async () => {
+test("room code join with hyphens, invalid codes rejected, membership enforced", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base, "one");
   const u2 = await registerUser(ctx.base, "two");
   const room = await createRoom(u1, ctx.base);
@@ -109,11 +110,11 @@ test("room code join with hyphens, invalid codes rejected, membership enforced",
   const rooms = await api(u2, ctx.base, "/rooms");
   assert.equal(rooms.body.rooms[0].id, room.id);
   assert.ok(rooms.body.rooms[0].lastOpenedAt);
-  await ctx.cleanup();
 });
 
-test("invalid snapshot leaves nothing behind (all-or-nothing)", async () => {
+test("invalid snapshot leaves nothing behind (all-or-nothing)", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const localCanvasId = randomUUID();
   const bad = await api(u, ctx.base, "/rooms", {
@@ -167,7 +168,6 @@ test("invalid snapshot leaves nothing behind (all-or-nothing)", async () => {
     }),
   });
   assert.equal(blob.status, 400);
-  await ctx.cleanup();
 });
 
 test("assets: upload, owner read, member read via linked room, stranger denied, type/size limits", async (t) => {
@@ -219,5 +219,4 @@ test("assets: upload, owner read, member read via linked room, stranger denied, 
     req.flushHeaders();
   });
   assert.equal(status, 413);
-  await ctx.cleanup();
 });

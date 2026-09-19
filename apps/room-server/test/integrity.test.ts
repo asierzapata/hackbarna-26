@@ -123,6 +123,8 @@ test("classifier database failure rolls trigger and decision back while retainin
   ctx.server.engine.db.exec("CREATE TEMP TRIGGER fail_decision BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT,'fixture decision failure'); END");
   ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 1, intent: "capture", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 4 };
   const id = randomUUID();
+  // An inferred cause, not an explicit one: an explicit invocation writes its
+  // trigger and decision inside postMessage, so the failure would surface there.
   const response = await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id, text: "We decided to use SQLite" }) });
   assert.equal(response.status, 200);
   await assert.rejects(ctx.server.engine.classifierIdle(room.id), /fixture decision failure/);

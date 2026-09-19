@@ -25,6 +25,8 @@ test("run touched limit 500 rejects excess atomically and generated ids include 
   }
   const rejected = await api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, { method: "POST", headers: { authorization: auth }, body: JSON.stringify({ id: randomUUID(), operations: [{ type: "add", draft: { type: "concept", label: "overflow" } }] }) });
   assert.equal(rejected.status, 400); assert.equal(ctx.server.engine.canvasSummary(room.id).counts.shapes, 500);
+  // Only a failed, cancelled or expired trigger is retryable; a completed one
+  // needs a fresh request, so fail this run before asking for a second attempt.
   ctx.server.engine.patchRun(room.id, lease.runId, auth, { id: randomUUID(), status: "failed" });
   ctx.server.engine.retryTrigger(user.id, room.id, trigger.id, randomUUID());
   const secondLease = ctx.server.engine.claimTrigger(user.id, room.id, trigger.id, { sessionId: ev.sessionId, manual: true });
@@ -51,6 +53,10 @@ test("future websocket cursor does not consume ticket, exact expiry rejects unus
 test("legacy suggestion deterministic shape collision returns conflict without overwriting human work", async (t) => {
   const ctx = await setup({ classifier: null }); t.after(() => ctx.cleanup());
   const user = await registerUser(ctx.base), room = await createRoom(user, ctx.base);
+  // The accepted shape id is derived from the suggestion entry, so a collision
+  // can only be built by putting the shape there first. Go straight at the
+  // entry: a suggestion reaching accept with its id already taken must not
+  // clobber whatever is sitting on it.
   const entry = { id: randomUUID(), roomId: room.id, seq: 1, at: new Date().toISOString(), kind: "suggestion", triggerId: randomUUID(), runId: randomUUID(), draft: { type: "concept", label: "Suggestion" }, status: "open", shapeId: null };
   ctx.server.engine.db.prepare("INSERT INTO entries(room_id,seq,id,kind,data,at) VALUES (?,?,?,?,?,?)").run(room.id, entry.seq, entry.id, entry.kind, JSON.stringify(entry), entry.at);
   const id = `shape:k${createHash("sha256").update(`suggest:${entry.id}:0`).digest("hex").slice(0, 24)}`;

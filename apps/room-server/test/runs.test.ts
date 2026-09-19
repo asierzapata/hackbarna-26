@@ -13,8 +13,9 @@ async function explicitTrigger(ctx: any, u: any, roomId: string) {
   return triggers.at(-1);
 }
 
-test("no ready executors -> needs_claim; ready client arriving gets autooffered", async () => {
+test("no ready executors -> needs_claim; ready client arriving gets autooffered", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const trig = await explicitTrigger(ctx, u, room.id);
@@ -38,11 +39,11 @@ test("no ready executors -> needs_claim; ready client arriving gets autooffered"
   assert.equal(triggers[0].status, "offered");
   assert.equal(triggers[0].assigneeSessionId, ev.sessionId);
   ev.close();
-  await ctx.cleanup();
 });
 
-test("claim -> lease -> heartbeat -> mutate -> done; stale lease denied; idempotent mutate", async () => {
+test("claim -> lease -> heartbeat -> mutate -> done; stale lease denied; idempotent mutate", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const trig = await explicitTrigger(ctx, u, room.id);
@@ -155,11 +156,11 @@ test("claim -> lease -> heartbeat -> mutate -> done; stale lease denied; idempot
   });
   assert.equal(late.status, 403);
   ev.close();
-  await ctx.cleanup();
 });
 
-test("simultaneous claims: only one wins; offer expiry reassigns; disconnect releases offer", async () => {
+test("simultaneous claims: only one wins; offer expiry reassigns; disconnect releases offer", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base, "one");
   const u2 = await registerUser(ctx.base, "two");
   const room = await createRoom(u1, ctx.base);
@@ -174,9 +175,9 @@ test("simultaneous claims: only one wins; offer expiry reassigns; disconnect rel
   ctx.server.engine.tick();
 
   // requester u1's session should be offered first
-  let t = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "offered");
-  assert.equal(t.assigneeSessionId, ev1.sessionId);
+  let trigState = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
+  assert.equal(trigState.status, "offered");
+  assert.equal(trigState.assigneeSessionId, ev1.sessionId);
 
   // u2 cannot steal a live offer
   const steal = await api(u2, ctx.base, `/rooms/${room.id}/triggers/${trig.id}/claim`, {
@@ -188,16 +189,16 @@ test("simultaneous claims: only one wins; offer expiry reassigns; disconnect rel
   // offer expiry -> reassign to u2 (u1 already offered this cycle)
   ctx.clock.advance(6000);
   ctx.server.engine.tick();
-  t = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "offered");
-  assert.equal(t.assigneeSessionId, ev2.sessionId);
+  trigState = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
+  assert.equal(trigState.status, "offered");
+  assert.equal(trigState.assigneeSessionId, ev2.sessionId);
 
   // disconnect u2 -> offer released, back to needs_claim (u1 already tried, u2 gone)
   ev2.close();
   await sleep(50);
   ctx.server.engine.tick();
-  t = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "needs_claim");
+  trigState = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
+  assert.equal(trigState.status, "needs_claim");
 
   // manual claim by u1's still-live session
   const claim = await api(u1, ctx.base, `/rooms/${room.id}/triggers/${trig.id}/claim`, {
@@ -206,11 +207,11 @@ test("simultaneous claims: only one wins; offer expiry reassigns; disconnect rel
   });
   assert.equal(claim.status, 200);
   ev1.close();
-  await ctx.cleanup();
 });
 
-test("lease expiry marks run failed, stale mutations denied, no auto-replay, explicit retry", async () => {
+test("lease expiry marks run failed, stale mutations denied, no auto-replay, explicit retry", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const trig = await explicitTrigger(ctx, u, room.id);
@@ -227,8 +228,8 @@ test("lease expiry marks run failed, stale mutations denied, no auto-replay, exp
 
   ctx.clock.advance(31_000);
   ctx.server.engine.tick();
-  let t = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "expired");
+  let trigState = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
+  assert.equal(trigState.status, "expired");
 
   // stale mutation denied
   const stale = await api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, {
@@ -244,16 +245,16 @@ test("lease expiry marks run failed, stale mutations denied, no auto-replay, exp
     body: JSON.stringify({ id: randomUUID() }),
   });
   assert.equal(retry.status, 200);
-  t = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
-  assert.equal(t.status, "pending");
+  trigState = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];
+  assert.equal(trigState.status, "pending");
   const thread = await api(u, ctx.base, `/rooms/${room.id}/thread`);
   assert.ok(thread.body.entries.some((e: any) => e.kind === "agent_turn" && e.status === "failed"));
   ev.close();
-  await ctx.cleanup();
 });
 
-test("context mode: mutation denied, structured draft approval is atomic and opposite resolution conflicts", async () => {
+test("context mode: mutation denied, structured draft approval is atomic and opposite resolution conflicts", async (t) => {
   const ctx = await setup();
+  t.after(() => ctx.cleanup());
   const u1 = await registerUser(ctx.base, "p1");
   const u2 = await registerUser(ctx.base, "p2");
   const room = await createRoom(u1, ctx.base);
@@ -281,8 +282,9 @@ test("context mode: mutation denied, structured draft approval is atomic and opp
   ev.close(); await ctx.cleanup();
 });
 
-test("data/query requires a live lease and calls demo data verbatim", async () => {
+test("data/query requires a live lease and calls demo data verbatim", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const trig = await explicitTrigger(ctx, u, room.id);
@@ -337,7 +339,6 @@ test("data/query requires a live lease and calls demo data verbatim", async () =
     400,
   );
   ev.close();
-  await ctx.cleanup();
 });
 
 // An explicit request is answered by a real agent, which takes tens of seconds.

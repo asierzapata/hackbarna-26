@@ -26,18 +26,19 @@ function wsConnect(url: string, origin?: string): Promise<{ ok: boolean; ws?: We
   });
 }
 
-test("socket tickets: one-use, channel-bound, expiring", async () => {
+test("socket tickets: one-use, channel-bound, expiring", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const port = ctx.server.port();
 
-  const t = await ticket(u, ctx.base, room.id, "events");
-  const c1 = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t}`);
+  const t1 = await ticket(u, ctx.base, room.id, "events");
+  const c1 = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t1}`);
   assert.equal(c1.ok, true);
   c1.ws?.close();
   // reuse rejected
-  const c2 = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t}`);
+  const c2 = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t1}`);
   assert.equal(c2.ok, false);
 
   // cross-channel rejected
@@ -54,28 +55,28 @@ test("socket tickets: one-use, channel-bound, expiring", async () => {
   // bogus ticket rejected
   const c5 = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=zzz`);
   assert.equal(c5.ok, false);
-  await ctx.cleanup();
 });
 
-test("origin allowlist enforced on upgrade; no-origin clients allowed", async () => {
+test("origin allowlist enforced on upgrade; no-origin clients allowed", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const port = ctx.server.port();
-  const t = await ticket(u, ctx.base, room.id, "events");
+  const t1 = await ticket(u, ctx.base, room.id, "events");
 
-  const bad = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t}`, "https://evil.example");
+  const bad = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t1}`, "https://evil.example");
   assert.equal(bad.ok, false);
 
   const t2 = await ticket(u, ctx.base, room.id, "events");
   const good = await wsConnect(`ws://127.0.0.1:${port}/events/${room.id}?ticket=${t2}`, "http://localhost:1420");
   assert.equal(good.ok, true);
   good.ws?.close();
-  await ctx.cleanup();
 });
 
-test("events socket rejects unknown message kinds and replays without gaps", async () => {
+test("events socket rejects unknown message kinds and replays without gaps", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   await api(u, ctx.base, `/rooms/${room.id}/messages`, {
@@ -93,11 +94,11 @@ test("events socket rejects unknown message kinds and replays without gaps", asy
   // unknown kind -> closed
   ev.send({ type: "admin.takeover" });
   await new Promise((r) => ev.ws.on("close", r));
-  await ctx.cleanup();
 });
 
-test("events socket live events have no replay/live gap", async () => {
+test("events socket live events have no replay/live gap", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
   const ev = new EventsClient(ctx.server.port(), room.id, await ticket(u, ctx.base, room.id, "events"));
@@ -109,11 +110,11 @@ test("events socket live events have no replay/live gap", async () => {
   const msg = await ev.waitFor((m) => m.type === "event" && m.event?.entry?.text === "live one");
   assert.ok(msg.event.cursor > 0);
   ev.close();
-  await ctx.cleanup();
 });
 
-test("oversized JSON bodies rejected", async () => {
+test("oversized JSON bodies rejected", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const res = await api(u, ctx.base, "/rooms", {
     method: "POST",
@@ -127,11 +128,11 @@ test("oversized JSON bodies rejected", async () => {
     req.flushHeaders();
   });
   assert.equal(status, 413);
-  await ctx.cleanup();
 });
 
-test("video token: stub provider, one session per room, identity in connection data, 503 when unconfigured", async () => {
+test("video token: stub provider, one session per room, identity in connection data, 503 when unconfigured", async (t) => {
   const ctx = await setup({ classifier: null });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base, "Vera");
   const room = await createRoom(u, ctx.base);
   const [t1, t2] = await Promise.all([
@@ -150,13 +151,12 @@ test("video token: stub provider, one session per room, identity in connection d
   const ctx2 = await setup({ classifier: null, video: null });
   const u2 = await registerUser(ctx2.base);
   const room2 = await createRoom(u2, ctx2.base);
-  const t = await api(u2, ctx2.base, `/rooms/${room2.id}/video-token`);
-  assert.equal(t.status, 503);
-  await ctx.cleanup();
+  const unconfigured = await api(u2, ctx2.base, `/rooms/${room2.id}/video-token`);
+  assert.equal(unconfigured.status, 503);
   await ctx2.cleanup();
 });
 
-test("video provider failure -> 502 and does not block room creation", async () => {
+test("video provider failure -> 502 and does not block room creation", async (t) => {
   const ctx = await setup({
     classifier: null,
     video: {
@@ -165,11 +165,11 @@ test("video provider failure -> 502 and does not block room creation", async () 
       generateClientToken: () => "x",
     },
   });
+  t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base); // room creation unaffected
   assert.ok(room.id);
-  const t = await api(u, ctx.base, `/rooms/${room.id}/video-token`);
-  assert.equal(t.status, 502);
-  assert.ok(!JSON.stringify(t.body).includes("secret details"));
-  await ctx.cleanup();
+  const failed = await api(u, ctx.base, `/rooms/${room.id}/video-token`);
+  assert.equal(failed.status, 502);
+  assert.ok(!JSON.stringify(failed.body).includes("secret details"));
 });

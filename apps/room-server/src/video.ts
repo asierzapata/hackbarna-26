@@ -21,11 +21,18 @@ const PEM_HEADER = "-----BEGIN";
 export function normalizePrivateKey(raw: string): string {
   const value = raw.trim();
   if (!value) throw new Error("empty Vonage private key");
-  if (existsSync(value)) return readFileSync(value, "utf8");
-  if (value.includes(PEM_HEADER)) return value.includes("\\n") ? value.replace(/\\n/g, "\n") : value;
+  if (existsSync(value)) return pem(readFileSync(value, "utf8"));
+  if (value.includes(PEM_HEADER)) return pem(value.includes("\\n") ? value.replace(/\\n/g, "\n") : value);
   const decoded = Buffer.from(value, "base64").toString("utf8");
   if (!decoded.includes(PEM_HEADER)) throw new Error("VONAGE_PRIVATE_KEY is neither a PEM, a path to one, nor base64 of one");
-  return decoded;
+  return pem(decoded);
+}
+
+// The four accepted forms have to produce byte-identical keys: trimming the
+// env-var form dropped the trailing newline a PEM ends with, so the same key
+// read from a file and pasted into the environment were not the same string.
+function pem(value: string): string {
+  return `${value.trimEnd()}\n`;
 }
 
 export function createVonageProvider(applicationId: string, privateKey: string, languageCode = "en-US"): VideoProvider {

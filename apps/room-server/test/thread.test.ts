@@ -46,7 +46,6 @@ test("messages: idempotent by client id, conflict on different payload, spoofed 
   // non-member cannot post
   const outsider = await registerUser(ctx.base);
   assert.equal((await postMsg(ctx, outsider, room.id, { id: randomUUID(), text: "x" })).status, 403);
-  await ctx.cleanup();
 });
 
 test("events: replay, cursor bounds, hasMore, updated entries keep seq with new cursor", async (t) => {
@@ -75,7 +74,6 @@ test("events: replay, cursor bounds, hasMore, updated entries keep seq with new 
     const r = await api(u, ctx.base, `/rooms/${room.id}/events?since=${bad}`);
     assert.equal(r.status, 400, `since=${bad}`);
   }
-  await ctx.cleanup();
 });
 
 test("imported publish messages never trigger classification", async (t) => {
@@ -89,7 +87,6 @@ test("imported publish messages never trigger classification", async (t) => {
   const triggers = await api(u, ctx.base, `/rooms/${room.id}/triggers`);
   assert.equal(triggers.body.triggers.length, 0);
   assert.equal(ctx.classifier.calls.length, 0);
-  await ctx.cleanup();
 });
 
 test("@assistant mention creates explicit trigger without classifier call", async (t) => {
@@ -104,7 +101,6 @@ test("@assistant mention creates explicit trigger without classifier call", asyn
   assert.equal(triggers[0].mode, "act");
   assert.equal(triggers[0].intent, "answer");
   assert.equal(ctx.classifier.calls.length, 0);
-  await ctx.cleanup();
 });
 
 test("classifier context paths preserve consent and cooldown, failure is graceful", async (t) => {
@@ -113,7 +109,8 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
   const u = await registerUser(ctx.base);
   const room = await createRoom(u, ctx.base);
 
-  // act trigger
+  // addressed above the threshold: a context trigger, never an act one — only
+  // an explicit invocation authorizes the assistant to touch the canvas.
   ctx.classifier.next = {
     addressedProbability: 0.95,
     worthCapturingProbability: 0,
@@ -128,10 +125,11 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
   let triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 1);
   assert.equal(triggers[0].mode, "context");
+  assert.equal(triggers[0].intent, "answer");
   assert.equal(triggers[0].status, "needs_claim"); // no ready executors
-  ctx.clock.advance(ctx.server.engine.timings.cooldownMs);
 
-  // propose trigger, sets cooldown
+  // worth capturing, past the cooldown the first one set
+  ctx.clock.advance(ctx.server.engine.timings.cooldownMs);
   ctx.classifier.next = {
     addressedProbability: 0.1,
     worthCapturingProbability: 0.9,
@@ -146,19 +144,20 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
   assert.equal(triggers[1].mode, "context");
+  assert.equal(triggers[1].intent, "capture");
 
-  // second propose inside cooldown suppressed
+  // a second inferred trigger inside the cooldown is suppressed
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "we decided Y too" });
   await ctx.server.engine.classifierIdle(room.id);
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
 
   // classifier error: chat still works, no trigger
+  ctx.clock.advance(31_000);
   ctx.classifier.next = () => Promise.reject(new Error("provider down"));
   const ok = await postMsg(ctx, u, room.id, { id: randomUUID(), text: "still works" });
   assert.equal(ok.status, 200);
   await ctx.server.engine.classifierIdle(room.id);
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
-  await ctx.cleanup();
 });
