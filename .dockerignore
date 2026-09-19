@@ -1,0 +1,26 @@
+# The build context is the monorepo root, so keep it small. node_modules alone
+# is 394M and would be re-sent to the daemon on every build.
+node_modules
+**/node_modules
+.git
+.turbo
+**/.turbo
+dist
+**/dist
+
+# The frontend is not in this image. src-tauri in particular carries a Rust
+# target/ dir that dwarfs everything else.
+apps/desktop/src-tauri
+apps/desktop/public
+apps/desktop/src
+
+# Local SQLite lives on a volume, never in the image.
+data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+*.log
+.DS_Store
+.vscode
+.idea
