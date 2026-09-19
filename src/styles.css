@@ -1,0 +1,114 @@
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --border: #d9d6d0;
+  --text: #1a1a1a;
+  --muted: #6b6b6b;
+
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.workspace__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace__canvas {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Header bar */
+.header-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.header-bar__brand {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.header-bar__slot {
+  flex: 1;
+}
+
+/* Canvas */
+.canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.canvas__viewport {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Call bar */
+.call-bar {
+  display: flex;
+  align-items: center;
+  height: 64px;
+  padding: 0 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.call-bar__slot {
+  flex: 1;
+}
+
+/* Chat panel */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  width: 420px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.chat-panel__messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.chat-panel__composer {
+  min-height: 88px;
+  border-top: 1px solid var(--border);
+  padding: 16px;
+}
