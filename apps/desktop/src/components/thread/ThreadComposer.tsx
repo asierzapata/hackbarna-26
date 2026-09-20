@@ -37,7 +37,7 @@ export interface ThreadComposerProps {
 
 export function ThreadComposer({
   anchors = [],
-  placeholder = "Message the room · Ask Kan (⌘↵) to bring in the assistant",
+  placeholder = "Message the canvas · Ask Kan (⌘↵) to bring in the assistant",
   replyTo,
   onClearReply,
   disabled,

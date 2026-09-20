@@ -38,6 +38,25 @@ export function getBackendBaseUrl(): string {
   return DEFAULT_BACKEND_URL;
 }
 
+/**
+ * An unauthenticated liveness probe, used to decide whether creating an online
+ * canvas is offerable at all. Deliberately not `listServerRooms`: that one
+ * registers this installation with the backend, and a purely offline user who
+ * only opened the create dialog has not asked for that.
+ */
+export async function checkServerReachable(timeoutMs = 4000): Promise<boolean> {
+  try {
+    const res = await fetch(`${getBackendBaseUrl()}/health`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { ok?: boolean };
+    return body.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 // Track registration state per backend origin
 const registeredOrigins = new Set<string>();
 let registrationPromise: Promise<void> | null = null;
@@ -232,7 +251,7 @@ export async function getRoomVideoToken(roomId: string, signal?: AbortSignal): P
     throw new Error(res.status === 503
       ? "Video calls are not configured on this server. You can still use the canvas."
       : res.status === 401 || res.status === 403
-        ? "You do not have permission to join this call. Reopen the room and try again."
+        ? "You do not have permission to join this call. Reopen the canvas and try again."
         : "The video service is unavailable. You can still use the canvas and retry the call.");
   }
   return res.json();

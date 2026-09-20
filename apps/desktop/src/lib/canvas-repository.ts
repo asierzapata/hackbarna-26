@@ -9,6 +9,9 @@ export interface CanvasCatalogEntry {
   updatedAt: string;
   lastOpenedAt: string;
   initialRecords?: unknown[];
+  /** Data URL of the last preview rendered from this canvas, for the catalog. */
+  thumbnail?: string;
+  thumbnailUpdatedAt?: string;
 }
 
 export interface PublishJournal {
@@ -182,6 +185,27 @@ export async function markCanvasOnline(
         lastOpenedAt: now,
       };
   return saveCanvasEntry(updated);
+}
+
+/**
+ * Previews are captured from a live editor, so they only exist for canvases
+ * this device has actually opened. A miss is normal, never an error.
+ */
+export async function saveCanvasThumbnail(
+  id: string,
+  thumbnail: string
+): Promise<void> {
+  try {
+    const existing = await getCanvasEntry(id);
+    if (!existing) return;
+    await saveCanvasEntry({
+      ...existing,
+      thumbnail,
+      thumbnailUpdatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn(`Could not store preview for canvas ${id}:`, err);
+  }
 }
 
 export async function touchCanvas(id: string): Promise<void> {

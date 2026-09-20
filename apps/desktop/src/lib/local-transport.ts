@@ -70,7 +70,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
       publish();
     };
     if (options.storage) { owner = true; await hydrate(); return; }
-    if (!globalThis.navigator?.locks) throw new Error("This webview cannot safely claim local work. Open a shared room instead.");
+    if (!globalThis.navigator?.locks) throw new Error("This webview cannot safely claim local work. Open an online canvas instead.");
     await new Promise<void>((resolve, reject) => {
       void navigator.locks.request(`kan-assistant:${options.canvasId}`, { ifAvailable: true }, async (lock) => {
         owner = Boolean(lock);

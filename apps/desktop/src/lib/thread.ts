@@ -170,19 +170,44 @@ export type ThreadEntry =
 
 export type ThreadEntryKind = ThreadEntry["kind"];
 
-/* ------------------------------------------------------------------ filters */
+/* ------------------------------------------------------------------- search */
 
-export type ThreadFilter = "everything" | "messages" | "agent";
+/**
+ * Everything in an entry a reader could plausibly search for.
+ *
+ * This replaced a three-way kind filter (Everything / Messages / Agent
+ * activity). The filter cost a permanent row in the panel header to answer a
+ * question nobody asks; "where did we say that" is the question a thread that
+ * records a whole meeting actually gets, and the tabs could not answer it.
+ */
+export function entrySearchText(entry: ThreadEntry): string {
+  const parts: string[] = [];
+  if ("text" in entry && entry.text) parts.push(entry.text);
+  switch (entry.kind) {
+    case "suggestion":
+      parts.push(entry.sourceLabel, entry.quote, entry.proposal.label);
+      break;
+    case "trigger":
+      parts.push(entry.reason, entry.status);
+      break;
+    case "offer":
+      parts.push(entry.title, entry.request);
+      break;
+    case "message":
+      for (const anchor of entry.anchors ?? []) parts.push(anchor.label);
+      for (const attachment of entry.attachments ?? []) parts.push(attachment.name);
+      break;
+    case "agent":
+      for (const step of entry.steps ?? []) parts.push(step.summary, step.tool);
+      break;
+  }
+  return parts.join(" ").toLowerCase();
+}
 
-const filterKinds: Record<ThreadFilter, ThreadEntryKind[] | null> = {
-  everything: null,
-  messages: ["transcript", "message"],
-  agent: ["agent", "suggestion", "trigger", "offer"],
-};
-
-export function matchesFilter(entry: ThreadEntry, filter: ThreadFilter) {
-  const kinds = filterKinds[filter];
-  return kinds === null || kinds.includes(entry.kind);
+export function matchesSearch(entry: ThreadEntry, query: string) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return entrySearchText(entry).includes(needle);
 }
 
 /* ------------------------------------------------------------------ grouping */
@@ -234,7 +259,7 @@ export type ThreadRow =
 
 export function buildThreadRows(
   entries: ThreadEntry[],
-  filter: ThreadFilter = "everything",
+  search = "",
   view: ThreadViewState = {}
 ): ThreadRow[] {
   const pendingIds = view.pendingIds ?? noIds;
@@ -262,8 +287,11 @@ export function buildThreadRows(
 
   for (const entry of ordered) {
     if (entry.kind === "agent" && (entry.hidden || (entry.status === "running" && !entry.text))) continue;
-    if (entry.kind === "trigger" && filter === "everything" && (entry.mode === "context" || entry.mode === "propose")) continue;
-    if (!matchesFilter(entry, filter)) continue;
+    // Contextual and propose triggers are bookkeeping for a turn the reader
+    // already sees as an agent entry. They were only ever visible behind the
+    // deleted "Agent activity" tab; per-turn diagnostics cover that need now.
+    if (entry.kind === "trigger" && (entry.mode === "context" || entry.mode === "propose")) continue;
+    if (!matchesSearch(entry, search)) continue;
 
     if (entry.kind === "transcript") {
       const last = rows[rows.length - 1];

@@ -108,7 +108,7 @@ export function HeaderBar({
             variant="outline"
             onClick={handleCopyCode}
             className="text-xs h-7 gap-1.5 font-mono"
-            title="Copy join code for collaborators"
+            title="Copy the invite code for collaborators"
           >
             {copied ? <RiCheckLine className="size-3.5 text-green-600" /> : <RiShareLine className="size-3.5" />}
             {copied ? "Copied" : roomCode}

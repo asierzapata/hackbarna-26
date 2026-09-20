@@ -1,11 +1,10 @@
 import * as React from "react";
 
-import { ConversationSimulator, ThreadPanel } from "./thread";
+import { AssistantMenu, ConversationSimulator, ThreadPanel } from "./thread";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
-import { NativeSelect, NativeSelectOption } from "./ui/native-select";
-import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, EAGERNESS_PACING, type AssistantEagerness } from "@kan/protocol";
+import { Spinner } from "./ui/spinner";
+import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, type AssistantEagerness } from "@kan/protocol";
+import { fromChimeIn, toChimeIn, type AssistantScope, type ChimeIn } from "@/lib/assistant-settings";
 
 import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRun, completeServerRun } from "@/lib/api-client";
 import { useCanvas } from "./canvas-context";
@@ -27,6 +26,29 @@ import { createCanvasTools } from "@/nodes/tools";
 import { useQaSource } from "@/lib/qa-source";
 
 const DEFAULT_USER = "You";
+
+interface AssistantSettings {
+  scope: AssistantScope;
+  background: boolean;
+  eagerness: AssistantEagerness;
+}
+
+const ASSISTANT_DEFAULTS: AssistantSettings = { scope: "own", background: false, eagerness: DEFAULT_EAGERNESS };
+
+function readAssistantSettings(roomId: string | undefined): AssistantSettings {
+  const saved = roomId ? localStorage.getItem(`kan-assistant:${roomId}`) : null;
+  if (!saved) return ASSISTANT_DEFAULTS;
+  try {
+    const value = JSON.parse(saved) as Partial<AssistantSettings>;
+    return {
+      scope: value.scope === "own" || value.scope === "room" || value.scope === "manual" ? value.scope : ASSISTANT_DEFAULTS.scope,
+      background: typeof value.background === "boolean" ? value.background : ASSISTANT_DEFAULTS.background,
+      eagerness: value.eagerness && ASSISTANT_EAGERNESS.includes(value.eagerness) ? value.eagerness : ASSISTANT_DEFAULTS.eagerness,
+    };
+  } catch {
+    return ASSISTANT_DEFAULTS;
+  }
+}
 const AGENT = "assistant";
 
 /** ACP tool statuses, in the thread's vocabulary. */
@@ -120,10 +142,28 @@ export function ChatPanel({
   React.useEffect(() => () => { void cancelRef.current(); }, [roomId]);
   const [userName, setUserName] = React.useState(DEFAULT_USER);
   const [userId, setUserId] = React.useState(DEFAULT_USER);
-  const [assistantScope, setAssistantScope] = React.useState<"own" | "room" | "manual">("own");
-  const [backgroundChecks, setBackgroundChecks] = React.useState(false);
+  const [assistantScope, setAssistantScope] = React.useState<AssistantScope>(() => readAssistantSettings(roomId).scope);
+  const [backgroundChecks, setBackgroundChecks] = React.useState(() => readAssistantSettings(roomId).background);
   const [assistantPaused, setAssistantPaused] = React.useState(false);
-  const [eagerness, setEagerness] = React.useState<AssistantEagerness>(DEFAULT_EAGERNESS);
+  const [eagerness, setEagerness] = React.useState<AssistantEagerness>(() => readAssistantSettings(roomId).eagerness);
+  /**
+   * Which room the three settings above currently hold.
+   *
+   * They are read at first render rather than restored in an effect: both
+   * effects run in the same commit, so a writer effect would persist the
+   * defaults over whatever a reader effect had just queued, and StrictMode's
+   * second pass would read those defaults back. Every assistant setting
+   * silently reverted on reload. Resetting during render instead of in an
+   * effect keeps that true when the room changes without a remount.
+   */
+  const settingsRoom = React.useRef(roomId);
+  if (settingsRoom.current !== roomId) {
+    settingsRoom.current = roomId;
+    const saved = readAssistantSettings(roomId);
+    setAssistantScope(saved.scope);
+    setBackgroundChecks(saved.background);
+    setEagerness(saved.eagerness);
+  }
 
   const editorRef = React.useRef(editor);
   editorRef.current = editor;
@@ -183,17 +223,6 @@ export function ChatPanel({
   const [roomSnapshot, setRoomSnapshot] = React.useState(() => transport.snapshot());
   const activeLease = React.useRef<LeaseExecution | undefined>(undefined);
   const attempts = React.useRef(new Set<string>());
-  React.useEffect(() => {
-    const saved = roomId ? localStorage.getItem(`kan-assistant:${roomId}`) : null;
-    if (!saved) return;
-    try {
-      const value = JSON.parse(saved) as { scope?: "own" | "room" | "manual"; background?: boolean; eagerness?: AssistantEagerness };
-      if (value.scope) setAssistantScope(value.scope);
-      if (value.background !== undefined) setBackgroundChecks(value.background);
-      if (value.eagerness && ASSISTANT_EAGERNESS.includes(value.eagerness)) setEagerness(value.eagerness);
-    } catch {}
-  }, [roomId]);
-
   React.useEffect(() => {
     if (!roomId) return;
     localStorage.setItem(`kan-assistant:${roomId}`, JSON.stringify({ scope: assistantScope, background: backgroundChecks, eagerness }));
@@ -466,6 +495,49 @@ export function ChatPanel({
     return [...humans, ...agents];
   }, [agent.status.agent, roomSnapshot.executors, roomSnapshot.members, userId, userName]);
 
+  const chimeIn = toChimeIn(assistantScope, eagerness);
+  /** Scope to restore when leaving "only when asked": lending survives going quiet. */
+  const lastActiveScope = React.useRef<AssistantScope>(assistantScope === "manual" ? "own" : assistantScope);
+  if (assistantScope !== "manual") lastActiveScope.current = assistantScope;
+  const applyChimeIn = React.useCallback((value: ChimeIn) => {
+    const next = fromChimeIn(value, lastActiveScope.current);
+    setAssistantScope(next.scope);
+    if (!next.eagerness) return;
+    setEagerness(next.eagerness);
+    if (online && roomId) void patchServerRoom(roomId, { assistantEagerness: next.eagerness }).catch(() => undefined);
+  }, [online, roomId]);
+
+  /**
+   * The one transient line above the stream.
+   *
+   * Only one of these can matter at a time and each is more urgent than the
+   * one below it, so this is a priority list rather than a stack of rows. The
+   * ambient transcription status is not here on purpose: it is always set, so
+   * showing it would make the "only when there is something to say" slot
+   * permanent. It lives in the footer instead.
+   */
+  const status = React.useMemo(() => {
+    if (agent.busy) {
+      return (
+        <>
+          <Spinner className="size-3" />
+          <span className="flex-1">Kan is working</span>
+          <Button variant="outline" size="xs" onClick={() => void agent.cancel()}>Cancel</Button>
+        </>
+      );
+    }
+    const error = actionError ?? roomSnapshot.error ?? transcription?.error;
+    if (!error) return null;
+    return (
+      <>
+        <span role="status" className="flex-1 text-destructive">{error}</span>
+        {transcription?.error === error ? (
+          <Button variant="outline" size="xs" onClick={transcription.retry}>Retry</Button>
+        ) : null}
+      </>
+    );
+  }, [actionError, agent, roomSnapshot.error, transcription]);
+
   const liveEntries = React.useMemo(() => (roomSnapshot.transcripts ?? []).filter((line) => !entries.some((entry) => entry.id === line.id)).map((line) => ({ ...line, kind: "transcript" as const, seq: PENDING_SEQ })), [roomSnapshot.transcripts, entries]);
   const visibleEntries = React.useMemo(() => [...entries, ...liveEntries], [entries, liveEntries]);
   const view = React.useMemo(
@@ -481,69 +553,61 @@ export function ChatPanel({
   return (
     <ThreadPanel
       className={className}
-      channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
+      channel={roomId ? `canvas/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={visibleEntries}
       participants={participants}
       currentUserId={userId}
       anchors={selectedAnchors}
       canvasNodeCount={shapeCount}
       view={view}
+      headerAction={
+        <AssistantMenu
+          ready={agent.status.state === "ready"}
+          agentName={agent.status.agent ?? undefined}
+          chimeIn={chimeIn}
+          onChimeInChange={applyChimeIn}
+          room={
+            online && roomId
+              ? {
+                  lend: assistantScope === "room",
+                  onLendChange: (value) => setAssistantScope(value ? "room" : "own"),
+                  backgroundChecks,
+                  onBackgroundChecksChange: setBackgroundChecks,
+                  paused: assistantPaused,
+                  onPausedChange: (value) => {
+                    setAssistantPaused(value);
+                    void patchServerRoom(roomId, { assistantPaused: value }).catch(reportError);
+                  },
+                  settings: roomSnapshot.room ? (
+                    <RoomAssistantSettings
+                      room={roomSnapshot.room}
+                      disabled={!roomSnapshot.ready}
+                      onSave={async (settings) => (await patchServerRoom(roomId, settings)).room}
+                    />
+                  ) : undefined,
+                }
+              : undefined
+          }
+        />
+      }
+      status={status}
+      footerStatus={transcription ? <span>{transcription.status}</span> : undefined}
       toolbar={
-        <div className="flex flex-col gap-2 border-b border-border p-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Kan · personal agent</span>
-            <ToggleGroup value={[assistantScope]} onValueChange={(value) => { const next = value[0]; if (next === "own" || next === "room" || next === "manual") setAssistantScope(next); }} size="sm" variant="outline">
-              <ToggleGroupItem value="own">My requests</ToggleGroupItem>
-              <ToggleGroupItem value="room">Help room</ToggleGroupItem>
-              <ToggleGroupItem value="manual">Manual</ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-          <label className="flex items-center justify-between gap-2 text-muted-foreground">
-            Allow background checks using my agent
-            <Switch checked={backgroundChecks} onCheckedChange={setBackgroundChecks} />
-          </label>
-          {online ? (
-            <RoomAssistantSettings
-              key={roomId}
-              room={roomSnapshot.room}
-              disabled={!roomSnapshot.ready || !roomId}
-              onSave={async (settings) => (await patchServerRoom(roomId!, settings)).room}
+        import.meta.env.DEV ? (
+          <div className="border-b border-border">
+            {/* Dev only. This is a test fixture, not a product control, and it
+                used to own the most prominent button in the panel. It stays a
+                plain row rather than moving into the assistant menu because a
+                menu unmounts on click and the driver polls its dataset while
+                it plays. */}
+            <ConversationSimulator
+              script={hackathonConversation}
+              onLine={simulateLine}
+              disabled={agent.status.state !== "ready" || !canvasTools || agent.busy}
+              onStop={() => void agent.cancel()}
             />
-          ) : (
-            <label className="flex items-center justify-between gap-2 text-muted-foreground">
-              <span className="flex flex-col">
-                Eagerness
-                <span className="text-[10px]">{EAGERNESS_PACING[eagerness].description}</span>
-              </span>
-              <NativeSelect
-                size="sm"
-                aria-label="Assistant eagerness"
-                data-testid="assistant-eagerness"
-                value={eagerness}
-                onChange={(event) => {
-                  const next = event.target.value as AssistantEagerness;
-                  if (ASSISTANT_EAGERNESS.includes(next)) setEagerness(next);
-                }}
-              >
-                {ASSISTANT_EAGERNESS.map((value) => (
-                  <NativeSelectOption key={value} value={value}>{EAGERNESS_PACING[value].label}</NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </label>
-          )}
-          {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(reportError); }} /></label> : null}
-          {transcription && <div className="flex flex-col gap-1 text-muted-foreground">
-            <span>{transcription.status}</span>
-            {transcription.error && <div role="status" className="flex items-center gap-2"><span>{transcription.error}</span><Button variant="outline" size="xs" onClick={transcription.retry}>Retry transcription</Button></div>}
-          </div>}
-          {actionError || roomSnapshot.error ? <p role="status">{actionError ?? roomSnapshot.error}</p> : null}
-          <ConversationSimulator
-            script={hackathonConversation}
-            onLine={simulateLine}
-            disabled={agent.status.state !== "ready" || !canvasTools || agent.busy}
-            onStop={() => void agent.cancel()}
-          />
-        </div>
+          </div>
+        ) : null
       }
       onClose={onClose}
       onJumpToNode={jumpToNode}

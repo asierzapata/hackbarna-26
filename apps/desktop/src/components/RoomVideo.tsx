@@ -97,7 +97,7 @@ export function RoomPrejoin({ title, name, controls, onJoin, onCancel }: {
           <h1 id="prejoin-title" className="text-3xl font-medium tracking-tight">Ready to join?</h1>
           <p className="truncate text-lg" title={title}>{title}</p>
           <p className="text-sm text-muted-foreground">Check your camera and sound. Make yourself at home.</p>
-          <p className="text-xs text-muted-foreground">When your microphone is on, Vonage transcribes your speech. The transcript is saved in the room chat, collapsed by default. Join muted to listen without being transcribed.</p>
+          <p className="text-xs text-muted-foreground">When your microphone is on, Vonage transcribes your speech. The transcript is saved in the canvas chat, collapsed by default. Join muted to listen without being transcribed.</p>
         </div>
         <FieldGroup>
           {(["video", "audio"] as const).map((kind) => <Field key={kind}>
@@ -118,7 +118,7 @@ export function RoomPrejoin({ title, name, controls, onJoin, onCancel }: {
           <AlertDescription>{[controls.state.video.error, controls.state.audio.error, speakerError ? "Could not play sound. Check your system output device." : null].filter(Boolean).map((error) => <p key={error}>{error}</p>)}<p>You can still join with camera and microphone off.</p></AlertDescription>
         </Alert>}
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="lg" disabled={pending} onClick={onJoin}>Join room<RiArrowRightLine data-icon="inline-end" /></Button>
+          <Button size="lg" disabled={pending} onClick={onJoin}>Join canvas<RiArrowRightLine data-icon="inline-end" /></Button>
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           {pending && <Button variant="outline" onClick={() => { controls.media.dispose(); onJoin(); }}>Join without devices</Button>}
         </div>
@@ -168,7 +168,7 @@ export function RoomParticipantStrip({ name, controls, call }: { name: string; c
       peers.push({ connectionId: person.userId, userId: null, name: person.userName, canvasId: person.userId });
     }
   }
-  return <section className="room-video" aria-label="Room participants">
+  return <section className="room-video" aria-label="Canvas participants">
     <div className="room-video__strip">
       <article className="room-video__tile" aria-label="Your participant tile">
         <div className="room-video__picture"><LocalPreview track={controls.state.video.track} name={name} /></div>
