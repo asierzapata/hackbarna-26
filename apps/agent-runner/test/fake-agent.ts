@@ -48,7 +48,7 @@ const app = agent()
     try {
       await mcp.connect(transport);
       const names = (await mcp.listTools()).tools.map((tool) => tool.name).sort();
-      const expected = (mode === "propose" ? ["getCanvas", "queryData", "proposeNode"] : ["getCanvas", "queryData", "addNode", "updateNode", "connectNodes", "arrange"]).sort();
+      const expected = (mode === "propose" ? ["getCanvas", "queryData", "proposeNode"] : ["getCanvas", "queryData", "addDiagram", "addNode", "updateNode", "connectNodes", "arrange"]).sort();
       if (JSON.stringify(names) !== JSON.stringify(expected)) throw new Error("incorrect tool scope");
       for (const call of [
         { name: "getCanvas", arguments: { scope: "summary" } },

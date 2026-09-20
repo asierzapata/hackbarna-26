@@ -24,6 +24,7 @@ export function createCanvasMcpServer(runClient: RunClient, mode: "act" | "propo
   if (mode === "propose") {
     server.registerTool("proposeNode", { description: TOOL_DESCRIPTIONS.proposeNode, inputSchema: CanvasToolInputs.proposeNode }, ({ draft, requestId }) => result("proposeNode", () => runClient.propose(draft, requestId), requestId));
   } else {
+    server.registerTool("addDiagram", { description: TOOL_DESCRIPTIONS.addDiagram, inputSchema: CanvasToolInputs.addDiagram }, ({ requestId, ...input }) => result("addDiagram", () => runClient.mutate({ type: "diagram", ...input }, requestId), requestId));
     server.registerTool("addNode", { description: TOOL_DESCRIPTIONS.addNode, inputSchema: CanvasToolInputs.addNode }, ({ requestId, ...input }) => result("addNode", () => runClient.mutate({ type: "add", ...input }, requestId), requestId));
     server.registerTool("updateNode", { description: TOOL_DESCRIPTIONS.updateNode, inputSchema: CanvasToolInputs.updateNode }, ({ requestId, ...input }) => result("updateNode", () => runClient.mutate({ type: "update", ...input }, requestId), requestId));
     server.registerTool("connectNodes", { description: TOOL_DESCRIPTIONS.connectNodes, inputSchema: CanvasToolInputs.connectNodes }, ({ requestId, ...input }) => result("connectNodes", () => runClient.mutate({ type: "connect", ...input }, requestId), requestId));

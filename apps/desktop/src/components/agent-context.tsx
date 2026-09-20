@@ -14,7 +14,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
-import { buildAssistantPrompt, type AssistantResult } from "@kan/protocol";
+import { buildAssistantPrompt, directCanvasResult, type AssistantResult } from "@kan/protocol";
 import { parseStructuredOutput } from "@/lib/assistant-controller";
 import { useQaSource } from "@/lib/qa-source";
 import { AgentRequestError, failure, normalizeFailure, type AgentFailure } from "@kan/protocol";
@@ -337,14 +337,19 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     runStructured: async (mode, context, signal, shapeIds, runId) => {
       if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
       if (turnId.current) throw new Error("An agent turn is already running");
+      const direct = directCanvasResult(mode, context);
       const id = runId ?? crypto.randomUUID();
       turnId.current = id;
       setThinkingShapeIds(shapeIds ?? []);
       setBusy(true);
       let abortHandler: (() => void) | undefined;
       const startedAt = performance.now();
-      recordDiagnostic({ event: "prompt.started", turnId: id, provider: status.provider ?? undefined, model: status.models?.current ?? undefined, phase: "structured" });
+      recordDiagnostic({ event: "prompt.started", turnId: id, provider: status.provider ?? undefined, model: status.models?.current ?? undefined, phase: direct ? "direct" : "structured" });
       try {
+        if (direct) {
+          recordDiagnostic({ event: "prompt.completed", turnId: id, durationMs: performance.now() - startedAt, phase: "direct" });
+          return direct;
+        }
         await listenersReady.current;
         if (signal.aborted || turnId.current !== id) throw new DOMException("assistant turn cancelled", "AbortError");
         const abortPromise = new Promise<never>((_, reject) => {
@@ -359,7 +364,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         if (signal.aborted) throw new DOMException("assistant turn cancelled", "AbortError");
         let result: AssistantResult;
         try { result = parseStructuredOutput(raw); }
-        catch (error) { captureFailureDetails(id, error); throw new AgentRequestError(failure("STRUCTURED_OUTPUT_INVALID", "parse", "not_applied"), { cause: error }); }
+        catch (error) { captureFailureDetails(id, error); throw new AgentRequestError(failure("STRUCTURED_OUTPUT_INVALID", "parse", "not_applied", { issues: normalizeFailure(error, "parse").issues }), { cause: error }); }
         if ((mode === "context" || mode === "propose") && result.kind === "act") throw new Error("contextual assistant turns cannot act");
         recordDiagnostic({ event: "prompt.completed", turnId: id, durationMs: performance.now() - startedAt });
         return result;
