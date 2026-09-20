@@ -508,14 +508,16 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 ## App icon packaging
 
 - `apps/desktop/src-tauri/icons/Kan.icon` is the editable Icon Composer source.
-  Tauri CLI 2.11.4 compiles it into `Assets.car` and sets `CFBundleIconName`
-  during macOS bundling; keep `icon.icns` alongside it for older macOS versions.
-  Native icon compilation requires full Xcode 26+ with first-launch components
-  installed; verify with `xcrun actool --version`.
+  Releases bundle the checked-in `icons/Assets.car`; Tauri discovers its icon name
+  and sets `CFBundleIconName`. Keep `icon.icns` for older macOS versions. This
+  avoids recompiling unchanged artwork on every release: Xcode 27's `actool` has
+  returned `Bad file descriptor` even when its version check succeeds.
 - Run `node scripts/generate-icons.mjs` on macOS after changing the artwork.
-  It regenerates the macOS fallback through `actool` and desktop PNG/ICO sizes
-  through Tauri from `icons/source.png`, the flattened Composer PNG export.
-  Update that export too when the design changes. Mobile outputs stay temporary.
+  It refreshes both `Assets.car` and the macOS fallback through `actool`, and
+  desktop PNG/ICO sizes through Tauri from `icons/source.png`, the flattened
+  Composer PNG export. Update that export too when the design changes. Commit
+  the source and generated assets together. Regeneration requires working full
+  Xcode 26+ with first-launch components installed. Mobile outputs stay temporary.
 - For an icon-only update to an already-built alpha, run
   `npm run tauri -- bundle --bundles app,dmg --config '{"productName":"Kan Alpha","identifier":"com.asierzapata.kan.alpha","bundle":{"macOS":{"signingIdentity":"-"}}}'`.
   This repackages the existing release executable; it does not compile current
@@ -535,3 +537,38 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   onboarding steps, the catalog and canvas headers, back navigation, and light/dark
   contrast. Use a separate app identifier and Vite port for fresh onboarding so
   the user's profile and canvases are not changed.
+
+## Deploying a new alpha download
+
+The landing site serves the current macOS Apple Silicon alpha from
+**`apps/site/public/kan-alpha.dmg`**, at the stable URL **`/kan-alpha.dmg`**.
+Replace that file for each release; both site download buttons use this path.
+
+From the repo root, on an Apple Silicon Mac:
+
+1. Commit the app changes to release. Keep version metadata consistent if bumping
+   the version; the build script reads the DMG version from `tauri.conf.json`.
+2. Run `node scripts/build-alpha.mjs`. It performs a fresh Tauri release build
+   (not `tauri bundle` of an old executable), using product name `Kan Alpha`,
+   identifier `com.asierzapata.kan.alpha`, ad-hoc signing, and no WebDriver feature.
+   It checks the app signature and DMG integrity, then atomically replaces
+   `apps/site/public/kan-alpha.dmg` and prints its size and SHA-256.
+3. Smoke-test `apps/desktop/src-tauri/target/release/bundle/macos/Kan Alpha.app`.
+   Exercise the actual packaged app and keep a canvas open beyond five seconds
+   to catch production-only licensing failures. The script requires a nonempty
+   `VITE_TLDRAW_LICENSE_KEY` from the build environment/root `.env.local`; presence
+   alone does not establish that the license is valid. Never commit env files.
+4. Run `npm run build -w @kan/site`. Vite copies the public DMG into
+   `apps/site/dist/kan-alpha.dmg`. Preview the built site with
+   `npm run preview -w @kan/site`, verify the download returns the real DMG (not
+   HTML), and compare its SHA-256 with the staged file.
+5. Commit `apps/site/public/kan-alpha.dmg` together with any release/site changes,
+   then deploy the landing site through its Vercel project. Root `vercel.json`
+   builds `@kan/site` and publishes `apps/site/dist`. Only push or trigger the
+   hosted deployment when explicitly asked; a local build is not a live deploy.
+
+The current download is arm64-only, not an Intel/universal build. The build helper
+rejects other host architectures so it cannot silently replace the advertised
+Apple Silicon download with an incompatible binary. Ad-hoc signing is not Apple
+notarization; retain the site's Gatekeeper warning. Do not ship an automation
+build or substitute a previous DMG when a fresh build fails.

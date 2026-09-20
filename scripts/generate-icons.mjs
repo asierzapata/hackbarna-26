@@ -29,6 +29,7 @@ try {
     }
   }
   await copyFile(join(output, "Kan.icns"), join(icons, "icon.icns"));
+  await copyFile(join(output, "Assets.car"), join(icons, "Assets.car"));
 } finally {
   await rm(output, { recursive: true, force: true });
 }
