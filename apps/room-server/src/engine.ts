@@ -771,6 +771,7 @@ export class Engine {
       ...(input.replyToEntryId ? { replyToEntryId: input.replyToEntryId } : {}),
     };
     const explicit = this.isExplicitMessage(roomId, input);
+    let explicitTriggerId: string | null = null;
     this.transaction( () => {
       entry.seq = this.nextSeq(roomId);
       for (const assetId of input.attachments ?? []) {
@@ -779,14 +780,20 @@ export class Engine {
       this.insertEntry(roomId, entry);
       if (explicit) {
         const trigger = this.createTrigger(roomId, entry, EXPLICIT_TRIGGER, causeAnchors(entry));
+        explicitTriggerId = trigger.id;
         this.recordDecision(roomId, entry, sha256(JSON.stringify(this.buildClassificationState(roomId, entry))), "explicit", null, trigger.id);
       } else {
         this.db.prepare("INSERT OR IGNORE INTO pending_classification (room_id,entry_id) VALUES (?,?)").run(roomId, entry.id);
       }
     });
     this.flushBroadcasts();
-    if (explicit) this.tick();
-    else this.enqueueClassification(roomId, entry);
+    if (explicit) {
+      this.tick();
+      console.info("room-server assistant_trigger", JSON.stringify({ roomId, entryId: entry.id, triggerId: explicitTriggerId, mode: "act", source: "explicit" }));
+    } else {
+      this.enqueueClassification(roomId, entry);
+      console.info("room-server jev_queued", JSON.stringify({ roomId, entryId: entry.id, source: input.source ?? "typed", debounceMs: this.timings.debounceMs }));
+    }
     return { entry, created: true };
   }
 
@@ -1020,6 +1027,10 @@ export class Engine {
     if (!this.db.prepare("SELECT 1 FROM pending_classification WHERE room_id=? AND entry_id=?").get(roomId, cause.id)) return;
     const state = this.buildClassificationState(roomId, cause);
     const stateHash = sha256(JSON.stringify(state));
+    const evaluationStartedAt = Date.now();
+    const roomRow = this.getRoomRow(roomId);
+    let triggerThreshold = Number(roomRow.assistant_threshold);
+    let cooldownMs = Number(roomRow.assistant_cooldown_ms);
     const explicit = cause.kind === "message" && explicitMention(cause.text, cause.source ?? "typed");
     let output: unknown = null;
     let status = explicit ? "explicit" : this.classifier ? "evaluated" : "skipped";
@@ -1028,7 +1039,9 @@ export class Engine {
     if (!explicit && this.classifier) {
       try {
         const decision = await this.classifier.decide(state);
-        const triggerThreshold = Number(this.getRoomRow(roomId).assistant_threshold);
+        const currentSettings = this.getRoomRow(roomId);
+        triggerThreshold = Number(currentSettings.assistant_threshold);
+        cooldownMs = Number(currentSettings.assistant_cooldown_ms);
         output = { ...decision, triggerThreshold };
         plan = triggerDecision(decision, triggerThreshold);
       } catch {
@@ -1051,18 +1064,45 @@ export class Engine {
       }
     }
     if (this.stopping) return;
+    let triggerId: string | null = null;
+    let suppression: "below_threshold" | "cooldown" | "paused" | "stale" | "classifier_error" | null = null;
     this.transaction(() => {
-      let triggerId: string | null = null;
-      const paused = Boolean(this.getRoomRow(roomId).assistant_paused);
-      if (plan && !(plan.mode !== "act" && (this.inCooldown(roomId) || paused))) {
+      const currentRoom = this.getRoomRow(roomId);
+      const paused = Boolean(currentRoom.assistant_paused);
+      const cooldownActive = plan?.mode !== "act" ? this.inCooldown(roomId) : false;
+      if (plan && !(plan.mode !== "act" && (cooldownActive || paused))) {
         triggerId = this.createTrigger(roomId, cause, plan, anchors.slice(0, 64)).id;
         if (plan.mode !== "act") this.db.prepare("UPDATE rooms SET last_propose_at=? WHERE id=?").run(this.now(), roomId);
+      } else if (plan) {
+        suppression = paused ? "paused" : "cooldown";
+      } else if (status === "failed") {
+        suppression = "classifier_error";
+      } else if (status === "stale") {
+        suppression = "stale";
+      } else if (!explicit && status === "evaluated") {
+        suppression = "below_threshold";
       }
       this.recordDecision(roomId, cause, stateHash, status, output, triggerId);
       this.db.prepare("DELETE FROM pending_classification WHERE room_id=? AND entry_id=?").run(roomId, cause.id);
     });
     this.flushBroadcasts();
     this.tick();
+    const trigger = triggerId ? this.listTriggers(roomId).find((candidate) => candidate.id === triggerId) : undefined;
+    const triggerProbability = output && typeof output === "object" && "triggerProbability" in output ? (output as { triggerProbability?: unknown }).triggerProbability : null;
+    console.info("room-server jev_decision", JSON.stringify({
+      roomId,
+      entryId: cause.id,
+      causeKind: cause.kind,
+      status,
+      swept,
+      durationMs: Date.now() - evaluationStartedAt,
+      triggerProbability,
+      triggerThreshold,
+      cooldownMs,
+      suppression,
+      triggerId,
+      triggerStatus: trigger?.status ?? null,
+    }));
   }
 
   // The room's own pacing, falling back to the server defaults for a room that
@@ -1364,9 +1404,11 @@ export class Engine {
         this.lastAssigned.set(candidate.sessionId, now);
         this.saveTriggerAndBroadcast(t, row, offeredIds);
         offeredRooms.add(row.room_id);
+        console.info("room-server assistant_trigger_offered", JSON.stringify({ roomId: row.room_id, triggerId: t.id, mode: t.mode, sessionId: candidate.sessionId, scope: candidate.scope, background: candidate.background }));
       } else if (t.status === "pending") {
         t.status = "needs_claim";
         this.saveTriggerAndBroadcast(t, row, offeredIds);
+        console.info("room-server assistant_trigger_needs_claim", JSON.stringify({ roomId: row.room_id, triggerId: t.id, mode: t.mode, reason: "no_eligible_executor" }));
       }
     }
     this.flushBroadcasts();
