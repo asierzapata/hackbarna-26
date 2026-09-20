@@ -308,6 +308,12 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 
 ## Canvas/chat regression checks
 
+- The tldraw theme in `apps/desktop/src/styles.css` is scoped to UI roots,
+  including portaled menus/popovers, not `.tl-container` itself: shared radius,
+  font and color tokens also style canvas content. Preserve round swatches and
+  handles. `node scripts/canvas-theme.e2e.mjs` checks the native UI theme and
+  tool switching with a temporary canvas, then restores the original route.
+  Do not drive concurrently.
 - `WorkspacePanels` must give its inner canvas wrapper explicit full height;
   panel dimensions alone do not prevent a zero-height canvas and clipped toolbar.
   Keep both panels mounted when collapsing chat to preserve editor and draft state.
