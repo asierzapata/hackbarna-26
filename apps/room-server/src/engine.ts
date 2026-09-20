@@ -8,10 +8,10 @@ import {
   type TLSyncForwardDiff,
   type TLRecordAuthorizer,
 } from "@tldraw/sync-core";
-import { type TLBaseShape } from "@tldraw/tlschema";
+import { type TLBaseShape, type TLShapeId } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
-import { createKanSchema, diagramPlacement, KAN_MAP_TYPE, KAN_NODE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
+import { createKanSchema, diagramPlacement, KAN_MAP_TYPE, KAN_NODE_TYPE, KAN_TABLE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
 import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
@@ -1975,10 +1975,11 @@ export class Engine {
         if (!Number.isFinite(x) || !Number.isFinite(y)) throw badRequest("coordinates must be finite");
         maxIndex = getIndexAbove(maxIndex);
         const isMap = op.draft.type === "map";
+        const isTable = op.draft.type === "table";
         const shape: UnknownRecord = {
           id,
           typeName: "shape",
-          type: isMap ? KAN_MAP_TYPE : KAN_NODE_TYPE,
+          type: isMap ? KAN_MAP_TYPE : isTable ? KAN_TABLE_TYPE : KAN_NODE_TYPE,
           x,
           y,
           rotation: 0,
@@ -1986,7 +1987,7 @@ export class Engine {
           parentId: targetPageId,
           isLocked: false,
           opacity: 1,
-          props: op.draft.type === "map" ? mapShapeProps(op.draft) : { ...kanNodeSize(op.draft.type), draft: op.draft },
+          props: op.draft.type === "map" ? mapShapeProps(op.draft) : op.draft.type === "table" ? tableShapeProps(op.draft) : { ...kanNodeSize(op.draft.type), draft: op.draft },
           meta: { provenance },
         } as unknown as UnknownRecord;
         planned.set(id, shape);
@@ -1995,16 +1996,50 @@ export class Engine {
       } else if (op.type === "update") {
         const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
         if (!existing || existing.typeName !== "shape") throw badRequest(`shape ${op.shapeId} not found`);
-        if (existing.type !== KAN_NODE_TYPE && existing.type !== KAN_MAP_TYPE) throw badRequest("only Kan node or map shapes can be updated");
-        if ((existing.type === KAN_MAP_TYPE) !== (op.draft.type === "map")) throw badRequest("map updates require a map draft");
+        if (existing.type !== KAN_NODE_TYPE && existing.type !== KAN_MAP_TYPE && existing.type !== KAN_TABLE_TYPE) throw badRequest("only Kan node, map, or table shapes can be updated");
+        if ((existing.type === KAN_MAP_TYPE) !== (op.draft.type === "map") || (existing.type === KAN_TABLE_TYPE) !== (op.draft.type === "table")) throw badRequest("rich node updates require a matching draft");
         const next = {
           ...existing,
-          props: existing.type === KAN_MAP_TYPE ? mapShapeProps(op.draft as Extract<NodeDraft, { type: "map" }>) : { ...existing.props, draft: op.draft },
+          props: existing.type === KAN_MAP_TYPE ? mapShapeProps(op.draft as Extract<NodeDraft, { type: "map" }>) : existing.type === KAN_TABLE_TYPE ? tableShapeProps(op.draft as Extract<NodeDraft, { type: "table" }>) : { ...existing.props, draft: op.draft },
           meta: { ...existing.meta, provenance },
         } as unknown as UnknownRecord;
         planned.set(op.shapeId, next);
         puts.push(next);
         shapeIds.push(op.shapeId);
+      } else if (op.type === "group") {
+        const shapes = op.shapeIds.map((id) => get(id) as TLBaseShape<string, Record<string, unknown>> | undefined);
+        if (shapes.some((shape) => !shape || shape.typeName !== "shape" || shape.parentId !== pageId || shape.rotation !== 0 || shape.isLocked)) throw badRequest("group requires unlocked top-level shapes on the current page");
+        const members = shapes as TLBaseShape<string, Record<string, unknown>>[];
+        const measured = members.map((shape) => ({ shape, bounds: shapePageBounds(shape) }));
+        const origin = { x: Math.min(...measured.map(({ bounds }) => bounds.x)) - GROUP_PADDING, y: Math.min(...measured.map(({ bounds }) => bounds.y)) - GROUP_PADDING };
+        const layout = layoutGroup(measured.map(({ shape, bounds }) => ({ id: shape.id as TLShapeId, w: bounds.w, h: bounds.h })), origin);
+        const groupId = `shape:${deterministicId("group", runKey(requestId, i))}`;
+        if (get(groupId)) throw conflict(`shape ${groupId} already exists`);
+        maxIndex = getIndexAbove(maxIndex);
+        const frame: UnknownRecord = {
+          id: groupId,
+          typeName: "shape",
+          type: "frame",
+          x: origin.x,
+          y: origin.y,
+          rotation: 0,
+          index: maxIndex,
+          parentId: pageId,
+          isLocked: false,
+          opacity: 1,
+          props: { w: layout.w, h: layout.h, name: "Group", color: "black" },
+          meta: { provenance, kanGroup: true },
+        } as unknown as UnknownRecord;
+        planned.set(groupId, frame);
+        puts.push(frame);
+        shapeIds.push(groupId);
+        for (const position of layout.positions) {
+          const shape = get(position.id) as TLBaseShape<string, Record<string, unknown>>;
+          const next = { ...shape, parentId: groupId, x: position.x, y: position.y, meta: { ...shape.meta, provenance } } as unknown as UnknownRecord;
+          planned.set(shape.id, next);
+          puts.push(next);
+          shapeIds.push(shape.id);
+        }
       } else if (op.type === "style" || op.type === "label") {
         const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
         if (!existing || existing.typeName !== "shape" || existing.type !== "geo") throw badRequest("color or label changes require a native geometric shape");
@@ -2461,6 +2496,55 @@ function extractRichText(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+const GROUP_PADDING = 28;
+const GROUP_GAP = 20;
+
+function shapePageBounds(shape: TLBaseShape<string, Record<string, unknown>>) {
+  const props = shape.props as { w?: unknown; h?: unknown };
+  const w = typeof props.w === "number" && Number.isFinite(props.w) ? props.w : 320;
+  const h = typeof props.h === "number" && Number.isFinite(props.h) ? props.h : 200;
+  return { x: shape.x, y: shape.y, w: Math.max(1, w), h: Math.max(1, h) };
+}
+
+function layoutGroup(items: Array<{ id: TLShapeId; w: number; h: number }>, origin: { x: number; y: number }) {
+  const columns = Math.ceil(Math.sqrt(items.length));
+  const rows = Math.ceil(items.length / columns);
+  const columnWidths = Array.from({ length: columns }, () => 0);
+  const rowHeights = Array.from({ length: rows }, () => 0);
+  for (const [index, item] of items.entries()) {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    columnWidths[column] = Math.max(columnWidths[column], item.w);
+    rowHeights[row] = Math.max(rowHeights[row], item.h);
+  }
+  const xOffsets = columnWidths.map((_, index) => columnWidths.slice(0, index).reduce((sum, width) => sum + width + GROUP_GAP, 0));
+  const yOffsets = rowHeights.map((_, index) => rowHeights.slice(0, index).reduce((sum, height) => sum + height + GROUP_GAP, 0));
+  return {
+    x: origin.x,
+    y: origin.y,
+    w: GROUP_PADDING * 2 + columnWidths.reduce((sum, width) => sum + width, 0) + GROUP_GAP * (columns - 1),
+    h: GROUP_PADDING * 2 + rowHeights.reduce((sum, height) => sum + height, 0) + GROUP_GAP * (rows - 1),
+    positions: items.map((item, index) => ({
+      id: item.id,
+      x: GROUP_PADDING + xOffsets[index % columns],
+      y: GROUP_PADDING + yOffsets[Math.floor(index / columns)],
+    })),
+  };
+}
+
+function tableShapeProps(draft: Extract<NodeDraft, { type: "table" }>) {
+  return {
+    ...kanNodeSize("table"),
+    title: draft.title,
+    columns: draft.columns,
+    rows: draft.rows,
+    highlightRow: -1,
+    sourceNote: draft.sourceNote ?? "",
+    sortBy: null,
+    selectedRows: [],
+  };
 }
 
 function mapShapeProps(draft: Extract<NodeDraft, { type: "map" }>) {

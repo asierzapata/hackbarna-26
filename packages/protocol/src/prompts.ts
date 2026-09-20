@@ -12,10 +12,10 @@ const DRAFT_CONTRACT = `NODE_DRAFT is one of:
 {"type":"markdown","title":string,"body":string}
 {"type":"decision","title":string,"bullets":string[]}
 {"type":"concept","label":string}
-{"type":"table","title":string,"columns":string[],"rows":string[][]}
+{"type":"table","title":string,"columns":string[],"rows":(string|number|boolean|null)[][],"sourceNote"?:string}
 {"type":"chart","title":string,"spec":bounded inline Vega-Lite object,"data":object[],"sourceNote"?:string}
 {"type":"map","title":string,"markers":[{"lat":number,"lng":number,"label":string,"note"?:string}],"center"?:{"lat":number,"lng":number},"zoom"?:number,"style"?:"streets"|"aquarelle"|"light"|"dark"|"satellite"|"outdoor"}
-Always use the calendar draft for calendars; never use a table to imitate a calendar. Events may be empty, IDs must be unique, end dates are inclusive. selectedDate highlights a day without inventing an event. Maps require numeric latitude/longitude markers; use supplied coordinates and label inferred locations as approximate. Table row widths equal column count. Charts use supplied data only: no remote URLs, expressions, calculate or string filters.`;
+Always use the calendar draft for calendars; never use a table to imitate a calendar. Events may be empty, IDs must be unique, end dates are inclusive. selectedDate highlights a day without inventing an event. Maps require numeric latitude/longitude markers; use supplied coordinates and label inferred locations as approximate. Table row widths equal column count. Use a table draft for CSV, JSON, sponsor lists, and other tabular data; never use markdown to imitate a table. Charts use supplied data only: no remote URLs, expressions, calculate or string filters.`;
 
 const DIAGRAM_CONTRACT = `DIAGRAM = {"type":"diagram","nodes":[{"id":"short-local-id","label":"Short label","group"?:"group-id","geo"?:"rectangle"|"ellipse"|"diamond","color"?:COLOR}],"edges":[{"from":"node-id","to":"node-id","label"?:"relationship"}],"groups"?:[{"id":"group-id","label":"Group name"}],"direction"?:"right"|"down","nearShapeId"?:"shape:existing-id"}. Maximum 40 nodes, 80 edges, 10 groups. Node and group IDs are unique within their own lists; every edge and group reference must resolve inside the diagram. These are local IDs, NOT canvas IDs. Edges may be empty for a collection. Return the whole graph once; never generate coordinates or canvas IDs for it.`;
 
@@ -24,9 +24,10 @@ const MUTATION_CONTRACT = `MUTATION is DIAGRAM or one of:
 {"type":"update","shapeId":"shape:existing-id","draft":NODE_DRAFT}
 {"type":"connect","from":"shape:existing-id","to":"shape:existing-id","label"?:string}
 {"type":"arrange","shapeIds":["shape:existing-id"],"layout":"row"|"column"|"grid"}
+{"type":"group","shapeIds":["shape:existing-id","shape:existing-id"]}
 {"type":"style","shapeId":"shape:existing-id","color":COLOR}
 {"type":"label","shapeId":"shape:existing-id","text":"Updated label or short facts, max 120 characters"}
-COLOR is black, grey, light-violet, violet, blue, light-blue, yellow, orange, green, light-green, light-red, red or white. style and label apply only to existing native geo shapes, retaining their IDs and connections. Use label to extend or correct facts on a diagram node instead of creating a duplicate. update applies to shared kan-node drafts and existing kan-map or kan-calendar nodes with matching drafts. Other rich nodes can be cited, not rewritten through this contract. Use diagram for new boxes, circles, branches and grouped ideas; connect and arrange reference EXISTING canvas IDs only. Never replace an existing shape just to recolor it.`;
+COLOR is black, grey, light-violet, violet, blue, light-blue, yellow, orange, green, light-green, light-red, red or white. style and label apply only to existing native geo shapes, retaining their IDs and connections. Use label to extend or correct facts on a diagram node instead of creating a duplicate. update applies to shared kan-node drafts and existing kan-map or kan-calendar nodes with matching drafts. Other rich nodes can be cited, not rewritten through this contract. Use group for existing nodes exactly like Cmd/Ctrl+G: create one rounded frame, preserve the listed nodes, and move only those nodes inside it. Use diagram for new boxes, circles, branches and grouped ideas; connect and arrange reference EXISTING canvas IDs only. Never replace an existing shape just to recolor it.`;
 
 const RESPONSE_CONTRACT = `Return exactly ONE JSON object. No markdown fences, surrounding prose, hidden reasoning or extra keys. Include sources:[] when no supplied evidence is cited. A source is {"kind":"entry","id":"exact entry ID"} or {"kind":"shape","id":"shape:exact-id"}. Never invent citations. Maximum 12 sources, 20000 text characters and 8 operations; a diagram counts as one operation. The application validates and applies operations; text is a short completion label, not a claim that you already executed them.`;
 
