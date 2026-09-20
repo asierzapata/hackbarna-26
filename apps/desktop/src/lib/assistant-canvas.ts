@@ -4,6 +4,37 @@ import { diagramPlacement, KAN_NODE_HEIGHT, KAN_NODE_WIDTH, planDiagram } from "
 import { MutationSchema, type Mutation } from "@kan/protocol";
 import { draftToShapePartial } from "@/nodes/draft";
 
+type Bounds = { x: number; y: number; w: number; h: number };
+
+function easeInOutQuart(t: number) {
+  return t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2;
+}
+
+function focusCreatedShapes(editor: Editor, shapeIds: string[]) {
+  if (!shapeIds.length || typeof editor.getShape !== "function" || typeof editor.getShapePageBounds !== "function") return;
+  const bounds = shapeIds.flatMap((id) => {
+    const shape = editor.getShape(id as TLShapeId);
+    const value = shape ? editor.getShapePageBounds(shape) : undefined;
+    return value ? [{ x: value.x, y: value.y, w: value.w, h: value.h }] : [];
+  });
+  if (!bounds.length) return;
+  const combined = bounds.reduce<Bounds>((current, value) => ({
+    x: Math.min(current.x, value.x),
+    y: Math.min(current.y, value.y),
+    w: Math.max(current.x + current.w, value.x + value.w) - Math.min(current.x, value.x),
+    h: Math.max(current.y + current.h, value.y + value.h) - Math.min(current.y, value.y),
+  }), bounds[0]);
+  const animation = {
+    duration: (editor.options?.animationMediumMs ?? 100) * 5,
+    easing: easeInOutQuart,
+  };
+  if (bounds.length === 1) {
+    editor.centerOnPoint?.({ x: combined.x + combined.w / 2, y: combined.y + combined.h / 2 }, { animation });
+  } else {
+    editor.zoomToBounds?.(combined, { animation });
+  }
+}
+
 export function assistantCanvasRecords(editor: Editor | null) {
   if (!editor) return [];
   return Object.values(editor.getSnapshot().document.store).filter((record) => record.typeName === "shape");
@@ -17,6 +48,7 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
   const bindings: Array<{ fromId: TLShapeId; toId: TLShapeId; terminal: "start" | "end" }> = [];
   const current = new Map(assistantCanvasRecords(editor).map((shape) => [shape.id, shape as TLShape]));
   const touched = new Set<string>();
+  const created = new Set<string>();
   const get = (id: string) => {
     const shape = (puts.slice().reverse().find(shape => shape.id === id) ?? current.get(id as TLShapeId)) as TLShape | undefined;
     if (!shape) throw new Error("A referenced canvas item no longer exists");
@@ -39,7 +71,10 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       if (plan.shapes.some(shape => current.has(shape.id) || puts.some(put => put.id === shape.id))) throw new Error("That canvas action was already applied");
       puts.push(...plan.shapes);
       diagramBindings.push(...plan.bindings);
-      plan.shapes.forEach(shape => touched.add(shape.id));
+      plan.shapes.forEach(shape => {
+        touched.add(shape.id);
+        if (shape.type !== "arrow") created.add(shape.id);
+      });
     } else if (operation.type === "add") {
       const id = (operation.shapeId ?? createShapeId(`${provenance.entryId}-${index}`)) as TLShapeId;
       if (current.has(id) || puts.some(shape => shape.id === id)) throw new Error("That canvas action was already applied");
@@ -53,6 +88,7 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
         : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
       touched.add(id);
+      created.add(id);
     } else if (operation.type === "update") {
       const shape = get(operation.shapeId);
       if (shape.type === "kan-calendar" && operation.draft.type === "calendar") {
@@ -106,5 +142,6 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
     editor.createBindings(diagramBindings);
     editor.createBindings<TLArrowBinding>(bindings.map(({ terminal, ...binding }) => ({ ...binding, type: "arrow", props: { terminal, normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false, snap: "none" } })));
   });
+  focusCreatedShapes(editor, [...created]);
   return [...touched];
 }
