@@ -475,6 +475,48 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   compatibility assertion in the transcription test; an unconstrained mock missed
   this integration failure.
 
+## Nebius Token Factory classifier
+
+- `apps/room-server/src/nebius-classifier.ts` is an opt-in provider for online
+  room classification, not the offline desktop agent. `KAN_CLASSIFIER=nebius`
+  requires server-only `NEBIUS_API_KEY`; never use a `VITE_` prefix. Existing
+  disabled/Jev defaults remain unchanged even when a Nebius key is present.
+- From the repo root, run `KAN_CLASSIFIER=nebius node --env-file=.env.local
+  --import tsx apps/room-server/src/main.ts`. The usual `npm run server` does
+  not load `.env.local`; deployments must supply these environment variables.
+  Do not replace another running server or point verification at user data.
+- `NEBIUS_CLASSIFIER_MODEL` overrides the default
+  `Qwen/Qwen3-30B-A3B-Instruct-2507`. Requests use Nebius's fixed HTTPS endpoint,
+  shared evaluation criteria, strict JSON validation, known-shape checks, an
+  8-second deadline, at most 512 output tokens and no automatic retries.
+  Context above 128 KB is rejected before transmission. Model probabilities
+  are self-reported estimates, not calibrated scores or permission to mutate.
+- Enabling this sends room conversation/canvas context to Nebius and consumes
+  credits. The classifier only feeds existing contextual trigger policy;
+  explicit invocations bypass it, and canvas mutation still requires the
+  existing authorization flow. No prompt, key or raw provider error is logged.
+- Focused checks: `node --import tsx --test apps/room-server/test/nebius.test.ts`;
+  backend checks: `npm run typecheck:backend` and `npm run test:backend`.
+- `node --import tsx apps/room-server/test/nebius-live.ts` is a no-network preview.
+  With approval to spend credits, run `node --env-file=.env.local --import tsx
+  apps/room-server/test/nebius-live.ts --live`. It makes at most six synthetic
+  inference calls using a temporary real room server, verifies HTTP/WebSocket
+  triggers and unchanged canvas records, prints JSON results and cleans its own
+  data. This is live backend coverage, not native UI or downstream agent coverage.
+- Add `--publish` to `--live` to publish a completed synthetic evaluation through
+  Nebius's `POST /v1/datasets` API, with no manual website upload. Use
+  `node --env-file=.env.local --import tsx apps/room-server/test/nebius-live.ts
+  --publish-existing` to publish the recorded root
+  `nebius-classifier-evaluation.jsonl` without running inference. Both publication
+  modes require approval to store the synthetic results in the Nebius account;
+  neither changes organization-wide retention nor logs real room conversations.
+- Publishing validates all six fixture inputs and scores, uses a content-derived
+  dataset name to reuse identical results, waits for READY and verifies every
+  stored row. It never overwrites/deletes datasets or automatically retries a
+  write. History and model decisions are JSON-encoded string columns. Data Lab
+  displays application-scored results, not a Nebius-managed evaluation job.
+  Checks: `node --import tsx --test apps/room-server/test/nebius-datalab.test.ts`.
+
 ## Prompts and timestamped conversation tests
 
 - All behavioral prompt text lives in `packages/protocol/src/prompts.ts`: shared
