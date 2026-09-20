@@ -503,3 +503,46 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   driver running. `--live` exercises the connected provider. It uses a temporary
   canvas and restores the page; do not drive concurrently. `TAURI_WEBDRIVER_URL`
   selects an isolated app. No agent-side post-generation review pass is used.
+
+## Galtea native evaluations
+
+- `node scripts/galtea.mjs <CLI arguments>` runs `galtea-cli==5.2.0` through
+  `uv`, loading `GALTEA_API_KEY` or `GALTEA` from the ignored root `.env.local`.
+  Never enable verbose HTTP logging: it exposes the Authorization header.
+- `scripts/galtea-evaluate.mjs` manages generated datasets, explicit versions,
+  result ingestion and summaries. Generation and judging consume Galtea credits.
+  Runtime evidence lives in ignored `galtea-results.local/`; it contains synthetic
+  fixtures only. Existing manifests and uploaded evaluations are reused.
+- `TAURI_WEBDRIVER_URL=http://127.0.0.1:4448 node scripts/galtea-native.e2e.mjs
+  <version-label> [suite-or-case-id]` runs the actual native AgentProvider, Rust
+  ACP connection, local completion validation and tldraw executor. Use a separate
+  app identifier and Vite port when other agents are working. The comparison
+  pins `gpt-5-6-luna-high`, matching the captured baseline.
+- `--baseline` uses the archived original executor, never restores old code over
+  the working tree. `--replay` applies previously recorded provider output and
+  must not be described as a fresh model call. Dynamic executor imports use a
+  versioned URL: importing the same bare path can reuse stale WKWebView code even
+  after HMR. Each new run records the executor hash.
+- `npm run test:desktop` includes batch-write regression and deterministic scoring
+  checks. `KAN_GALTEA_CANVAS_MODULE=/absolute/path/to/baseline-canvas.ts` selects an
+  archived executor for the batch regression test; the old implementation fails
+  seven checks. `node scripts/galtea-report.mjs` builds the local HTML evidence pack
+  after the discovery and held-out versions have been run and scored.
+- Round 2 uses `node scripts/galtea-round2.mjs prepare` to upload 20 curated
+  cases (five ordinary, compound, protection and conversation cases each) and
+  freeze both executors. It requires the existing Round 1 baseline artifacts.
+  Run `scripts/galtea-native.e2e.mjs round2-before --round2 --baseline`, then
+  `round2-after --round2`, and `round2-repeats --round2 --repeats`, with the
+  isolated driver URL above. Never drive two native runs concurrently.
+- Round 2 retains real local thread entries and canvas state within each three-turn
+  conversation. Expected values, protected fields, IDs and binding endpoints are
+  checked independently of emitted operations. Model-format and application errors
+  remain failures; the three predeclared repeats never replace first-pass results.
+  The harness records raw synthetic structured responses locally for diagnosis.
+- `node scripts/galtea-round2.mjs submit|results <label>` ingests complete sessions
+  and scores them in Galtea. `audit <label>...` checks fixture isolation/history;
+  `summary` aggregates the three versions. `node scripts/galtea-report.mjs --round2`
+  writes `submission-round2.html` without overwriting the original evidence page.
+  Round 2 uses uploaded curated cases, not new Galtea-generated prompts. API judge
+  metrics require `input` and `actual_output`; `conversation_turns` is rejected by
+  the current API, so complete conversations are ingested as session traces.
