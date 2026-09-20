@@ -56,7 +56,8 @@ try {
   run("document.querySelector('aside[aria-label=Thread] textarea').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); return true;");
   await wait(`document.querySelector('aside[aria-label=Thread]').textContent.includes(${JSON.stringify(`${marker} chat message`)})`);
   drive("fill", "aside[aria-label=Thread] textarea", `${marker} unsent draft`);
-  drive("clickText", "Messages");
+  drive("click", "[data-testid=thread-search-toggle]");
+  drive("fill", "[data-testid=thread-search]", marker);
   run("window.dispatchEvent(new ErrorEvent('error',{message:'QA synthetic error token=qa-fixture-private'})); return true;");
   drive("clickText", "Report bug");
   await wait("!!document.querySelector('#qa-description')");
@@ -72,13 +73,13 @@ try {
   assert.deepEqual(blank.context.canvas.value.selectedShapeIds, [shapeId]);
   assert.ok(blank.context.chat.value.entries.some(entry => entry.text === `${marker} chat message`));
   assert.equal(blank.context.composer.value.text, `${marker} unsent draft`);
-  assert.equal(blank.context.threadView.value.filter, "messages");
+  assert.equal(blank.context.threadView.value.search, marker);
   assert.equal(typeof blank.context.agent.value.busy, "boolean");
   assert.ok(blank.errors.some(error => error.message.includes("QA synthetic error")));
   assert.ok(!JSON.stringify(blank).includes("qa-fixture-private"));
   assert.equal(blank.runtime.os, "macos");
   assert.equal(queueCommand("list")[0].status, "open");
-  console.log("PASS blank description, real native persistence, opening-time canvas snapshot, selection, chat, draft, filter, agent state, redacted errors");
+  console.log("PASS blank description, real native persistence, opening-time canvas snapshot, selection, chat, draft, search, agent state, redacted errors");
 
   drive("clickText", "Report bug");
   await wait("!!document.querySelector('#qa-description')");

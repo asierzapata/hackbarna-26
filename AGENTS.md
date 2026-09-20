@@ -474,3 +474,35 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   before subscription (`OT_INVALID_PARAMETER`, code 1011). Keep the SDK option
   compatibility assertion in the transcription test; an unconstrained mock missed
   this integration failure.
+
+## Thread panel header
+
+- The header is one row: `Thread` badge, channel, the assistant chip, search,
+  close. The three-way filter tabs (Everything / Messages / Agent activity) are
+  gone; `buildThreadRows(entries, search, view)` takes a search query instead,
+  matched by `matchesSearch` over body text plus anchors, attachments, agent
+  step summaries, suggestion quotes and offer titles. Contextual and propose
+  triggers are now always hidden, since only the deleted tab revealed them.
+- `AssistantMenu` (`components/thread/AssistantMenu.tsx`) is the single
+  assistant control. Scope, eagerness, background checks and the room pause all
+  live in it. `lib/assistant-settings.ts` collapses scope+eagerness into one
+  `ChimeIn` ladder (`asked` = `scope: "manual"`, then the four eagerness
+  levels). It derives rather than migrates: `kan-assistant:<roomId>` and the
+  server's `assistantEagerness` keep their existing shape. Whose triggers the
+  agent runs (`own` vs `room`) stays a separate switch, shown only online.
+- Assistant settings are read at **first render**, not restored in an effect.
+  A reader effect and the writer effect run in the same commit, so the writer
+  persisted the defaults over the restore and StrictMode's second pass read
+  those defaults back: every setting reverted on reload. Room changes reset the
+  state during render for the same reason.
+- `ThreadPanel` has three slots: `headerAction` (the chip), `status` (one
+  transient line, rendered only when non-empty: agent busy with Cancel, then
+  errors) and `footerStatus` (ambient state such as the call transcript). Do
+  not put always-set text in `status` or the slot becomes permanent.
+- `ConversationSimulator` is a dev fixture and is mounted only under
+  `import.meta.env.DEV`. It stays a plain row rather than moving into the
+  assistant menu because a menu unmounts on click and `local-agent.e2e.mjs`
+  polls its `data-testid=conversation-simulator` dataset while it plays.
+- `lib/config.ts` treats a blank `VITE_*` key as absent. Vite injects `""` for a
+  key present but empty in `.env.local`, and the old `.min(1).optional()`
+  crashed the whole app on boot over an optional key.
