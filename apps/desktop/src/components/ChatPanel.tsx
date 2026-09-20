@@ -369,7 +369,7 @@ export function ChatPanel({
 
     try {
       const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
-      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds) : text, {
+      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds, canvasTools.getCanvas({ scope: "summary" })) : text, {
         onTrace: (traceId) => patchAgent(id, (entry) => ({ ...entry, traceId, status: "running" })),
         canvas: canvasTools && roomId ? {
           id: roomId,

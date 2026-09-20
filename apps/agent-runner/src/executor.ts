@@ -93,7 +93,7 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
     try {
       const context = contextSchema.parse(await run.request("/context"));
       const contextual = context.trigger.mode !== "act";
-      const tools: CanvasToolName[] = context.trigger.mode === "act" ? ["getCanvas", "queryData", "addNode", "updateNode", "connectNodes", "arrange"] : ["getCanvas", "queryData", "proposeNode"];
+      const tools: CanvasToolName[] = context.trigger.mode === "act" ? ["getCanvas", "queryData", "addDiagram", "addNode", "updateNode", "connectNodes", "arrange"] : ["getCanvas", "queryData", "proposeNode"];
       phase = "initialize";
       agent = await openAgentSession(options.agent, {
         signal, runId: lease.runId,

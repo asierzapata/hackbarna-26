@@ -474,3 +474,32 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   before subscription (`OT_INVALID_PARAMETER`, code 1011). Keep the SDK option
   compatibility assertion in the transcription test; an unconstrained mock missed
   this integration failure.
+
+## Prompts and timestamped conversation tests
+
+- All behavioral prompt text lives in `packages/protocol/src/prompts.ts`: shared
+  core, explicit/context modes, drawing contract, local MCP, runner and classifier.
+  `assistant-policy.ts` retains scheduling and explicit-invocation helpers.
+- A bounded `diagram` mutation creates native editable geo nodes, bound arrows,
+  and named frames in one batch. Layout is shared in `packages/nodes/src/diagram.ts`.
+  `label` updates an existing geo node's text without replacing its ID. Deploy
+  desktop and room server together when changing this shared mutation contract.
+- Literal creation/recolor commands use `directCanvasResult`, without a model call.
+  Ambiguous targets, incomplete canvas context and broader requests fall through
+  to the agent. Contextual mode still cannot mutate. Explicit drawing runs tolerate
+  newer messages, but not changes to the captured canvas or an expired lease.
+- `scripts/conversation-cases.ts` holds timestamped prompts and expected canvas
+  states. `npm run test:conversations` runs two headless scenarios against a real
+  temporary room server with controlled model responses. The color case holds the
+  first result so a second speaker arrives during creation. These fixtures address
+  Kan explicitly; they do not authorize mutations from ambient conversation.
+- `npm run test:conversations -- --live` uses the real local Devin ACP provider,
+  with native/filesystem/terminal tools denied. Optional `--model <model>` and
+  `--case colors|solar-system` narrow comparisons. It prints input/action timestamps,
+  queue-inclusive lag, execution path, actual nodes and semantic assertions.
+  `--strict-latency` also fails on any action lag of 3 seconds or more. Controlled
+  timings are not model-quality or live-provider performance evidence.
+- Native regression: `node scripts/drawing.e2e.mjs` from the catalog with the Tauri
+  driver running. `--live` exercises the connected provider. It uses a temporary
+  canvas and restores the page; do not drive concurrently. `TAURI_WEBDRIVER_URL`
+  selects an isolated app. No agent-side post-generation review pass is used.

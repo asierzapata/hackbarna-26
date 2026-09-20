@@ -7,6 +7,8 @@ import {
 import { T } from "@tldraw/validate";
 import { NodeDraftSchema, type NodeDraft } from "@kan/protocol";
 
+export { planDiagram, diagramPlacement } from "./diagram";
+
 export const KAN_NODE_TYPE = "kan-node";
 export const KAN_NODE_WIDTH = 320;
 export const KAN_NODE_HEIGHT = 200;

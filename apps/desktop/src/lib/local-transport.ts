@@ -1,4 +1,4 @@
-import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, DEFAULT_EAGERNESS, eagernessPacing, type AssistantEagerness, EntrySchema, explicitInvocation, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
+import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, DEFAULT_EAGERNESS, eagernessPacing, type AssistantEagerness, EntrySchema, explicitInvocation, isDrawingResult, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
 import { toViewEntry, type RoomTransport, type SendInput, type RoomSnapshot } from "./room-transport";
 import type { AssistantPreferences } from "./assistant-controller";
 import type { ThreadEntry } from "./thread";
@@ -25,7 +25,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
   const listeners = new Set<(entry: ThreadEntry) => void>();
   const snapshots = new Set<(snapshot: RoomSnapshot) => void>();
   const leases = new Map<string, Lease>();
-  const contexts = new Map<string, { revision: string; entryIds: Set<string>; shapes: LocalCanvasRecord[]; value: unknown }>();
+  const contexts = new Map<string, { revision: string; canvasRevision: string; entryIds: Set<string>; shapes: LocalCanvasRecord[]; value: unknown }>();
   const completions = new Set<string>();
   const fresh = new Set<string>();
   let entries: Entry[] = [];
@@ -99,6 +99,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
     queue = task.then(() => undefined, () => undefined);
     return task;
   };
+  const canvasRevision = () => JSON.stringify([...options.getCanvas()].sort((a, b) => a.id.localeCompare(b.id)));
   const revision = async () => {
     const shapes = [...options.getCanvas()].sort((a, b) => a.id.localeCompare(b.id));
     const humanSeq = Math.max(0, ...entries.filter((entry) => entry.kind === "message").map((entry) => entry.seq));
@@ -210,7 +211,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
         const causeEntries = entries.filter((entry) => trigger.causeEntryIds.includes(entry.id));
         const rev = await revision();
         const value = { trigger, causeEntries, recentEntries, canvas: { shapes, truncated: allShapes.length > shapes.length }, revision: rev };
-        contexts.set(runId, { revision: rev, entryIds: new Set([...causeEntries, ...recentEntries].map((entry) => entry.id)), shapes, value });
+        contexts.set(runId, { revision: rev, canvasRevision: canvasRevision(), entryIds: new Set([...causeEntries, ...recentEntries].map((entry) => entry.id)), shapes, value });
         return { revision: rev, value };
       });
     },
@@ -233,7 +234,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
         }
         if (await revision() !== context.revision) {
           if (trigger.mode !== "act") result = { kind: "silent" };
-          else if (result.kind !== "reply") throw new Error("The canvas or discussion changed. Retry this request with current context.");
+          else if (result.kind !== "reply" && !(trigger.source === "explicit" && isDrawingResult(result) && canvasRevision() === context.canvasRevision)) throw new Error("The canvas or discussion changed. Retry this request with current context.");
         }
         if (result.kind === "act") turn.touchedShapeIds = options.applyOperations(result.operations, { entryId: turn.id, runId, agentId, byUserId: options.userId });
         if (result.kind === "offer") entries.push({ ...base(), kind: "offer", triggerId: trigger.id, runId, title: result.title, request: result.request, text: result.text, sources: result.sources, status: "open", resolvedBy: null, resultTriggerId: null, revision: context.revision });
