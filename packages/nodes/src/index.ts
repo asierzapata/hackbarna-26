@@ -12,6 +12,7 @@ export { planDiagram, diagramPlacement } from "./diagram";
 export const KAN_NODE_TYPE = "kan-node";
 export const KAN_MAP_TYPE = "kan-map";
 export const KAN_TABLE_TYPE = "kan-table";
+export const KAN_LOGO_TYPE = "kan-logo";
 export const KAN_NODE_WIDTH = 320;
 export const KAN_NODE_HEIGHT = 200;
 
@@ -19,6 +20,7 @@ export function kanNodeSize(type: NodeDraft["type"]) {
   if (type === "calendar") return { w: 520, h: 560 };
   if (type === "map") return { w: 480, h: 360 };
   if (type === "table") return { w: 480, h: 280 };
+  if (type === "logo") return { w: 160, h: 160 };
   return { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT };
 }
 
@@ -64,6 +66,14 @@ export const kanTableShapeProps = {
   selectedRows: T.arrayOf(T.number),
 };
 
+export const kanLogoShapeProps = {
+  w: T.positiveNumber,
+  h: T.positiveNumber,
+  domain: T.string,
+  name: T.string,
+  note: T.string,
+};
+
 export const kanShapeProps = {
   w: T.positiveNumber,
   h: T.positiveNumber,
@@ -79,6 +89,7 @@ export function createKanSchema() {
       [KAN_NODE_TYPE]: { props: kanShapeProps },
       [KAN_MAP_TYPE]: { props: kanMapShapeProps },
       [KAN_TABLE_TYPE]: { props: kanTableShapeProps },
+      [KAN_LOGO_TYPE]: { props: kanLogoShapeProps },
     },
     bindings: defaultBindingSchemas,
   });

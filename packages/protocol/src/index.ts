@@ -108,6 +108,12 @@ export const MapDraftSchema = z.strictObject({
   style: z.enum(["streets", "aquarelle", "light", "dark", "satellite", "outdoor"]).optional().describe("Map style; defaults to Aquarelle"),
   sourceNote: z.string().max(500).optional().describe("Source or reference for the map"),
 });
+export const LogoDraftSchema = z.strictObject({
+  type: z.literal("logo"),
+  domain: z.string().regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i).max(255).describe("Company domain, for example stripe.com"),
+  name: z.string().max(200).optional().describe("Company name"),
+  note: z.string().max(500).optional().describe("Optional context shown with the logo"),
+});
 
 const calendarDate = z.iso.date().refine((value) => value >= "0001-01-01", "Date must be in years 0001–9999");
 const calendarEvent = z.strictObject({
@@ -151,6 +157,7 @@ export const NodeDraftSchema = z.discriminatedUnion("type", [
     sourceNote: z.string().max(500).optional(),
   }),
   MapDraftSchema,
+  LogoDraftSchema,
 ]).refine((v) => boundedJson(12, 50_000, MAX_JSON_BYTES, 20_000).safeParse(v).success, "draft exceeds JSON bounds");
 export const SnapshotRecordSchema = boundedJson(16, 50_000, 96 * 1024, 20_000);
 export type NodeDraft = z.infer<typeof NodeDraftSchema>;
