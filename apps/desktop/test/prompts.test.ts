@@ -11,6 +11,32 @@ test("all execution prompts share the same core and only contextual mode prefers
   assert.doesNotMatch(buildAssistantPrompt("context", {}), /"type":"diagram"/);
 });
 
+test("execution prompts default substantive work to the canvas without duplicating it in chat", () => {
+  const input = context("Compare three launch ideas");
+  for (const prompt of [buildAssistantPrompt("act", input), buildCanvasPrompt(input.causeEntries[0].text), buildRunnerPrompt(input)]) {
+    assert.match(prompt, /Default to useful canvas artifacts/);
+    assert.match(prompt, /even when the user does not explicitly say "draw" or "put it on the canvas"/);
+    assert.match(prompt, /Honor explicit chat-only or no-edit requests/);
+    assert.match(prompt, /Do not repeat the artifact's contents in chat/);
+    assert.match(prompt, /prefer targeted updates over duplicates/);
+  }
+  assert.match(buildAssistantPrompt("act", input), /Prefer an act result with concrete operations/);
+  assert.doesNotMatch(buildAssistantPrompt("act", input), /Requests to discuss a topic can receive a brief useful answer without canvas changes/);
+});
+
+test("canvas-first guidance preserves preview-only modes and concise chat exceptions", () => {
+  for (const mode of ["context", "propose"] as const) {
+    const prompt = buildAssistantPrompt(mode, {});
+    assert.match(prompt, /NEVER return act or mutate the canvas/);
+    assert.match(prompt, /Prefer silence/);
+    assert.match(prompt, /prefer a concrete canvas draft or bounded offer over a long chat reply/);
+    assert.doesNotMatch(prompt, /Prefer an act result with concrete operations/);
+  }
+  assert.match(buildRunnerPrompt({ ...context("Compare options"), trigger: { mode: "propose" } }), /In propose mode do not mutate: call proposeNode for human acceptance/);
+  assert.match(CORE_INSTRUCTIONS, /greetings, simple factual answers, essential clarifications/);
+  assert.match(CORE_INSTRUCTIONS, /When canvas edits are authorized/);
+});
+
 test("drawing path omits unrelated rich node contracts without narrowing compound or edit requests", () => {
   assert.equal(isDiagramRequest(context("Draw a flowchart with branches")), true);
   const full = buildAssistantPrompt("act", context("Create a calendar and food options"));
