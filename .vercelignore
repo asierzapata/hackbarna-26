@@ -13,6 +13,7 @@
 !apps/site/public
 !apps/site/public/app-icon.png
 !apps/site/public/favicon.svg
+!apps/site/public/screenshot-kan.png
 !apps/site/public/kan-alpha.dmg
 !apps/desktop
 !apps/desktop/package.json
