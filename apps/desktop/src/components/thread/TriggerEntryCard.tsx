@@ -25,7 +25,7 @@ export function TriggerEntryCard({ entry }: { entry: TriggerEntry }) {
   return (
     <Message align="start">
       <MessageContent>
-        <Bubble variant="ghost" className="w-full border border-border bg-muted p-3">
+        <Bubble variant="ghost" className="w-full rounded-lg bg-muted/60 p-3">
           <BubbleContent className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{labels[entry.status]}</Badge>

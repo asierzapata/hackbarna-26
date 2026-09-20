@@ -689,3 +689,15 @@ rejects other host architectures so it cannot silently replace the advertised
 Apple Silicon download with an incompatible binary. Ad-hoc signing is not Apple
 notarization; retain the site's Gatekeeper warning. Do not ship an automation
 build or substitute a previous DMG when a fresh build fails.
+
+## Desktop visual language
+
+- Prefer Mac-native clarity: system sans-serif typography, neutral surfaces, blue
+  interaction accents, and restrained translucency. Keep canvas content solid.
+- Shared radii live in `apps/desktop/src/styles.css`: xs 4px, sm 6px, md 8px,
+  lg 12px, xl 16px. Controls use md, menus lg, cards/dialogs xl. Retain square
+  inner edges for joined controls and circular slider/scrollbar handles.
+- Composer disabled styling must target the input control, not any disabled
+  descendant: an empty draft disables Send but must not fade the textarea.
+- UI styling can be checked in an isolated native instance with a separate app
+  identifier, Vite port and WebDriver port; do not drive the user's active window.

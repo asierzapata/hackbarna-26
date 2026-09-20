@@ -60,7 +60,7 @@ export function JoinRoomDialog({ open, onClose, onJoined }: JoinRoomDialogProps)
       aria-labelledby="join-dialog-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
         <div className="flex items-center gap-2 text-foreground font-heading font-medium">
           <RiLoginBoxLine className="size-5 text-primary" />
           <h2 id="join-dialog-title" className="text-base">
@@ -75,7 +75,7 @@ export function JoinRoomDialog({ open, onClose, onJoined }: JoinRoomDialogProps)
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
-            <label htmlFor="join-code-input" className="text-xs font-mono font-medium text-foreground">
+            <label htmlFor="join-code-input" className="text-sm font-sans font-medium text-foreground">
               Invite code
             </label>
             <Input

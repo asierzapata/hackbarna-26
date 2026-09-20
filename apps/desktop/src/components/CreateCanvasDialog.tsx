@@ -65,7 +65,7 @@ function ModeCard({
       disabled={disabled}
       onClick={onSelect}
       className={cn(
-        "flex flex-1 flex-col gap-1.5 border p-3 text-left transition-colors",
+        "flex flex-1 flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         selected
           ? "border-primary bg-primary/5"
@@ -77,11 +77,11 @@ function ModeCard({
         {icon}
         {title}
       </span>
-      <span className="text-[11px] leading-snug text-muted-foreground">
+      <span className="text-xs leading-snug text-muted-foreground">
         {description}
       </span>
       {note ? (
-        <span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground/80">
+        <span className="text-xs font-mono uppercase tracking-wide text-muted-foreground/80">
           {note}
         </span>
       ) : null}
@@ -176,7 +176,7 @@ export function CreateCanvasDialog({
       }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
         <div className="flex items-center gap-2 text-foreground font-heading font-medium">
           <RiAddLine className="size-5 text-primary" />
           <h2 id="create-canvas-title" className="text-base">
@@ -188,7 +188,7 @@ export function CreateCanvasDialog({
           <div className="space-y-1.5">
             <label
               htmlFor="create-canvas-name"
-              className="text-xs font-mono font-medium text-foreground"
+              className="text-sm font-sans font-medium text-foreground"
             >
               Name
             </label>
@@ -209,7 +209,7 @@ export function CreateCanvasDialog({
             role="radiogroup"
             aria-label="Where this canvas lives"
           >
-            <span className="text-xs font-mono font-medium text-foreground">
+            <span className="text-sm font-sans font-medium text-foreground">
               Where it lives
             </span>
             <div className="flex items-stretch gap-2">
@@ -239,7 +239,7 @@ export function CreateCanvasDialog({
                 }
               />
             </div>
-            <p className="text-[11px] leading-snug text-muted-foreground">
+            <p className="text-xs leading-snug text-muted-foreground">
               {mode === "online"
                 ? "An online canvas stays online. You can always duplicate it into a separate offline copy."
                 : "You can make an offline canvas online later, but not the other way around."}

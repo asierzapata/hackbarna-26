@@ -37,7 +37,7 @@ function MediaButtons({ controls, compact = false }: { controls: LocalMediaContr
       const enabled = !!device.track || device.pending;
       const label = kind === "audio" ? enabled ? "Mute microphone" : "Unmute microphone" : enabled ? "Turn camera off" : "Turn camera on";
       const Icon = kind === "audio" ? enabled ? RiMicLine : RiMicOffLine : enabled ? RiVideoOnLine : RiVideoOffLine;
-      return <Button key={kind} size={compact ? "icon-xs" : "default"} variant={enabled ? "secondary" : "outline"} title={label} aria-label={label} aria-pressed={enabled} onClick={() => void controls.media.enable(kind, !enabled)}>
+      return <Button key={kind} size={compact ? "icon-sm" : "default"} variant={enabled ? "secondary" : "outline"} title={label} aria-label={label} aria-pressed={enabled} onClick={() => void controls.media.enable(kind, !enabled)}>
         {device.pending ? <Spinner data-icon="inline-start" /> : <Icon data-icon="inline-start" />}
         {!compact && (kind === "audio" ? enabled ? "Mic on" : "Mic off" : enabled ? "Camera on" : "Camera off")}
       </Button>;
@@ -91,10 +91,10 @@ export function RoomPrejoin({ title, name, controls, onJoin, onCancel }: {
         <MediaButtons controls={controls} />
         <p className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><RiShieldCheckLine className="size-4" />Only you can see and hear this preview.</p>
       </section>
-      <section className="flex min-w-0 flex-col gap-6">
+      <section className="room-prejoin__settings flex min-w-0 flex-col gap-6">
         <div className="flex flex-col gap-2">
-          <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground">Before you enter</p>
-          <h1 id="prejoin-title" className="text-3xl font-medium tracking-tight">Ready to join?</h1>
+          <p className="text-sm font-medium text-muted-foreground">Before you enter</p>
+          <h1 id="prejoin-title" className="text-3xl font-semibold tracking-tight">Ready to join?</h1>
           <p className="truncate text-lg" title={title}>{title}</p>
           <p className="text-sm text-muted-foreground">Check your camera and sound. Make yourself at home.</p>
           <p className="text-xs text-muted-foreground">When your microphone is on, Vonage transcribes your speech. The transcript is saved in the canvas chat, collapsed by default. Join muted to listen without being transcribed.</p>

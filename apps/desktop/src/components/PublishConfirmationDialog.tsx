@@ -26,7 +26,7 @@ export function PublishConfirmationDialog({
       aria-labelledby="publish-dialog-title"
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150"
     >
-      <div className="w-full max-w-md border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl space-y-4 animate-in zoom-in-95 duration-150">
         <div className="flex items-center gap-2 text-foreground font-heading font-medium">
           <RiCloudLine className="size-5 text-primary" />
           <h2 id="publish-dialog-title" className="text-base">

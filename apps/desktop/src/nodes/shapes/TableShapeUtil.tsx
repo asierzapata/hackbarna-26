@@ -230,7 +230,7 @@ function CompanyLogo({ domain, name }: { domain: string; name: string }) {
       data-testid={`table-company-logo-${domain.replace(/\./g, "-")}`}
     >
       {source === "initials" ? (
-        <span className="font-heading text-[10px] font-semibold text-muted-foreground">
+        <span className="font-heading text-xs font-semibold text-muted-foreground">
           {brandInitials(displayName)}
         </span>
       ) : (

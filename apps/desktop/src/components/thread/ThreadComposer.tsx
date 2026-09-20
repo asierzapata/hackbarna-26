@@ -1,5 +1,5 @@
 import * as React from "react";
-import { RiCornerDownLeftLine, RiSparkling2Line } from "@remixicon/react";
+import { RiSparkling2Line } from "@remixicon/react";
 import { explicitInvocation } from "@kan/protocol";
 
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +9,6 @@ import {
   InputGroupAddon,
   InputGroupTextarea,
 } from "@/components/ui/input-group";
-import { Kbd } from "@/components/ui/kbd";
 import {
   ModelSelectorKit,
   type AiModelSelection,
@@ -37,7 +36,7 @@ export interface ThreadComposerProps {
 
 export function ThreadComposer({
   anchors = [],
-  placeholder = "Message the canvas · Ask Kan (⌘↵) to bring in the assistant",
+  placeholder,
   replyTo,
   onClearReply,
   disabled,
@@ -71,33 +70,13 @@ export function ThreadComposer({
   }
 
   return (
-    <InputGroup className="bg-muted">
-      <InputGroupAddon align="block-start" className="justify-between">
-        {replyTo ? (
-          <Button variant="outline" size="xs" onClick={onClearReply}>
-            Replying to {replyTo.label}
-          </Button>
-        ) : null}
-        {anchors.length ? (
-          <span className="flex min-w-0 flex-wrap items-center gap-1">
-            <Badge variant="outline" className="border-agent text-agent">
-              {anchors.length} node{anchors.length === 1 ? "" : "s"} selected (
-              {anchors.map((a) => a.label).join(", ")})
-            </Badge>
-          </span>
-        ) : (
-          <span className="text-muted-foreground">no canvas anchor</span>
-        )}
-        <Kbd>
-          <RiCornerDownLeftLine />
-        </Kbd>
-      </InputGroupAddon>
-
+    <InputGroup variant="composer">
       <InputGroupTextarea
         value={text}
         disabled={disabled}
-        placeholder={placeholder}
-        rows={2}
+        placeholder={placeholder ?? (agentReady ? "Message or ask Kan…" : "Write a message…")}
+        aria-label="Message the canvas"
+        rows={3}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
@@ -107,7 +86,24 @@ export function ThreadComposer({
         }}
       />
 
-      <InputGroupAddon align="block-end" className="justify-between gap-2">
+      {replyTo || anchors.length ? (
+        <InputGroupAddon align="block-start" className="min-w-0 flex-wrap justify-start">
+          {replyTo ? (
+            <Button variant="secondary" size="xs" onClick={onClearReply} className="max-w-full">
+              <span className="truncate">Replying to {replyTo.label}</span>
+            </Button>
+          ) : null}
+          {anchors.length ? (
+            <Badge variant="secondary" className="max-w-full" title={anchors.map((a) => a.label).join(", ")}>
+              <span className="truncate">
+                {anchors.length === 1 ? anchors[0].label : `${anchors.length} items selected`}
+              </span>
+            </Badge>
+          ) : null}
+        </InputGroupAddon>
+      ) : null}
+
+      <InputGroupAddon align="block-end" className="flex-wrap justify-between gap-2">
         {modelSelection ? (
           <ModelSelectorKit
             models={models ?? []}
@@ -122,7 +118,7 @@ export function ThreadComposer({
         )}
         <span className="flex items-center gap-2">
           {agentReady ? (
-            <Button size="sm" disabled={!canSend} onClick={() => send(true)}>
+            <Button variant="agent" size="sm" disabled={!canSend} onClick={() => send(true)} title="Ask Kan (⌘/Ctrl+Enter)">
               <RiSparkling2Line data-icon="inline-start" />
               Ask Kan
             </Button>
