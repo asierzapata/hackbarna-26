@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/empty";
 import { JoinRoomDialog } from "@/components/JoinRoomDialog";
 import { CreateCanvasDialog } from "@/components/CreateCanvasDialog";
+import { DeleteCanvasDialog } from "@/components/DeleteCanvasDialog";
 import { KanBrand } from "@/components/KanBrand";
 import {
   CanvasCard,
@@ -33,6 +34,7 @@ import {
   type ServerRoomSummary,
 } from "@/lib/api-client";
 import { duplicateOnlineToOffline } from "@/lib/duplicate-canvas";
+import { deleteCanvas } from "@/lib/delete-canvas";
 
 export const Route = createFileRoute("/")({
   component: CatalogPage,
@@ -135,6 +137,9 @@ function CatalogPage() {
   const [renameDraft, setRenameDraft] = React.useState("");
   const [renameError, setRenameError] = React.useState<string | null>(null);
   const [isRenaming, setIsRenaming] = React.useState(false);
+  const [removeTargetId, setRemoveTargetId] = React.useState<string | null>(null);
+  const [removeError, setRemoveError] = React.useState<string | null>(null);
+  const [isRemoving, setIsRemoving] = React.useState(false);
 
   const refreshCatalog = React.useCallback(async () => {
     const profile = await getInstallationProfile();
@@ -205,6 +210,42 @@ function CatalogPage() {
     }
   };
 
+  const beginRemove = (item: CatalogItem) => {
+    if (isRemoving) return;
+    setRemoveTargetId(item.id);
+    setRemoveError(null);
+  };
+
+  const cancelRemove = () => {
+    if (isRemoving) return;
+    setRemoveTargetId(null);
+    setRemoveError(null);
+  };
+
+  const handleRemove = async () => {
+    const target = items.find((item) => item.id === removeTargetId);
+    if (!target) return;
+
+    setIsRemoving(true);
+    setRemoveError(null);
+    try {
+      await deleteCanvas(target.id, target.mode);
+      // Drop it from both sources rather than refetching: a full refresh would
+      // contact the server again, and the card should go the moment it is gone.
+      setLocalCanvases((canvases) =>
+        canvases.filter((canvas) => canvas.id !== target.localCanvasId),
+      );
+      setServerRooms((rooms) => rooms.filter((room) => room.id !== target.roomId));
+      setRemoveTargetId(null);
+    } catch (err) {
+      setRemoveError(
+        err instanceof Error ? err.message : "Failed to remove canvas",
+      );
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
   const beginRename = (item: CatalogItem) => {
     if (isRenaming) return;
     setRenameTargetId(item.id);
@@ -267,6 +308,8 @@ function CatalogPage() {
     }
   };
 
+  const removeTarget = items.find((item) => item.id === removeTargetId);
+
   if (loading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-background">
@@ -287,7 +330,7 @@ function CatalogPage() {
         <div className="header-bar__brand flex items-center gap-2">
           <KanBrand />
           {userName ? (
-            <span className="border-l border-border pl-2 font-mono text-xs font-normal text-muted-foreground">
+            <span className="border-l border-border pl-3 font-sans text-sm font-normal text-muted-foreground">
               {userName}
             </span>
           ) : null}
@@ -318,13 +361,13 @@ function CatalogPage() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 p-6 md:p-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="font-heading text-xl font-bold text-foreground">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 p-6 md:p-10">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-2">
+            <h1 className="font-sans text-[28px] font-semibold tracking-tight text-foreground">
               Canvases
             </h1>
-            <p className="font-sans text-xs text-muted-foreground">
+            <p className="font-sans text-sm text-muted-foreground">
               Kept on this device, or shared online for others to edit with you.
             </p>
           </div>
@@ -341,7 +384,7 @@ function CatalogPage() {
             <div
               role="radiogroup"
               aria-label="Filter canvases"
-              className="flex items-center border border-border"
+              className="flex items-center gap-0.5 rounded-lg bg-muted p-1"
             >
               {filters.map((option) => (
                 <button
@@ -352,8 +395,8 @@ function CatalogPage() {
                   onClick={() => setFilter(option.value)}
                   className={
                     filter === option.value
-                      ? "bg-primary px-2.5 py-1 font-mono text-[11px] uppercase text-primary-foreground"
-                      : "px-2.5 py-1 font-mono text-[11px] uppercase text-muted-foreground hover:bg-muted/60"
+                      ? "rounded-md bg-card px-3 py-1 text-[13px] font-medium text-foreground shadow-sm"
+                      : "rounded-md px-3 py-1 text-[13px] text-muted-foreground hover:text-foreground"
                   }
                 >
                   {option.label}
@@ -402,7 +445,7 @@ function CatalogPage() {
             </div>
           </Empty>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {visibleItems.map((item) => (
               <CanvasCard
                 key={item.id}
@@ -413,8 +456,10 @@ function CatalogPage() {
                 onDuplicate={
                   item.mode === "online" ? () => void handleDuplicate(item) : undefined
                 }
+                onRemove={() => beginRemove(item)}
                 isDuplicating={duplicatingId === item.id}
                 isRenaming={isRenaming}
+                isRemoving={isRemoving && removeTargetId === item.id}
                 renameEditor={
                   renameTargetId === item.id ? (
                     <CanvasRenameEditor
@@ -450,6 +495,17 @@ function CatalogPage() {
             params: { canvasId: canvas.localCanvasId },
           });
         }}
+      />
+
+      <DeleteCanvasDialog
+        open={removeTarget !== undefined}
+        name={removeTarget?.name ?? ""}
+        mode={removeTarget?.mode ?? "offline"}
+        inviteCode={removeTarget?.inviteCode}
+        busy={isRemoving}
+        error={removeError}
+        onConfirm={() => void handleRemove()}
+        onCancel={cancelRemove}
       />
 
       <JoinRoomDialog

@@ -220,3 +220,71 @@ test("assets: upload, owner read, member read via linked room, stranger denied, 
   });
   assert.equal(status, 413);
 });
+
+test("leaving a room removes only the leaver's membership", async (t) => {
+  const ctx = await setup();
+  t.after(() => ctx.cleanup());
+  const owner = await registerUser(ctx.base, "Owner");
+  const guest = await registerUser(ctx.base, "Guest");
+  const room = await createRoom(owner, ctx.base);
+  await api(guest, ctx.base, "/rooms/join", {
+    method: "POST",
+    body: JSON.stringify({ code: room.code }),
+  });
+
+  const left = await api(guest, ctx.base, `/rooms/${room.id}/leave`, { method: "POST" });
+  assert.equal(left.status, 200);
+
+  assert.deepEqual(
+    (await api(guest, ctx.base, "/rooms")).body.rooms.map((r: any) => r.id),
+    [],
+  );
+  assert.deepEqual(
+    (await api(owner, ctx.base, "/rooms")).body.rooms.map((r: any) => r.id),
+    [room.id],
+  );
+  // The room itself is untouched, and the leaver is now an outsider to it.
+  assert.equal((await api(owner, ctx.base, `/rooms/${room.id}`)).status, 200);
+  assert.equal((await api(guest, ctx.base, `/rooms/${room.id}`)).status, 403);
+  assert.equal((await api(guest, ctx.base, `/rooms/${room.id}/leave`, { method: "POST" })).status, 403);
+
+  const thread = await api(owner, ctx.base, `/rooms/${room.id}/thread`);
+  assert.ok(
+    thread.body.entries.some((e: any) => e.kind === "system" && e.text === "Guest left the room"),
+    JSON.stringify(thread.body.entries),
+  );
+});
+
+test("rejoining by code after leaving restores membership and the canvas", async (t) => {
+  const ctx = await setup();
+  t.after(() => ctx.cleanup());
+  const owner = await registerUser(ctx.base, "Owner");
+  const room = await createRoom(owner, ctx.base, {
+    messages: [{ id: randomUUID(), text: "before", at: new Date().toISOString() }],
+  });
+
+  assert.equal((await api(owner, ctx.base, `/rooms/${room.id}/leave`, { method: "POST" })).status, 200);
+  assert.deepEqual((await api(owner, ctx.base, "/rooms")).body.rooms, []);
+
+  const rejoin = await api(owner, ctx.base, "/rooms/join", {
+    method: "POST",
+    body: JSON.stringify({ code: room.code }),
+  });
+  assert.equal(rejoin.status, 200);
+  assert.equal(rejoin.body.room.id, room.id);
+  const thread = await api(owner, ctx.base, `/rooms/${room.id}/thread`);
+  assert.ok(thread.body.entries.some((e: any) => e.text === "before"));
+});
+
+test("leaving a room the caller is not in or that does not exist is rejected", async (t) => {
+  const ctx = await setup();
+  t.after(() => ctx.cleanup());
+  const owner = await registerUser(ctx.base, "Owner");
+  const outsider = await registerUser(ctx.base, "Outsider");
+  const room = await createRoom(owner, ctx.base);
+
+  assert.equal((await api(outsider, ctx.base, `/rooms/${room.id}/leave`, { method: "POST" })).status, 403);
+  assert.equal((await api(owner, ctx.base, `/rooms/${randomUUID()}/leave`, { method: "POST" })).status, 404);
+  assert.equal((await api(null, ctx.base, `/rooms/${room.id}/leave`, { method: "POST" })).status, 401);
+  assert.equal((await api(owner, ctx.base, "/rooms")).body.rooms.length, 1);
+});

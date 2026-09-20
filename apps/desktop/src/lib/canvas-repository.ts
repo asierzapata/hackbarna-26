@@ -266,3 +266,53 @@ export async function clearPublishJournal(localCanvasId: string): Promise<void> 
     // Ignore cleanup failure
   }
 }
+
+/**
+ * tldraw stores each canvas in its own IndexedDB database named after the
+ * persistence key, and keeps a registry of those names in localStorage. It
+ * exposes no per-document delete, so we do both halves here. Leaving the
+ * registry entry behind would leave tldraw listing a database that no longer
+ * exists.
+ */
+const TLDRAW_DB_PREFIX = "TLDRAW_DOCUMENT_v2";
+const TLDRAW_DB_NAME_INDEX = "TLDRAW_DB_NAME_INDEX_v2";
+
+export async function deleteCanvasDocument(localPersistenceKey: string): Promise<void> {
+  const dbName = `${TLDRAW_DB_PREFIX}${localPersistenceKey}`;
+
+  if (typeof localStorage !== "undefined") {
+    try {
+      const names = JSON.parse(localStorage.getItem(TLDRAW_DB_NAME_INDEX) || "[]") as unknown;
+      if (Array.isArray(names)) {
+        localStorage.setItem(
+          TLDRAW_DB_NAME_INDEX,
+          JSON.stringify(names.filter((name) => name !== dbName)),
+        );
+      }
+    } catch (err) {
+      console.warn(`Could not prune the tldraw database index for ${dbName}:`, err);
+    }
+  }
+
+  if (typeof indexedDB === "undefined") return;
+
+  await new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase(dbName);
+    if (!req) {
+      resolve();
+      return;
+    }
+    req.onsuccess = () => resolve();
+    // A still-open editor connection blocks the delete, and an error leaves the
+    // database in place. Neither should strand the user with an undeletable
+    // card, so both resolve: the catalog entry is already gone by this point.
+    req.onblocked = () => {
+      console.warn(`Deleting ${dbName} is blocked by an open connection`);
+      resolve();
+    };
+    req.onerror = () => {
+      console.warn(`Could not delete ${dbName}:`, req.error);
+      resolve();
+    };
+  });
+}

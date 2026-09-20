@@ -427,7 +427,12 @@ export function ChatPanel({
         ? activity.steps
         : (entry.steps?.length ? entry.steps : finishedSteps.current.get(entry.traceId ?? "") ?? []);
       if (!steps.length && !live) return entry;
-      return { ...entry, steps, thought: live ? activity.thought : undefined };
+      return {
+        ...entry,
+        steps,
+        thought: live ? activity.thought : undefined,
+        thinking: live ? !!activity.thoughtBuffer : undefined,
+      };
     },
     [activity]
   );

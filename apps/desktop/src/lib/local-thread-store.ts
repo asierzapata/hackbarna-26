@@ -45,3 +45,18 @@ export async function localHumanMessages(canvasId: string) {
   if (messages.length > 500) throw new Error("Publishing more than 500 messages is not supported; the local history is preserved.");
   return messages.map(({ id, text, at, anchors, source }) => ({ id, text, at, anchors, source }));
 }
+
+/**
+ * Drops a canvas's offline thread. Not on `LocalThreadStorage`: the interface
+ * is what `local-transport` swaps out in tests, and deletion is a catalog
+ * concern rather than something a live thread ever does to itself.
+ */
+export async function deleteLocalThread(canvasId: string): Promise<void> {
+  const db = await openThreadDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("entries", "readwrite");
+    tx.objectStore("entries").delete(canvasId);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onabort = tx.onerror = () => { db.close(); reject(tx.error ?? new Error("Could not delete the thread")); };
+  });
+}

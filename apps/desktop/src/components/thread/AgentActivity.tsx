@@ -21,11 +21,14 @@ import { useThread } from "./thread-context";
 export function AgentActivity({
   steps = [],
   thought,
+  thinking = false,
   running = false,
   durationMs,
 }: {
   steps?: AgentStep[];
   thought?: string;
+  /** Reasoning is streaming, even before a whole sentence is ready to show. */
+  thinking?: boolean;
   running?: boolean;
   durationMs?: number;
 }) {
@@ -47,7 +50,7 @@ export function AgentActivity({
           className="flex items-center gap-2 text-xs text-muted-foreground"
         >
           <Spinner className="size-3 shrink-0" aria-hidden />
-          <span className="shimmer">{activityLabel(steps, thought)}</span>
+          <span className="shimmer">{activityLabel(steps, thinking || !!thought)}</span>
         </div>
       ) : (
         <button
@@ -76,7 +79,7 @@ export function AgentActivity({
       {running && thought ? (
         <p
           data-testid="agent-thought"
-          className="ms-1 border-s border-border ps-3 text-[11px] leading-relaxed text-muted-foreground/80 italic"
+          className="ms-1 border-s border-border ps-3 text-xs leading-relaxed text-muted-foreground/80 italic"
         >
           {thought}
         </p>

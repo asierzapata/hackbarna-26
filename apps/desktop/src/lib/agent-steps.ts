@@ -127,14 +127,35 @@ export function stepsFromMutations(operations: readonly Mutation[]): AgentStep[]
   }));
 }
 
+/**
+ * The one line of reasoning to show, from everything streamed so far.
+ *
+ * Thought chunks arrive a word or two at a time. Painting each chunk made the
+ * line flash single tokens, which is unreadable and looks broken, so the
+ * caller accumulates instead and this picks the last *finished* sentence: the
+ * line then changes once per thought rather than once per token. A sentence
+ * still being typed stays hidden behind the one before it.
+ */
+const SENTENCE = /[^.!?\u2026\n]+[.!?\u2026]+/g;
+
+export function thoughtLine(buffer: string): string {
+  const text = buffer.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const sentences = text.match(SENTENCE);
+  if (sentences?.length) return sentences[sentences.length - 1].trim();
+  // Some models never punctuate. Past a paragraph's worth, showing the
+  // unfinished thought beats showing nothing at all for the whole turn.
+  return text.length >= 100 ? text : "";
+}
+
 /** The one line shown while the turn runs. */
 export function activityLabel(
   steps: readonly AgentStep[],
-  thought?: string,
+  thinking = false,
 ): string {
   const running = [...steps].reverse().find((step) => step.state === "running" || step.state === "pending");
   if (running) return running.summary;
-  if (thought) return "Thinking";
+  if (thinking) return "Thinking";
   return steps.length ? "Finishing up" : "Working";
 }
 

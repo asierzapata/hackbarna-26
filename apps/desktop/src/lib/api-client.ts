@@ -192,6 +192,17 @@ export async function publishServerRoom(payload: {
   return res.json() as Promise<PublishResult>;
 }
 
+/**
+ * Drops this installation's membership. The room itself survives for everyone
+ * else — there is no room deletion, by design — so this is "remove it from my
+ * catalog", not "destroy the canvas".
+ */
+export async function leaveServerRoom(roomId: string): Promise<void> {
+  await ensureBackendIdentity();
+  const res = await authenticatedFetch(`/rooms/${roomId}/leave`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to leave room: ${res.status}`);
+}
+
 export async function patchServerRoom(roomId: string, input: { name?: string; assistantPaused?: boolean; assistantEagerness?: AssistantEagerness; assistantThreshold?: number; assistantCooldownMs?: number }): Promise<RoomDetailResponse> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
