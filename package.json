@@ -5,6 +5,7 @@
   "type": "module",
   "workspaces": [
     "apps/desktop",
+    "apps/site",
     "apps/room-server",
     "apps/agent-runner",
     "packages/protocol",

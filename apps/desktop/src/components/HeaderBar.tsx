@@ -12,6 +12,7 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Spinner } from "./ui/spinner";
 import { SignInButton } from "./SignInButton";
+import { KanBrand } from "./KanBrand";
 
 export interface HeaderBarProps {
   title?: string;
@@ -45,9 +46,10 @@ export function HeaderBar({
         to="/"
         className="header-bar__brand flex items-center gap-1.5 text-xs font-mono font-bold text-foreground/80 hover:text-foreground transition-colors"
         title="Back to all canvases"
+        aria-label="Back to all canvases"
       >
         <RiArrowLeftLine className="size-4" />
-        <span>// KAN</span>
+        <KanBrand />
       </Link>
 
       {title ? (

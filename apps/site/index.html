@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kan — An infinite canvas you work on with an agent</title>
+    <meta
+      name="description"
+      content="Kan is a native macOS canvas for figuring things out, with an AI agent that works the board alongside you. Alpha."
+    />
+    <meta property="og:title" content="Kan" />
+    <meta
+      property="og:description"
+      content="An infinite canvas you work on with an agent. Native macOS, alpha."
+    />
+    <meta property="og:type" content="website" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body class="bg-paper text-ink font-sans antialiased flex min-h-screen flex-col">
+    <header
+      class="fixed top-0 left-0 z-50 h-14 w-full border-b border-line bg-paper/90 backdrop-blur-md"
+    >
+     <div class="mx-auto flex h-full max-w-5xl items-center justify-between px-6 md:px-10">
+      <div class="flex items-center gap-3">
+        <a href="#" class="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
+          <span class="inline-block h-3 w-3 bg-ink"></span>
+          Kan
+        </a>
+        <span class="font-mono text-xs text-ink-subtle">macOS</span>
+        <span class="border border-line px-1.5 py-0.5 font-mono text-[10px] tracking-wide text-ink-subtle">
+          ALPHA
+        </span>
+      </div>
+
+      <nav class="hidden items-center gap-7 text-[13px] text-ink-muted md:flex">
+        <a href="#canvas" class="transition-colors hover:text-ink">Canvas</a>
+        <a href="#agents" class="transition-colors hover:text-ink">Agents</a>
+        <a href="#rooms" class="transition-colors hover:text-ink">Rooms</a>
+        <a href="#built" class="transition-colors hover:text-ink">How it's built</a>
+      </nav>
+
+      <a
+        href="#download"
+        class="inline-flex items-center bg-ink px-3.5 py-1.5 text-[13px] font-medium text-white transition-colors hover:bg-black"
+      >
+        Download the alpha
+      </a>
+     </div>
+    </header>
+
+    <main class="grow pt-14">
+      <!-- HERO -->
+      <section class="mx-auto max-w-5xl px-6 pt-20 pb-16 md:px-10">
+        <p class="mb-4 font-mono text-xs tracking-wider text-ink-subtle uppercase">
+          A desktop canvas for thought
+        </p>
+        <h1 class="max-w-3xl text-3xl leading-[1.15] font-semibold tracking-tight sm:text-4xl md:text-5xl">
+          Think on an infinite canvas.<br />An agent works it with you.
+        </h1>
+        <p class="mt-6 max-w-2xl text-base leading-relaxed text-ink-muted sm:text-lg">
+          Kan is a native macOS app for figuring things out. Spread your notes, tables, diagrams
+          and references across one freeform space. When you want help, an agent reads the board
+          and works on it next to you, placing and connecting things while you watch.
+        </p>
+
+        <div class="mt-8 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+          <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
+          <a
+            href="/kan-alpha.dmg"
+            class="inline-flex items-center justify-center bg-ink px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-black"
+          >
+            Download the alpha
+          </a>
+          <a
+            href="#canvas"
+            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm text-ink-muted transition-colors hover:text-ink"
+          >
+            See how the canvas works
+            <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+              <path d="M8 2v9.2L4.4 7.6 3 9l5 5 5-5-1.4-1.4L8 11.2V2z" />
+            </svg>
+          </a>
+        </div>
+
+        <div class="mt-10 grid grid-cols-1 gap-4 border-t border-line pt-6 text-xs text-ink-muted sm:grid-cols-3">
+          <div>
+            <span class="block font-medium text-ink">This is an alpha</span>
+            Early, rough in places, and changing quickly.
+          </div>
+          <div>
+            <span class="block font-medium text-ink">Your canvases stay on your Mac</span>
+            Solo boards are stored locally and work offline.
+          </div>
+          <div>
+            <span class="block font-medium text-ink">Your own agent subscription</span>
+            Kan never holds a model token of yours.
+          </div>
+        </div>
+      </section>
+
+      <!-- CANVAS PREVIEW -->
+      <section id="canvas" class="relative overflow-hidden border-y border-line">
+        <div
+          class="flex items-center justify-between border-b border-line bg-card/60 px-6 py-2.5 font-mono text-xs text-ink-subtle"
+        >
+          <div class="flex items-center gap-3">
+            <span class="font-medium text-ink">Team offsite</span>
+            <span class="text-line">/</span>
+            <span>Canvas</span>
+          </div>
+          <div class="flex items-center gap-4">
+            <span class="flex items-center gap-1.5 text-agent">
+              <span class="inline-block h-1.5 w-1.5 bg-agent"></span>
+              Agent working
+            </span>
+            <span class="hidden text-line sm:inline">|</span>
+            <span class="hidden sm:inline">100%</span>
+          </div>
+        </div>
+
+        <div
+          class="canvas-dots relative flex w-full flex-col gap-4 overflow-hidden p-6 select-none md:block md:h-[620px] md:p-12"
+        >
+
+          <!-- What the human put down -->
+          <div class="w-full border border-line bg-card p-5 shadow-sm md:absolute md:top-20 md:left-20 md:w-80">
+            <div class="flex items-center justify-between border-b border-line-subtle pb-3 font-mono text-xs text-ink-subtle">
+              <span>Note</span>
+              <span>Edited 10m ago</span>
+            </div>
+            <div class="mt-3">
+              <h3 class="text-sm font-semibold">Two days, twenty people</h3>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">
+                Somewhere within an hour of the city. Half the second day kept free for the
+                workshop. Needs a schedule people can actually read.
+              </p>
+            </div>
+          </div>
+
+          <!-- What the agent is doing about it -->
+          <div class="w-full border border-agent bg-card p-4 shadow-sm md:absolute md:top-24 md:left-[43%] md:z-10 md:w-84 md:max-w-[340px]">
+            <div class="flex items-center justify-between border-b border-line-subtle pb-2.5 text-xs">
+              <div class="flex items-center gap-1.5 font-medium text-agent">
+                <span class="inline-block h-1.5 w-1.5 bg-agent"></span>
+                <span>Devin · Working</span>
+              </div>
+              <span class="font-mono text-[11px] text-ink-subtle">on this board</span>
+            </div>
+            <div class="mt-3 space-y-2 text-xs">
+              <p>Building the schedule from your note and laying it out beside it.</p>
+              <div class="border border-line bg-paper p-2.5 font-mono text-[11px] leading-relaxed text-ink-muted">
+                added calendar · 2 days<br />
+                added table · sessions<br />
+                connecting to note…
+              </div>
+            </div>
+          </div>
+
+          <!-- What it wants a human to decide -->
+          <div class="w-full border border-human-line bg-card p-5 shadow-sm md:absolute md:top-36 md:right-24 md:z-10 md:w-80">
+            <div class="flex items-center justify-between border-b border-line-subtle pb-2.5 text-xs">
+              <div class="flex items-center gap-1.5 font-medium text-human">
+                <span class="inline-block h-1.5 w-1.5 bg-human-line"></span>
+                <span>Suggestion</span>
+              </div>
+              <span class="font-mono text-[11px] text-ink-subtle">Your call</span>
+            </div>
+            <div class="mt-3">
+              <h4 class="text-xs font-semibold">Add a map of the venue?</h4>
+              <p class="mt-1 text-xs leading-relaxed text-ink-muted">
+                There is travel time in three of the sessions. A map next to the schedule would
+                make it obvious which ones are tight.
+              </p>
+              <div class="mt-4 flex gap-2">
+                <button class="border border-human-line bg-human-soft px-2.5 py-1 text-xs font-medium text-human transition-colors hover:bg-human-line hover:text-white">
+                  Add it
+                </button>
+                <button class="border border-line bg-paper px-2.5 py-1 text-xs text-ink-muted transition-colors hover:text-ink">
+                  Not now
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="w-full border border-line bg-card p-4 shadow-sm md:absolute md:bottom-14 md:left-24 md:w-72">
+            <div class="border-b border-line-subtle pb-1 font-mono text-[11px] text-ink-subtle">
+              Still open
+            </div>
+            <p class="mt-2 text-xs leading-relaxed text-ink-muted">
+              Budget per head?<br />
+              Who runs the workshop?
+            </p>
+          </div>
+
+          <div
+            class="mx-auto flex items-center gap-1 border border-line bg-card px-2 py-1.5 text-xs shadow-sm md:absolute md:bottom-5 md:left-1/2 md:mx-0 md:-translate-x-1/2"
+          >
+            <span class="flex h-7 w-7 items-center justify-center border border-line bg-paper">
+              <svg viewBox="0 0 16 16" class="h-4 w-4" fill="currentColor" aria-hidden="true"><path d="M3 1l10 6-4.2 1.3L7.5 15z"/></svg>
+            </span>
+            <span class="flex h-7 w-7 items-center justify-center text-ink-muted">
+              <svg viewBox="0 0 16 16" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11"/></svg>
+            </span>
+            <span class="flex h-7 w-7 items-center justify-center text-ink-muted">
+              <svg viewBox="0 0 16 16" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg>
+            </span>
+            <span class="flex h-7 w-7 items-center justify-center text-ink-muted">
+              <svg viewBox="0 0 16 16" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 8h11M9.5 4.5L13 8l-3.5 3.5"/></svg>
+            </span>
+            <span class="mx-1 h-4 w-px bg-line"></span>
+            <span class="flex h-7 items-center gap-1 px-2 font-medium whitespace-nowrap text-agent">Ask Kan</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW IT WORKS -->
+      <section id="agents" class="mx-auto max-w-5xl border-b border-line px-6 py-20 md:px-10">
+        <div class="mb-12 max-w-2xl">
+          <p class="mb-2 font-mono text-xs tracking-wider text-ink-subtle uppercase">How it works</p>
+          <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+            A place to work something out, not a column of chat.
+          </h2>
+          <p class="mt-3 text-sm leading-relaxed text-ink-muted sm:text-base">
+            Most AI tools give you one scrolling conversation and ask you to hold the rest in your
+            head. Kan puts the whole problem in front of you, and lets an agent work in the same
+            space you are working in.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 gap-8 md:grid-cols-3">
+          <div class="border-t border-line pt-4">
+            <span class="font-mono text-xs text-ink-subtle">01</span>
+            <h3 class="mt-2 text-base font-semibold">You can see what it did</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ink-muted">
+              The agent places notes, tables, charts, maps, timelines and calendars onto the board,
+              connects them and arranges them. You watch it happen, and the part of the canvas it
+              is working on lights up. Nothing is hidden behind a summary of what it claims to have
+              done.
+            </p>
+          </div>
+
+          <div class="border-t border-line pt-4">
+            <span class="font-mono text-xs text-ink-subtle">02</span>
+            <h3 class="mt-2 text-base font-semibold">Bring your own agent</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ink-muted">
+              Kan talks to agents over the Agent Client Protocol. Devin and OpenAI Codex are
+              supported today. Both run as a local process on your Mac under the subscription you
+              already pay for, which is why Kan never holds a model token of yours.
+            </p>
+          </div>
+
+          <div class="border-t border-line pt-4">
+            <span class="font-mono text-xs text-ink-subtle">03</span>
+            <h3 class="mt-2 text-base font-semibold">Local by default</h3>
+            <p class="mt-2 text-sm leading-relaxed text-ink-muted">
+              Boards you work on alone live on your machine, in the app's own storage. They open
+              instantly and keep working with no internet connection. Nothing leaves your Mac until
+              you deliberately share a board.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ROOMS -->
+      <section id="rooms" class="mx-auto max-w-5xl border-b border-line px-6 py-20 md:px-10">
+        <div class="grid grid-cols-1 items-start gap-10 lg:grid-cols-12">
+          <div class="lg:col-span-5">
+            <p class="mb-2 font-mono text-xs tracking-wider text-ink-subtle uppercase">Rooms</p>
+            <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">
+              Meetings that leave something behind.
+            </h2>
+            <p class="mt-4 text-sm leading-relaxed text-ink-muted">
+              Open a room and a few people share one canvas, with video and live transcription
+              running. The board you end the call with is the thing you keep working on.
+            </p>
+
+            <div class="mt-6 space-y-4 text-sm text-ink-muted">
+              <div class="border-l border-line pl-3">
+                <span class="block font-medium text-ink">What was said is kept</span>
+                Speech is transcribed live and the final text becomes part of the room's
+                conversation, next to the board it was about. No separate recording to rewatch.
+              </div>
+              <div class="border-l border-line pl-3">
+                <span class="block font-medium text-ink">Follow someone's view</span>
+                When a person is walking the room through a layout, you can latch onto their
+                viewport and go where they go.
+              </div>
+            </div>
+          </div>
+
+          <div class="border border-line bg-card p-6 shadow-sm lg:col-span-7">
+            <div class="flex items-center justify-between border-b border-line-subtle pb-3 font-mono text-xs text-ink-subtle">
+              <span class="font-medium text-ink">Room · Offsite planning</span>
+              <span>3 present</span>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between border-b border-line-subtle pb-4">
+              <div class="flex items-center gap-3">
+                <span class="flex h-8 w-8 items-center justify-center border border-line bg-paper text-xs font-medium">SC</span>
+                <span>
+                  <span class="block text-xs font-medium">Sara is speaking</span>
+                  <span class="text-[11px] text-ink-subtle">Transcribing</span>
+                </span>
+              </div>
+              <span class="flex items-center gap-1 font-mono text-xs text-agent">Following</span>
+            </div>
+
+            <div class="mt-4 border border-line-subtle bg-paper p-3.5">
+              <div class="mb-1 font-mono text-[11px] text-ink-subtle">Conversation</div>
+              <p class="text-xs leading-relaxed italic">
+                "Let's keep the whole second morning free. Every offsite we do this and every
+                offsite we run out of room."
+              </p>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between border-t border-line-subtle pt-3 text-xs text-ink-subtle">
+              <span>Video and transcription by Vonage</span>
+              <span>Kept in the room's history</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- HOW IT'S BUILT -->
+      <section id="built" class="mx-auto max-w-5xl border-b border-line px-6 py-20 md:px-10">
+        <div class="mb-10 max-w-2xl">
+          <p class="mb-2 font-mono text-xs tracking-wider text-ink-subtle uppercase">How it's built</p>
+          <h2 class="text-2xl font-semibold tracking-tight sm:text-3xl">Standard parts, put together carefully.</h2>
+        </div>
+
+        <div class="grid grid-cols-1 gap-8 text-sm sm:grid-cols-2">
+          <div class="border-t border-line pt-4">
+            <h3 class="font-medium">A native shell, built with Tauri</h3>
+            <p class="mt-2 leading-relaxed text-ink-muted">
+              Rust handles the system side and the agent processes; the interface renders in the
+              Mac's own web view. It is a real desktop app, not a website in a window.
+            </p>
+          </div>
+          <div class="border-t border-line pt-4">
+            <h3 class="font-medium">A canvas built on tldraw</h3>
+            <p class="mt-2 leading-relaxed text-ink-muted">
+              Rather than write a canvas engine, we built on tldraw and added the node types and
+              the agent tooling on top of it.
+            </p>
+          </div>
+          <div class="border-t border-line pt-4">
+            <h3 class="font-medium">Agents over ACP</h3>
+            <p class="mt-2 leading-relaxed text-ink-muted">
+              The agent reaches the board through a narrow set of canvas tools, not by driving your
+              machine. It can read and change the canvas you have open, and nothing else.
+            </p>
+          </div>
+          <div class="border-t border-line pt-4">
+            <h3 class="font-medium">A room server you can point at</h3>
+            <p class="mt-2 leading-relaxed text-ink-muted">
+              Shared boards sync through a room server, with Vonage handling video and
+              transcription. Solo boards never touch it.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- DOWNLOAD -->
+      <section id="download" class="mx-auto max-w-5xl px-6 py-20 md:px-10">
+        <div class="mx-auto max-w-xl text-center">
+          <span class="font-mono text-xs tracking-wider text-ink-subtle uppercase">Alpha</span>
+          <h2 class="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Try it</h2>
+          <p class="mt-3 text-sm leading-relaxed text-ink-muted">
+            Kan is an alpha. It is rough in places, it changes often, and you will find things that
+            do not work yet. If that sounds fine, it is yours to use.
+          </p>
+
+          <div class="mt-8">
+            <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
+            <a
+              href="/kan-alpha.dmg"
+              class="inline-flex items-center justify-center bg-ink px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-black"
+            >
+              Download Kan for macOS
+            </a>
+          </div>
+
+          <!-- TODO: fill in the real minimum macOS version and architecture once you cut a build. -->
+          <p class="mt-4 font-mono text-[11px] text-ink-subtle">
+            macOS · requires a Devin or OpenAI Codex subscription
+          </p>
+
+          <div class="mt-8 border border-line bg-card p-4 text-left text-xs leading-relaxed text-ink-muted">
+            <span class="block font-medium text-ink">macOS will warn you about this app</span>
+            The alpha is not signed with an Apple developer certificate yet, so the first time you
+            open it macOS will tell you it cannot verify the developer. That is expected. Right
+            click the app and choose Open, then confirm.
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="w-full border-t border-line bg-paper px-6 py-10 text-xs text-ink-muted md:px-10">
+      <div class="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
+        <div class="flex items-center gap-3">
+          <span class="inline-block h-2.5 w-2.5 bg-ink"></span>
+          <span class="font-medium text-ink">Kan</span>
+          <span class="text-ink-subtle">· macOS</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-6">
+          <a href="#canvas" class="transition-colors hover:text-ink">Canvas</a>
+          <a href="#agents" class="transition-colors hover:text-ink">Agents</a>
+          <a href="#rooms" class="transition-colors hover:text-ink">Rooms</a>
+          <a href="#built" class="transition-colors hover:text-ink">How it's built</a>
+          <a href="#download" class="transition-colors hover:text-ink">Download</a>
+        </div>
+      </div>
+      <div class="mx-auto mt-6 flex max-w-5xl flex-col items-start justify-between gap-2 border-t border-line-subtle pt-6 text-[11px] text-ink-subtle sm:flex-row sm:items-center">
+        <span>An infinite canvas you work on with an agent.</span>
+        <span>Alpha. Expect sharp edges.</span>
+      </div>
+    </footer>
+  </body>
+</html>
