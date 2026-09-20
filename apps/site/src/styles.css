@@ -15,7 +15,7 @@
   --color-line-subtle: #eceae4;
   --color-agent: #4b4de8;
   --color-agent-soft: #eef0fd;
-  --color-human: #b87d27;
+  --color-human: #855716;
   --color-human-line: #d19a4a;
   --color-human-soft: #fbf5ed;
 
@@ -42,6 +42,107 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 5.5rem;
+}
+
+@layer base {
+  a, summary {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  a:hover {
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-agent);
+    outline-offset: 5px;
+  }
+
+  main:focus {
+    outline: none;
+  }
+}
+
+@layer components {
+  .button {
+    @apply inline-flex min-h-12 items-center justify-center gap-3 bg-ink px-5 py-3 text-sm font-medium text-white transition-colors;
+  }
+
+  .button:hover {
+    @apply bg-agent text-white;
+  }
+
+  .button-small {
+    @apply min-h-11 gap-1 px-4 py-2;
+  }
+
+  .text-link {
+    @apply underline decoration-line underline-offset-4 hover:decoration-ink;
+  }
+
+  .eyebrow {
+    @apply font-mono text-[11px] leading-relaxed tracking-wider text-ink-subtle uppercase;
+  }
+
+  .section-title {
+    @apply text-3xl leading-[1.15] font-semibold tracking-tight sm:text-4xl;
+    text-wrap: balance;
+  }
+
+  .example-card {
+    @apply min-w-0 border border-line bg-card p-4 sm:p-5;
+  }
+
+  .schedule {
+    table-layout: fixed;
+    overflow-wrap: anywhere;
+  }
+
+  .schedule th, .schedule td {
+    @apply border-b border-line-subtle px-2 py-4 align-top leading-relaxed sm:px-3;
+  }
+
+  .schedule thead th {
+    @apply pt-0 font-medium text-ink-muted;
+  }
+
+  .schedule th:first-child {
+    width: 25%;
+    @apply pl-0;
+  }
+
+  .schedule tbody th {
+    @apply font-normal text-ink-muted;
+  }
+
+  .schedule td {
+    @apply text-[13px];
+  }
+
+  .faq-item {
+    @apply border-b border-line;
+  }
+
+  .faq-item summary {
+    @apply cursor-pointer py-5 pr-3 text-sm leading-relaxed font-medium;
+  }
+
+  .faq-item summary::marker {
+    color: var(--color-agent);
+  }
+
+  .faq-item[open] summary {
+    @apply text-agent;
+  }
+
+  .faq-answer {
+    @apply flex flex-col gap-3 pb-5 text-sm leading-relaxed text-ink-muted;
+  }
+
+  .skip-link {
+    @apply fixed top-2 left-2 z-[100] -translate-y-24 border border-agent bg-card px-4 py-3 text-sm text-ink focus:translate-y-0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
