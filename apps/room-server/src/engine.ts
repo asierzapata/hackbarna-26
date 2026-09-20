@@ -617,6 +617,39 @@ export class Engine {
     return { room: this.rowToRoom(row) };
   }
 
+  /**
+   * Leaving is per-member: the room, its canvas and its thread stay untouched
+   * for everyone else. There is deliberately no room deletion — one member
+   * tidying their catalog must not destroy work the others still rely on. A
+   * room whose last member leaves simply stops being listed; rejoining by code
+   * brings it back.
+   */
+  leaveRoom(user: { id: string; name: string }, roomId: string) {
+    this.requireMember(roomId, user.id);
+    const at = nowIso(this.now());
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM members WHERE room_id=? AND user_id=?").run(roomId, user.id);
+      const remaining = this.db.prepare("SELECT COUNT(*) AS n FROM members WHERE room_id=?").get(roomId) as { n: number };
+      // Nobody is left to read it, and the entry would be the first thing a
+      // rejoining member saw. Skip it rather than narrate an empty room.
+      if (remaining.n === 0) return;
+      const entry: Entry = {
+        id: uuid(),
+        roomId,
+        seq: this.nextSeq(roomId),
+        at,
+        kind: "system",
+        text: `${user.name} left the room`,
+        authorId: user.id,
+        shapeIds: [],
+      };
+      this.insertEntry(roomId, entry);
+    });
+    this.flushBroadcasts();
+    this.broadcastPresence(roomId);
+    return { ok: true };
+  }
+
   renameUser(userId: string, name: string) {
     this.db.prepare("UPDATE users SET name=? WHERE id=?").run(name, userId);
     const rooms = this.db.prepare("SELECT room_id FROM members WHERE user_id=?").all(userId) as { room_id: string }[];

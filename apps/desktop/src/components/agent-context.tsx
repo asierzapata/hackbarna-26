@@ -14,7 +14,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
-import { applyToolCall } from "@/lib/agent-steps";
+import { applyToolCall, thoughtLine } from "@/lib/agent-steps";
 import type { AgentStep } from "@/lib/thread";
 import { buildAssistantPrompt, directCanvasResult, type AssistantResult } from "@kan/protocol";
 import { parseStructuredOutput } from "@/lib/assistant-controller";
@@ -71,6 +71,9 @@ type SessionUpdate =
 export interface AgentActivityState {
   turnId: string | null;
   steps: AgentStep[];
+  /** Everything streamed so far, kept whole so the line does not flash tokens. */
+  thoughtBuffer?: string;
+  /** What the thread shows: the last finished sentence of the buffer. */
   thought?: string;
 }
 
@@ -199,13 +202,13 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         case "agent_thought_chunk": {
           const text = (payload as { content?: { text?: string } }).content?.text;
           if (!text) break;
-          // One line, replaced as it streams. A side panel has no room for a
-          // full thought log, and nobody reads one anyway.
-          setActivity((previous) =>
-            previous.turnId === envelope.turnId
-              ? { ...previous, thought: text.replace(/\s+/g, " ").trim() }
-              : previous
-          );
+          // Accumulate, then show one finished sentence at a time. A side panel
+          // has no room for a full thought log, and nobody reads one anyway.
+          setActivity((previous) => {
+            if (previous.turnId !== envelope.turnId) return previous;
+            const thoughtBuffer = (previous.thoughtBuffer ?? "") + text;
+            return { ...previous, thoughtBuffer, thought: thoughtLine(thoughtBuffer) };
+          });
           break;
         }
         case "tool_call":

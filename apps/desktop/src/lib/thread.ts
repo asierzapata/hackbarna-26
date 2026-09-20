@@ -110,11 +110,13 @@ export interface AgentEntry extends ThreadEntryBase {
   traceId?: string;
   steps?: AgentStep[];
   /**
-   * The agent's current reasoning, one line, replaced as it streams and
-   * cleared when the turn ends. Deliberately not accumulated: a side panel
-   * has no room for a full thought log.
+   * The agent's current reasoning: the last finished sentence of what it has
+   * streamed, cleared when the turn ends. One line on purpose, since a side
+   * panel has no room for a full thought log.
    */
   thought?: string;
+  /** The agent is reasoning, even if no whole sentence is ready to show yet. */
+  thinking?: boolean;
   sources?: { kind: "entry" | "shape"; id: string }[];
   status?: "running" | "done" | "failed" | "cancelled";
   hidden?: boolean;

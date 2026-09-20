@@ -10,6 +10,7 @@ import {
   stepState,
   stepsFromMutations,
   summaryLabel,
+  thoughtLine,
   toolKey,
 } from "../src/lib/agent-steps";
 import { AgentActivity } from "../src/components/thread/AgentActivity";
@@ -72,6 +73,32 @@ test("a structured turn gets its steps from the mutations it reports", () => {
   assert.ok(steps.every((step) => step.state === "done"));
 });
 
+test("a half-streamed sentence never reaches the screen", () => {
+  // Chunks arrive a word or two at a time. Painting each one is what made the
+  // line flash single tokens.
+  let buffer = "";
+  const shown: string[] = [];
+  for (const chunk of ["The two ", "clusters are ", "unrelated, so one ", "arrow is enough."]) {
+    buffer += chunk;
+    shown.push(thoughtLine(buffer));
+  }
+  assert.deepEqual(shown, ["", "", "", "The two clusters are unrelated, so one arrow is enough."]);
+});
+
+test("the thought line holds the last finished sentence while the next one types", () => {
+  const buffer = "First I read the canvas. Now I am checking whether the";
+  assert.equal(thoughtLine(buffer), "First I read the canvas.");
+});
+
+test("an unpunctuated thought shows up once it is long enough to be worth reading", () => {
+  const short = "thinking about the layout";
+  assert.equal(thoughtLine(short), "");
+  const long =
+    "thinking about the layout and whether the two clusters belong together or should stay apart for the moment";
+  assert.ok(long.length >= 100);
+  assert.equal(thoughtLine(long), long);
+});
+
 test("the live label follows the step that is actually running", () => {
   const steps: AgentStep[] = [
     { id: "a", tool: "getCanvas", summary: "Read the canvas", state: "done" },
@@ -79,7 +106,7 @@ test("the live label follows the step that is actually running", () => {
   ];
   assert.equal(activityLabel(steps), "Adding a node");
   assert.equal(activityLabel([]), "Working");
-  assert.equal(activityLabel([steps[0]], "weighing the options"), "Thinking");
+  assert.equal(activityLabel([steps[0]], true), "Thinking");
 });
 
 test("the collapsed line counts steps and failures", () => {

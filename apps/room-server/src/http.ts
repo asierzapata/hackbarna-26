@@ -203,6 +203,8 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
     return c.json(engine.patchRoom(c.get("user"), c.req.param("id")!, input));
   });
 
+  app.post("/rooms/:id/leave", auth, (c) => c.json(engine.leaveRoom(c.get("user"), c.req.param("id")!)));
+
   app.post("/rooms/:id/open", auth, (c) => c.json(engine.openRoom(c.get("user").id, c.req.param("id")!)));
 
   app.post("/assets", auth, async (c) => {

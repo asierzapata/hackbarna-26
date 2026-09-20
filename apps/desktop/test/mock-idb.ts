@@ -99,6 +99,9 @@ class MockDatabase {
 
   constructor(public name: string, public version: number) {}
 
+  /** Real code closes its connections; the shim has none to close. */
+  close() {}
+
   get objectStoreNames() {
     return {
       contains: (n: string) => this.objectStores.has(n),
@@ -114,14 +117,22 @@ class MockDatabase {
   transaction(storeNames: string | string[], mode: "readonly" | "readwrite") {
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
     const self = this;
-    return {
+    const tx = {
       mode,
+      error: null as Error | null,
+      oncomplete: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      onabort: null as (() => void) | null,
       objectStore(name: string) {
         const s = self.objectStores.get(name);
         if (!s) throw new Error(`Store ${name} not found`);
         return s;
       },
     };
+    // Store requests settle in a microtask, so completion has to come after
+    // them or a caller waiting on `oncomplete` would see the work undone.
+    queueMicrotask(() => queueMicrotask(() => tx.oncomplete?.()));
+    return tx;
   }
 }
 
@@ -148,7 +159,12 @@ export function setupMockIndexedDB() {
       return req;
     },
     deleteDatabase(name: string) {
-      openDatabases.delete(name);
+      const req = new MockRequest<void>();
+      queueMicrotask(() => {
+        openDatabases.delete(name);
+        req.succeed(undefined);
+      });
+      return req;
     },
   };
 
