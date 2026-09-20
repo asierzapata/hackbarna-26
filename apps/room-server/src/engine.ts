@@ -12,7 +12,7 @@ import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
 import { createKanSchema, diagramPlacement, KAN_NODE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
-import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, isDrawingResult, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
@@ -1721,8 +1721,8 @@ export class Engine {
     // wrong — and in a live room that drift is the normal case, not the
     // exception. The offline path has always allowed this; holding the room
     // server to a stricter rule failed explicit requests that were fine.
-    const drawingOnUnchangedCanvas = trigger.source === "explicit" && isDrawingResult(parsed.data) && storedContext.canvasRevision === this.currentCanvasRevision(roomId);
-    if (trigger.mode === "act" && input.revision !== currentRevision && parsed.data.kind !== "reply" && !drawingOnUnchangedCanvas) throw conflict("run context is stale");
+    const canvasChanged = storedContext.canvasRevision !== this.currentCanvasRevision(roomId);
+    if (trigger.mode === "act" && input.revision !== currentRevision && parsed.data.kind !== "reply" && canvasChanged) throw conflict("canvas changed while this action was running");
     const staleContext = (trigger.mode === "context" || trigger.mode === "propose") && (input.revision !== currentRevision || storedContext?.revision !== input.revision);
     const assistantResult: AssistantResult = staleContext ? { kind: "silent" } : parsed.data;
     if (trigger.mode === "act" && input.revision && storedContext?.revision && input.revision !== storedContext.revision) throw conflict("run context is stale");

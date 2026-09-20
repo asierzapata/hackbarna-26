@@ -88,10 +88,16 @@ export interface MessageEntry extends ThreadEntryBase {
 export interface AgentStep {
   id: string;
   tool: string;
+  /** Present tense while running, past tense once it settles. */
   summary: string;
   /** Canvas node the step touched — makes the row jumpable. */
   target?: CanvasAnchor;
-  state?: "running" | "done" | "error";
+  state?: "pending" | "running" | "done" | "error";
+  /** `performance.now()` at the first sighting, for the live duration. */
+  startedAt?: number;
+  durationMs?: number;
+  /** Only set when `state` is `error`; shown on the row instead of a duration. */
+  error?: string;
 }
 
 /** Output of one agent turn. */
@@ -103,6 +109,12 @@ export interface AgentEntry extends ThreadEntryBase {
   durationMs?: number;
   traceId?: string;
   steps?: AgentStep[];
+  /**
+   * The agent's current reasoning, one line, replaced as it streams and
+   * cleared when the turn ends. Deliberately not accumulated: a side panel
+   * has no room for a full thought log.
+   */
+  thought?: string;
   sources?: { kind: "entry" | "shape"; id: string }[];
   status?: "running" | "done" | "failed" | "cancelled";
   hidden?: boolean;
@@ -286,7 +298,10 @@ export function buildThreadRows(
   });
 
   for (const entry of ordered) {
-    if (entry.kind === "agent" && (entry.hidden || (entry.status === "running" && !entry.text))) continue;
+    // A running turn with no text used to be skipped, because an empty bubble
+    // says nothing. It now carries the step rail, which is the one moment the
+    // reader most wants it.
+    if (entry.kind === "agent" && entry.hidden) continue;
     // Contextual and propose triggers are bookkeeping for a turn the reader
     // already sees as an agent entry. They were only ever visible behind the
     // deleted "Agent activity" tab; per-turn diagnostics cover that need now.
