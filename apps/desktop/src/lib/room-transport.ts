@@ -89,7 +89,11 @@ function toSteps(steps: unknown[]): AgentStep[] {
         tool: typeof step.tool === "string" ? step.tool : "tool",
         summary: typeof step.summary === "string" ? step.summary : "",
         state:
-          step.state === "running" || step.state === "error" ? step.state : "done",
+          step.state === "running" || step.state === "pending" || step.state === "error"
+            ? step.state
+            : "done",
+        durationMs: typeof step.durationMs === "number" ? step.durationMs : undefined,
+        error: typeof step.error === "string" ? step.error : undefined,
       },
     ];
   });

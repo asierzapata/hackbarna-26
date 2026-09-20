@@ -51,12 +51,13 @@ test("workspace renders both panel contents in either chat state and hides close
   }
 });
 
-test("empty streaming agent turns expose an accessible Working status without metadata", () => {
+test("a streaming agent turn narrates its steps through an accessible status", () => {
   const markup = renderAgent("", true);
   assert.match(markup, /role="status"/);
   assert.match(markup, /aria-live="polite"/);
-  assert.match(markup, />Working<\/span>/);
-  assert.doesNotMatch(markup, /No response received|Hidden model|Hidden tool|1000/);
+  // The rail reports what is running; the model name and raw duration stay out.
+  assert.match(markup, /Hidden tool/);
+  assert.doesNotMatch(markup, /No response received|Hidden model|1000/);
 });
 
 test("completed empty agent turns say that no response was received", () => {
@@ -65,8 +66,9 @@ test("completed empty agent turns say that no response was received", () => {
   assert.doesNotMatch(markup, />Working<\/span>/);
 });
 
-test("a reply replaces the working status and keeps metadata hidden", () => {
+test("a reply is shown alongside the steps that produced it", () => {
   const markup = renderAgent("Updated the box.", true);
   assert.match(markup, /Updated the box\./);
-  assert.doesNotMatch(markup, /Working|No response received|Hidden model|Hidden tool|1000/);
+  assert.match(markup, /Hidden tool/);
+  assert.doesNotMatch(markup, /No response received|Hidden model|1000/);
 });

@@ -1,11 +1,10 @@
-import { cn } from "cn";
-
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import type { AgentEntry } from "@/lib/thread";
 import { AgentDiagnostics } from "@/components/AgentDiagnostics";
 
+import { AgentActivity } from "./AgentActivity";
 import { useAuthor, useThread } from "./thread-context";
 
 /**
@@ -37,31 +36,24 @@ export function AgentEntryCard({
               <span aria-hidden className="size-2 shrink-0 rounded-full bg-agent" />
               <span className="font-medium">{agent.name}</span>
             </MessageHeader>
+            <AgentActivity
+              steps={entry.steps}
+              thought={entry.thought}
+              running={streaming}
+              durationMs={entry.durationMs}
+            />
             {hasSummary ? (
-              <p
-                className={cn(
-                  "text-xs leading-relaxed wrap-break-word",
-                  streaming && "shimmer"
-                )}
-              >
-                {summary}
-              </p>
-            ) : (
-              <span
-                role="status"
-                aria-live="polite"
-                className={cn(
-                  "text-xs leading-relaxed text-muted-foreground",
-                  streaming && "shimmer"
-                )}
-              >
-                {streaming ? "Working" : "No response received"}
+              <p className="text-xs leading-relaxed wrap-break-word">{summary}</p>
+            ) : streaming ? null : (
+              <span className="text-xs leading-relaxed text-muted-foreground">
+                No response received
               </span>
             )}
             {entry.sources?.length ? <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">{entry.sources.map((source) => source.kind === "entry" ? <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToEntry?.(source.id)}>Source {source.id.slice(0, 8)}</Button> : <Button key={`${source.kind}:${source.id}`} variant="link" size="xs" onClick={() => onJumpToNode?.({ nodeId: source.id, label: source.id })}>Canvas {source.id.slice(0, 16)}</Button>)}</div> : null}
 
             {entry.traceId ? <AgentDiagnostics turnId={entry.traceId} /> : null}
-            <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>
+            {/* Replying to a turn that has not finished answering is noise. */}
+            {streaming ? null : <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>}
           </BubbleContent>
         </Bubble>
       </MessageContent>

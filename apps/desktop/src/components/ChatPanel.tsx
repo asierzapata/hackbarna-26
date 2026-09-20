@@ -10,7 +10,7 @@ import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRu
 import { useCanvas } from "./canvas-context";
 import { RoomAssistantSettings } from "./RoomAssistantSettings";
 import { assistantCanvasRecords, applyAssistantOperations } from "@/lib/assistant-canvas";
-import type { OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
+import type { AgentEntry, AgentStep, OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
 import { PENDING_SEQ } from "@/lib/thread";
 import { createWsTransport, type RoomTransport } from "@/lib/room-transport";
 
@@ -404,15 +404,52 @@ export function ChatPanel({
     );
   }, [actionError, agent, roomSnapshot.error, transcription]);
 
+  /**
+   * Steps for turns that have already ended.
+   *
+   * The provider drops its live activity the moment a turn finishes, and the
+   * room does not carry steps back, so the rail would blink out exactly when
+   * someone wants to read it. Keeping the last state per run is enough for the
+   * collapsed summary. Client-only: a reload forgets it, which is the right
+   * trade for not writing tool noise into the room.
+   */
+  const finishedSteps = React.useRef(new Map<string, AgentStep[]>());
+  const activity = agent.activity;
+  if (activity.turnId && activity.steps.length) {
+    finishedSteps.current.set(activity.turnId, activity.steps);
+  }
+
+  /** Paint live activity onto the agent entry for the run in flight. */
+  const withActivity = React.useCallback(
+    (entry: AgentEntry): AgentEntry => {
+      const live = activity.turnId === entry.traceId;
+      const steps = live
+        ? activity.steps
+        : (entry.steps?.length ? entry.steps : finishedSteps.current.get(entry.traceId ?? "") ?? []);
+      if (!steps.length && !live) return entry;
+      return { ...entry, steps, thought: live ? activity.thought : undefined };
+    },
+    [activity]
+  );
+
   const liveEntries = React.useMemo(() => (roomSnapshot.transcripts ?? []).filter((line) => !entries.some((entry) => entry.id === line.id)).map((line) => ({ ...line, kind: "transcript" as const, seq: PENDING_SEQ })), [roomSnapshot.transcripts, entries]);
-  const visibleEntries = React.useMemo(() => [...entries, ...liveEntries], [entries, liveEntries]);
+  const visibleEntries = React.useMemo(
+    () => [...entries.map((entry) => (entry.kind === "agent" ? withActivity(entry) : entry)), ...liveEntries],
+    [entries, liveEntries, withActivity]
+  );
+  /** A running agent turn is the one whose rail streams. */
+  const streamingIds = React.useMemo(
+    () => new Set(entries.filter((entry) => entry.kind === "agent" && entry.status === "running").map((entry) => entry.id)),
+    [entries]
+  );
   const view = React.useMemo(
     () => ({
       interimIds: new Set(liveEntries.map((line) => line.id)),
+      streamingIds,
       pendingIds,
       entryOrder: entryOrderRef.current,
     }),
-    [pendingIds, liveEntries]
+    [pendingIds, liveEntries, streamingIds]
   );
 
   return (
