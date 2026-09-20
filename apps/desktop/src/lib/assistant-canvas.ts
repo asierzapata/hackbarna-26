@@ -48,7 +48,7 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       const viewport = editor.getViewportPageBounds();
       const origin = diagramPlacement([...current.values(), ...puts], near?.parentId ?? editor.getCurrentPageId(), { x: viewport.x + 80, y: viewport.y + 80 });
       const position = { x: operation.x ?? origin.x, y: operation.y ?? near?.y ?? origin.y };
-      const shape: TLShapePartial = operation.draft.type === "calendar"
+      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map"
         ? { ...draftToShapePartial(operation.draft, id, position), parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
         : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
@@ -60,8 +60,11 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
         const month = draft.selectedDate?.slice(0, 7) ?? draft.month ?? shape.props.month;
         const selectedDate = draft.selectedDate === undefined ? shape.props.selectedDate : draft.selectedDate;
         puts.push({ ...shape, props: { ...shape.props, title: draft.title, events: draft.events, sourceNote: draft.sourceNote ?? "", month, selectedDate: selectedDate?.startsWith(`${month}-`) ? selectedDate : null }, meta: { ...shape.meta, provenance } });
+      } else if (shape.type === "kan-map" && operation.draft.type === "map") {
+        const next = draftToShapePartial(operation.draft, shape.id, { x: shape.x, y: shape.y });
+        puts.push({ ...shape, ...next, props: { ...shape.props, ...next.props }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       } else {
-        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards or rich calendars can be updated by this action");
+        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards, maps, or rich calendars can be updated by this action");
         puts.push({ ...shape, props: { ...shape.props, draft: operation.draft }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       }
       touched.add(shape.id);

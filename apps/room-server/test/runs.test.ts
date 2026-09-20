@@ -85,12 +85,17 @@ test("claim -> lease -> heartbeat -> mutate -> done; stale lease denied; idempot
     headers: runAuth,
     body: JSON.stringify({
       id: mutateId,
-      operations: [{ type: "add", draft: { type: "markdown", title: "Note", body: "hi" }, x: 10, y: 20 }],
+      operations: [
+        { type: "add", draft: { type: "markdown", title: "Note", body: "hi" }, x: 10, y: 20 },
+        { type: "add", draft: { type: "map", title: "Venue options", markers: [{ lat: 41.403, lng: 2.194, label: "Glovo", note: "Approximate" }, { lat: 41.375, lng: 2.189, label: "Norrsken", note: "Approximate" }] } },
+      ],
     }),
   });
   assert.equal(mut.status, 200, JSON.stringify(mut.body));
   const shapeId = mut.body.shapeIds[0];
+  const mapId = mut.body.shapeIds[1];
   assert.match(shapeId, /^shape:/);
+  assert.match(mapId, /^shape:/);
 
   // idempotent retry returns same ids
   const mut2 = await api(null, ctx.base, `/rooms/${room.id}/runs/${lease.runId}/mutate`, {
@@ -98,12 +103,19 @@ test("claim -> lease -> heartbeat -> mutate -> done; stale lease denied; idempot
     headers: runAuth,
     body: JSON.stringify({
       id: mutateId,
-      operations: [{ type: "add", draft: { type: "markdown", title: "Note", body: "hi" }, x: 10, y: 20 }],
+      operations: [
+        { type: "add", draft: { type: "markdown", title: "Note", body: "hi" }, x: 10, y: 20 },
+        { type: "add", draft: { type: "map", title: "Venue options", markers: [{ lat: 41.403, lng: 2.194, label: "Glovo", note: "Approximate" }, { lat: 41.375, lng: 2.189, label: "Norrsken", note: "Approximate" }] } },
+      ],
     }),
   });
   assert.deepEqual(mut2.body.shapeIds, mut.body.shapeIds);
   const canvas = await api(u, ctx.base, `/rooms/${room.id}/canvas`);
   assert.equal(canvas.body.records.filter((r: any) => r.id === shapeId).length, 1);
+  const map = canvas.body.records.find((r: any) => r.id === mapId);
+  assert.equal(map.type, "kan-map");
+  assert.equal(map.props.markers.length, 2);
+  assert.equal(map.props.style, "aquarelle");
 
   // provenance stamped by server
   const rec = canvas.body.records.find((r: any) => r.id === shapeId);

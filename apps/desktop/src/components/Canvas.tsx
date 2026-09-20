@@ -34,7 +34,7 @@ import {
   getRoomWebSocketUrl,
   uploadServerAsset,
 } from "@/lib/api-client";
-import { createKanShapeUtils } from "@/nodes/shapes";
+import { createKanShapeUtils, MapShapeUtil } from "@/nodes/shapes";
 import { MermaidPasteHandler } from "./MermaidPasteHandler";
 import {
   createCanvasTools,
@@ -47,7 +47,7 @@ import { CanvasThinkingOverlay } from "./CanvasThinkingOverlay";
 
 const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
-const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils];
+const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils, MapShapeUtil];
 
 const primaryTools = [
   "select",
@@ -306,7 +306,7 @@ function OnlineCanvas({ roomId, user }: { roomId: string; user: { id: string; na
           key={roomId}
           store={store}
           assetUrls={assetUrls}
-          shapeUtils={shapeUtils}
+          shapeUtils={syncShapeUtils}
           components={canvasComponents}
           overrides={canvasOverrides}
           onMount={onMount}

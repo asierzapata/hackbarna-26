@@ -112,6 +112,37 @@ test("native geo full canvas output retains all props", () => {
   assert.deepEqual(canvas.shapes[0].meta, { source: "test" });
 });
 
+test("structured map additions create a native map shape with every marker", () => {
+  const created: unknown[] = [];
+  const editor = {
+    getSnapshot: () => ({ document: { store: {} } }),
+    getCurrentPageId: () => "page:page",
+    getViewportPageBounds: () => ({ x: 0, y: 0, w: 1000, h: 800 }),
+    run: (callback: () => void) => callback(),
+    createShapes: (shapes: unknown[]) => created.push(...shapes),
+    updateShapes: () => {},
+    createBindings: () => {},
+  } as unknown as Editor;
+  const operation = MutationSchema.parse({
+    type: "add",
+    draft: {
+      type: "map",
+      title: "Venue options",
+      markers: [
+        { lat: 41.403, lng: 2.194, label: "Glovo", note: "Approximate" },
+        { lat: 41.375, lng: 2.189, label: "Norrsken", note: "Approximate" },
+      ],
+    },
+  });
+
+  assert.deepEqual(applyAssistantOperations(editor, [operation], { entryId: "map" }), ["shape:map-0"]);
+  const map = created[0] as { type: string; props: { title: string; markers: unknown[]; style: string } };
+  assert.equal(map.type, "kan-map");
+  assert.equal(map.props.title, "Venue options");
+  assert.equal(map.props.markers.length, 2);
+  assert.equal(map.props.style, "aquarelle");
+});
+
 test("native geo updates preserve the existing ID and style/link props", () => {
   const shape = {
     id: "shape:ellipse",
