@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/empty";
 import { JoinRoomDialog } from "@/components/JoinRoomDialog";
 import { CreateCanvasDialog } from "@/components/CreateCanvasDialog";
+import { KanBrand } from "@/components/KanBrand";
 import {
   CanvasCard,
   CanvasRenameEditor,
@@ -284,7 +285,7 @@ function CatalogPage() {
     <div className="flex h-full w-full flex-col overflow-y-auto bg-background">
       <header className="header-bar sticky top-0 z-20 shrink-0">
         <div className="header-bar__brand flex items-center gap-2">
-          <span>// KAN</span>
+          <KanBrand />
           {userName ? (
             <span className="border-l border-border pl-2 font-mono text-xs font-normal text-muted-foreground">
               {userName}

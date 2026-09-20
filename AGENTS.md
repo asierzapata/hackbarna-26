@@ -525,3 +525,13 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   inspect `Assets.car` with `xcrun assetutil --info`, verify the signature with
   `codesign --verify --deep --strict`, and launch the actual `.app` to check the
   macOS icon. A dev WebDriver window does not exercise packaged icon resources.
+- `components/KanBrand.tsx` provides the compact, theme-aware SVG plus wordmark
+  for both headers and the full bundled Composer PNG for onboarding. The icon is
+  decorative beside the welcome heading; the canvas link retains its explicit
+  back arrow and accessible navigation label. Header foreground/background must
+  use the paired theme tokens, not the legacy always-white `--surface`.
+- Branding checks: `npx tsx --tsconfig apps/desktop/tsconfig.json --test
+  apps/desktop/test/kan-brand.test.tsx`. Native verification should cover both
+  onboarding steps, the catalog and canvas headers, back navigation, and light/dark
+  contrast. Use a separate app identifier and Vite port for fresh onboarding so
+  the user's profile and canvases are not changed.
