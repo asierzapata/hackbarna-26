@@ -42,6 +42,7 @@ const mutationWording: Record<Mutation["type"], string> = {
   update: "Updated a node",
   connect: "Connected two nodes",
   arrange: "Arranged nodes",
+  group: "Grouped nodes",
   style: "Changed a colour",
   diagram: "Drew a diagram",
   label: "Renamed a node",

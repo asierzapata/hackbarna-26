@@ -2,6 +2,7 @@ import { createShapeId, toRichText, type TLArrowBinding, type TLShape, type TLSh
 import type { Editor } from "tldraw";
 import { diagramPlacement, KAN_NODE_HEIGHT, KAN_NODE_WIDTH, planDiagram } from "@kan/nodes";
 import { MutationSchema, type Mutation } from "@kan/protocol";
+import { createCanvasTools } from "@/nodes/tools";
 import { draftToShapePartial } from "@/nodes/draft";
 
 type Bounds = { x: number; y: number; w: number; h: number };
@@ -49,6 +50,7 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
   const current = new Map(assistantCanvasRecords(editor).map((shape) => [shape.id, shape as TLShape]));
   const touched = new Set<string>();
   const created = new Set<string>();
+  const groupRequests: string[][] = [];
   const get = (id: string) => {
     const shape = (puts.slice().reverse().find(shape => shape.id === id) ?? current.get(id as TLShapeId)) as TLShape | undefined;
     if (!shape) throw new Error("A referenced canvas item no longer exists");
@@ -83,7 +85,7 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       const viewport = editor.getViewportPageBounds();
       const origin = diagramPlacement([...current.values(), ...puts], near?.parentId ?? editor.getCurrentPageId(), { x: viewport.x + 80, y: viewport.y + 80 });
       const position = { x: operation.x ?? origin.x, y: operation.y ?? near?.y ?? origin.y };
-      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map"
+      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map" || operation.draft.type === "table"
         ? { ...draftToShapePartial(operation.draft, id, position), parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
         : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
@@ -99,11 +101,19 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       } else if (shape.type === "kan-map" && operation.draft.type === "map") {
         const next = draftToShapePartial(operation.draft, shape.id, { x: shape.x, y: shape.y });
         puts.push({ ...shape, ...next, props: { ...shape.props, ...next.props }, meta: { ...shape.meta, provenance } } as TLShapePartial);
+      } else if (shape.type === "kan-table" && operation.draft.type === "table") {
+        const next = draftToShapePartial(operation.draft, shape.id, { x: shape.x, y: shape.y });
+        puts.push({ ...shape, ...next, props: { ...shape.props, ...next.props }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       } else {
-        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards, maps, or rich calendars can be updated by this action");
+        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards, maps, tables, or rich calendars can be updated by this action");
         puts.push({ ...shape, props: { ...shape.props, draft: operation.draft }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       }
       touched.add(shape.id);
+    } else if (operation.type === "group") {
+      const shapeIds = [...new Set(operation.shapeIds)];
+      shapeIds.forEach((id) => get(id));
+      groupRequests.push(shapeIds);
+      shapeIds.forEach((id) => touched.add(id));
     } else if (operation.type === "style" || operation.type === "label") {
       const shape = get(operation.shapeId);
       if (shape.type !== "geo") throw new Error("Only native geometric shapes support color or label changes");
@@ -142,6 +152,11 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
     editor.createBindings(diagramBindings);
     editor.createBindings<TLArrowBinding>(bindings.map(({ terminal, ...binding }) => ({ ...binding, type: "arrow", props: { terminal, normalizedAnchor: { x: 0.5, y: 0.5 }, isExact: false, isPrecise: false, snap: "none" } })));
   });
+  for (const shapeIds of groupRequests) {
+    const group = createCanvasTools(editor).groupNodes({ shapeIds });
+    touched.add(group.shapeId);
+    group.memberShapeIds.forEach((id) => touched.add(id));
+  }
   focusCreatedShapes(editor, [...created]);
   return [...touched];
 }

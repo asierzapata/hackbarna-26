@@ -34,7 +34,7 @@ import {
   getRoomWebSocketUrl,
   uploadServerAsset,
 } from "@/lib/api-client";
-import { createKanShapeUtils, MapShapeUtil } from "@/nodes/shapes";
+import { createKanShapeUtils, MapShapeUtil, TableShapeUtil } from "@/nodes/shapes";
 import { MermaidPasteHandler } from "./MermaidPasteHandler";
 import {
   createCanvasTools,
@@ -47,7 +47,7 @@ import { CanvasThinkingOverlay } from "./CanvasThinkingOverlay";
 
 const assetUrls = getAssetUrlsByImport();
 const canvasShapeUtils = [...shapeUtils, ...createKanShapeUtils()];
-const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils, MapShapeUtil];
+const syncShapeUtils = [...defaultShapeUtils, ...shapeUtils, MapShapeUtil, TableShapeUtil];
 
 const primaryTools = [
   "select",

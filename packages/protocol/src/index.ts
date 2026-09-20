@@ -139,7 +139,8 @@ export const NodeDraftSchema = z.discriminatedUnion("type", [
     type: z.literal("table"),
     title: z.string().min(1).max(200),
     columns: z.array(z.string().min(1).max(200)).min(1).max(20),
-    rows: z.array(z.array(z.string().max(1000)).max(20)).max(500),
+    rows: z.array(z.array(z.union([z.string().max(1000), z.number().finite(), z.boolean(), z.null()])).max(20)).max(500),
+    sourceNote: z.string().max(500).optional(),
   }).refine((v) => v.rows.every((row) => row.length === v.columns.length), "row width must equal columns"),
   z.strictObject({
     type: z.literal("chart"),
@@ -346,6 +347,10 @@ export const MutationSchema = z.discriminatedUnion("type", [
     type: z.literal("arrange"),
     shapeIds: z.array(shapeId).min(1).max(200),
     layout: z.enum(["row", "column", "grid"]),
+  }),
+  z.strictObject({
+    type: z.literal("group"),
+    shapeIds: z.array(shapeId).min(2).max(200).describe("Existing nodes to group like Cmd/Ctrl+G"),
   }),
   z.strictObject({ type: z.literal("style"), shapeId, color: GeoColorSchema }),
   DiagramInputSchema.safeExtend({ type: z.literal("diagram") }),
