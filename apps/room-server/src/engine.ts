@@ -11,7 +11,7 @@ import {
 import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
-import { createKanSchema, diagramPlacement, KAN_NODE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
+import { createKanSchema, diagramPlacement, KAN_MAP_TYPE, KAN_NODE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
 import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
@@ -1941,10 +1941,11 @@ export class Engine {
         }
         if (!Number.isFinite(x) || !Number.isFinite(y)) throw badRequest("coordinates must be finite");
         maxIndex = getIndexAbove(maxIndex);
+        const isMap = op.draft.type === "map";
         const shape: UnknownRecord = {
           id,
           typeName: "shape",
-          type: KAN_NODE_TYPE,
+          type: isMap ? KAN_MAP_TYPE : KAN_NODE_TYPE,
           x,
           y,
           rotation: 0,
@@ -1952,7 +1953,7 @@ export class Engine {
           parentId: targetPageId,
           isLocked: false,
           opacity: 1,
-          props: { ...kanNodeSize(op.draft.type), draft: op.draft },
+          props: op.draft.type === "map" ? mapShapeProps(op.draft) : { ...kanNodeSize(op.draft.type), draft: op.draft },
           meta: { provenance },
         } as unknown as UnknownRecord;
         planned.set(id, shape);
@@ -1961,10 +1962,11 @@ export class Engine {
       } else if (op.type === "update") {
         const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
         if (!existing || existing.typeName !== "shape") throw badRequest(`shape ${op.shapeId} not found`);
-        if (existing.type !== KAN_NODE_TYPE) throw badRequest("only kan-node shapes can be updated");
+        if (existing.type !== KAN_NODE_TYPE && existing.type !== KAN_MAP_TYPE) throw badRequest("only Kan node or map shapes can be updated");
+        if ((existing.type === KAN_MAP_TYPE) !== (op.draft.type === "map")) throw badRequest("map updates require a map draft");
         const next = {
           ...existing,
-          props: { ...existing.props, draft: op.draft },
+          props: existing.type === KAN_MAP_TYPE ? mapShapeProps(op.draft as Extract<NodeDraft, { type: "map" }>) : { ...existing.props, draft: op.draft },
           meta: { ...existing.meta, provenance },
         } as unknown as UnknownRecord;
         planned.set(op.shapeId, next);
@@ -2426,6 +2428,18 @@ function extractRichText(value: unknown): string {
   } catch {
     return "";
   }
+}
+
+function mapShapeProps(draft: Extract<NodeDraft, { type: "map" }>) {
+  return {
+    ...kanNodeSize("map"),
+    title: draft.title,
+    markers: draft.markers,
+    center: draft.center ?? null,
+    zoom: draft.zoom ?? null,
+    style: draft.style ?? "aquarelle",
+    selectedMarker: -1,
+  };
 }
 
 function boundedContextProps(props: unknown): unknown {

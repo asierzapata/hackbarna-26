@@ -89,6 +89,25 @@ const chartSpecSchema = boundedJson(10)
   .refine(checkChartSpec, "chart spec contains forbidden keys");
 const chartDataRow = z.record(z.string(), z.union([z.string().max(2048), z.number().finite(), z.boolean(), z.null()]));
 
+const mapMarkerSchema = z.strictObject({
+  lat: z.number().finite().min(-90).max(90).describe("Marker latitude"),
+  lng: z.number().finite().min(-180).max(180).describe("Marker longitude"),
+  label: z.string().min(1).max(200).describe("Place label"),
+  note: z.string().max(500).optional().describe("Optional note, such as approximate location"),
+});
+const mapCenterSchema = z.strictObject({
+  lat: z.number().finite().min(-90).max(90),
+  lng: z.number().finite().min(-180).max(180),
+});
+export const MapDraftSchema = z.strictObject({
+  type: z.literal("map"),
+  title: z.string().min(1).max(200).describe("Map heading"),
+  markers: z.array(mapMarkerSchema).min(1).max(100).describe("Places to pin on the map"),
+  center: mapCenterSchema.optional().describe("Optional map center"),
+  zoom: z.number().finite().min(0).max(22).optional().describe("Optional map zoom"),
+  style: z.enum(["streets", "aquarelle", "light", "dark", "satellite", "outdoor"]).optional().describe("Map style; defaults to Aquarelle"),
+});
+
 const calendarDate = z.iso.date().refine((value) => value >= "0001-01-01", "Date must be in years 0001–9999");
 const calendarEvent = z.strictObject({
   id: z.string().min(1).max(200),
@@ -129,6 +148,7 @@ export const NodeDraftSchema = z.discriminatedUnion("type", [
     data: z.array(chartDataRow).max(1000),
     sourceNote: z.string().max(500).optional(),
   }),
+  MapDraftSchema,
 ]).refine((v) => boundedJson(12, 50_000, MAX_JSON_BYTES, 20_000).safeParse(v).success, "draft exceeds JSON bounds");
 export const SnapshotRecordSchema = boundedJson(16, 50_000, 96 * 1024, 20_000);
 export type NodeDraft = z.infer<typeof NodeDraftSchema>;
