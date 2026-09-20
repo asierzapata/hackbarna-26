@@ -1043,7 +1043,7 @@ export class Engine {
         triggerThreshold = Number(currentSettings.assistant_threshold);
         cooldownMs = Number(currentSettings.assistant_cooldown_ms);
         output = { ...decision, triggerThreshold };
-        plan = triggerDecision(decision, triggerThreshold);
+        plan = triggerDecision(decision, triggerThreshold, cause.kind === "message" && cause.source === "transcript" ? "act" : "context");
       } catch {
         status = "failed";
         output = { error: "classifier_unavailable" };

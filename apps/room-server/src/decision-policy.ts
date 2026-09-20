@@ -38,14 +38,16 @@ export function explicitMention(text: string, source: "typed" | "transcript" = "
   return explicitInvocation(text, source);
 }
 
-export function triggerDecision(decision: Decision, threshold = TRIGGER_PROBABILITY_THRESHOLD) {
+export function triggerDecision(decision: Decision, threshold = TRIGGER_PROBABILITY_THRESHOLD, mode: "context" | "act" = "context") {
   const probability = decision.triggerProbability;
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1 || !Number.isFinite(probability) || probability <= threshold || probability > 1) return null;
   return {
-    mode: "context" as const,
+    mode,
     intent: "answer" as const,
     confidence: probability,
-    reason: "The exchange warrants a contextual assistant check: answer, clarify, or propose a grounded draft. No canvas changes are authorized.",
+    reason: mode === "act"
+      ? "The live conversation contains a grounded assistant action; fulfill the latest request using the supplied room context."
+      : "The exchange warrants a contextual assistant check: answer, clarify, or propose a grounded draft. No canvas changes are authorized.",
   };
 }
 
