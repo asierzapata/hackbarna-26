@@ -11,8 +11,8 @@ import {
 import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
-import { createKanSchema, KAN_NODE_TYPE, kanNodeSize } from "@kan/nodes";
-import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { createKanSchema, diagramPlacement, KAN_NODE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
+import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, isDrawingResult, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
@@ -1654,7 +1654,7 @@ export class Engine {
     const canvas = this.contextCanvas(roomId);
     const revision = this.currentRevision(roomId);
     const context = { trigger, causeEntries, recentEntries, canvas, revision };
-    this.db.prepare("UPDATE runs SET context=? WHERE run_id=?").run(JSON.stringify({ revision, entryIds: [...new Set([...causeEntries, ...recentEntries].map((entry) => entry?.id).filter(Boolean))], shapeIds: canvas.shapes.map((shape) => shape.id), shapes: canvas.shapes }), run.run_id);
+    this.db.prepare("UPDATE runs SET context=? WHERE run_id=?").run(JSON.stringify({ revision, canvasRevision: this.currentCanvasRevision(roomId), entryIds: [...new Set([...causeEntries, ...recentEntries].map((entry) => entry?.id).filter(Boolean))], shapeIds: canvas.shapes.map((shape) => shape.id), shapes: canvas.shapes }), run.run_id);
     return context;
   }
 
@@ -1670,6 +1670,10 @@ export class Engine {
       });
     const shapeCount = records.filter((r) => (r as { typeName?: string }).typeName === "shape").length;
     return { shapes, truncated: shapeCount > shapes.length, counts: { shapes: shapeCount, records: records.length } };
+  }
+
+  private currentCanvasRevision(roomId: string) {
+    return sha256(JSON.stringify(this.canvasRecords(roomId).sort((a, b) => String((a as { id: string }).id).localeCompare(String((b as { id: string }).id)))));
   }
 
   private currentRevision(roomId: string) {
@@ -1699,7 +1703,7 @@ export class Engine {
     if ((trigger.mode === "context" || trigger.mode === "propose") && parsed.data.kind === "act") throw forbidden("contextual runs cannot mutate");
     if (trigger.mode === "act" && parsed.data.kind === "silent") throw badRequest("explicit runs cannot be silent");
     const sources = parsed.data.kind === "silent" ? [] : parsed.data.sources;
-    const storedContext = run.context ? JSON.parse(run.context) as { revision?: string; entryIds?: string[]; shapeIds?: string[]; shapes?: unknown[] } : null;
+    const storedContext = run.context ? JSON.parse(run.context) as { revision?: string; canvasRevision?: string; entryIds?: string[]; shapeIds?: string[]; shapes?: unknown[] } : null;
     if (!storedContext?.revision) throw badRequest("run context was not captured");
     if (input.revision !== storedContext.revision) {
       if (trigger.mode === "context" || trigger.mode === "propose") {
@@ -1717,7 +1721,8 @@ export class Engine {
     // wrong — and in a live room that drift is the normal case, not the
     // exception. The offline path has always allowed this; holding the room
     // server to a stricter rule failed explicit requests that were fine.
-    if (trigger.mode === "act" && input.revision !== currentRevision && parsed.data.kind !== "reply") throw conflict("run context is stale");
+    const drawingOnUnchangedCanvas = trigger.source === "explicit" && isDrawingResult(parsed.data) && storedContext.canvasRevision === this.currentCanvasRevision(roomId);
+    if (trigger.mode === "act" && input.revision !== currentRevision && parsed.data.kind !== "reply" && !drawingOnUnchangedCanvas) throw conflict("run context is stale");
     const staleContext = (trigger.mode === "context" || trigger.mode === "propose") && (input.revision !== currentRevision || storedContext?.revision !== input.revision);
     const assistantResult: AssistantResult = staleContext ? { kind: "silent" } : parsed.data;
     if (trigger.mode === "act" && input.revision && storedContext?.revision && input.revision !== storedContext.revision) throw conflict("run context is stale");
@@ -1733,6 +1738,7 @@ export class Engine {
         const shapeIds: string[] = [];
         const provenance = { entryId: entry.id, runId, agentId: run.agent_id, byUserId: run.user_id };
         const puts = this.planMutations(roomId, `${runId}:${input.id}`, assistantResult.operations, provenance, shapeIds);
+        if (new Set([...entry.touchedShapeIds, ...shapeIds]).size > 500) throw badRequest("run exceeds touched shape limit");
         for (const record of puts) txn.set((record as { id: string }).id, record as UnknownRecord);
         entry.touchedShapeIds = [...new Set([...entry.touchedShapeIds, ...shapeIds])];
       }
@@ -1880,7 +1886,7 @@ export class Engine {
     roomId: string,
     requestId: string,
     operations: Mutation[],
-    provenance: Record<string, unknown>,
+    provenance: TLBaseShape<string, Record<string, unknown>>["meta"],
     shapeIds: string[],
   ): unknown[] {
     const handle = this.getRoomHandle(roomId);
@@ -1901,11 +1907,29 @@ export class Engine {
     }
 
     operations.forEach((op, i) => {
-      if (op.type === "add") {
+      if (op.type === "diagram") {
+        const { type: _type, ...graph } = op;
+        const near = op.nearShapeId ? get(op.nearShapeId) as TLBaseShape<string, Record<string, unknown>> | undefined : undefined;
+        if (op.nearShapeId && (!near || near.typeName !== "shape" || !near.parentId.startsWith("page:") || near.rotation !== 0 || near.isLocked)) throw badRequest("diagram target must be an unlocked top-level shape");
+        const targetPageId = near?.parentId ?? pageId;
+        const origin = diagramPlacement([...current.values(), ...planned.values()] as unknown as TLBaseShape<string, Record<string, unknown>>[], targetPageId);
+        const plan = planDiagram(graph, { id: key => deterministicId(key, runKey(requestId, i)), pageId: targetPageId, origin, provenance });
+        for (const shape of plan.shapes) {
+          if (get(shape.id)) throw conflict("diagram was already applied");
+          maxIndex = getIndexAbove(maxIndex);
+          const record = { rotation: 0, isLocked: false, opacity: 1, ...shape, typeName: "shape", index: maxIndex } as unknown as UnknownRecord;
+          planned.set(record.id, record); puts.push(record); shapeIds.push(shape.id);
+        }
+        for (const binding of plan.bindings) {
+          const record = { ...binding, typeName: "binding" } as UnknownRecord;
+          planned.set(record.id, record); puts.push(record);
+        }
+      } else if (op.type === "add") {
         const id = (op.shapeId ?? `shape:${deterministicId(`add`, runKey(requestId, i))}`) as `shape:${string}`;
         if (get(id)) throw conflict(`shape ${id} already exists`);
-        let x = op.x ?? 0;
-        let y = op.y ?? 0;
+        const origin = diagramPlacement([...current.values(), ...planned.values()] as unknown as TLBaseShape<string, Record<string, unknown>>[], pageId, { x: 0, y: 0 });
+        let x = op.x ?? origin.x;
+        let y = op.y ?? origin.y;
         let targetPageId = pageId;
         if (op.nearShapeId) {
           const near = get(op.nearShapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
@@ -1946,11 +1970,12 @@ export class Engine {
         planned.set(op.shapeId, next);
         puts.push(next);
         shapeIds.push(op.shapeId);
-      } else if (op.type === "style") {
+      } else if (op.type === "style" || op.type === "label") {
         const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
-        if (!existing || existing.typeName !== "shape" || existing.type !== "geo") throw badRequest("color changes require a native geometric shape");
-        if (existing.isLocked) throw badRequest("unlock the shape before changing its color");
-        const next = { ...existing, props: { ...existing.props, color: op.color }, meta: { ...existing.meta, provenance } } as unknown as UnknownRecord;
+        if (!existing || existing.typeName !== "shape" || existing.type !== "geo") throw badRequest("color or label changes require a native geometric shape");
+        if (existing.isLocked) throw badRequest("unlock the shape before changing it");
+        const patch = op.type === "style" ? { color: op.color } : { richText: richTextOf(op.text) };
+        const next = { ...existing, props: { ...existing.props, ...patch }, meta: { ...existing.meta, provenance } } as unknown as UnknownRecord;
         planned.set(op.shapeId, next);
         puts.push(next);
         shapeIds.push(op.shapeId);

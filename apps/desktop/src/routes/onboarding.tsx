@@ -1,6 +1,6 @@
 import * as React from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { RiSparklingLine } from "@remixicon/react";
+import { KanAppIcon } from "@/components/KanBrand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -104,7 +104,7 @@ function OnboardingPage() {
     <main className="flex min-h-full w-full items-center justify-center bg-background p-6">
       <div className="flex w-full max-w-md flex-col gap-6">
         <div className="flex flex-col items-center gap-2 text-center">
-          <RiSparklingLine className="size-6 text-primary" />
+          <KanAppIcon />
           <h1 className="font-heading text-2xl font-bold tracking-tight">
             {profile ? "Your AI, ready when you are" : "Welcome to Kan"}
           </h1>

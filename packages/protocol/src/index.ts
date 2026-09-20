@@ -2,6 +2,8 @@ import { z } from "zod";
 import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, MAX_ASSISTANT_COOLDOWN_MS } from "./assistant-policy";
 
 export * from "./assistant-policy";
+export * from "./prompts";
+export * from "./direct-canvas";
 export * from "./diagnostics";
 
 const uuid = z.uuid();
@@ -281,6 +283,29 @@ export const GeoColorSchema = z.enum([
   "orange", "green", "light-green", "light-red", "red", "white",
 ]).describe("Native tldraw shape color");
 
+const diagramId = z.string().regex(/^[A-Za-z0-9_-]{1,40}$/);
+export const DiagramInputSchema = z.strictObject({
+  nodes: z.array(z.strictObject({
+    id: diagramId.describe("Unique local node ID, not a canvas shape ID"),
+    label: z.string().min(1).max(120).describe("Short label"),
+    group: diagramId.optional().describe("Local group ID"),
+    geo: z.enum(["rectangle", "ellipse", "diamond"]).optional(),
+    color: GeoColorSchema.optional(),
+  })).min(1).max(40),
+  edges: z.array(z.strictObject({ from: diagramId, to: diagramId, label: z.string().max(80).optional() })).max(80).default([]),
+  groups: z.array(z.strictObject({ id: diagramId, label: z.string().min(1).max(120) })).max(10).default([]),
+  direction: z.enum(["right", "down"]).default("right"),
+  nearShapeId: shapeId.optional(),
+}).refine((diagram) => {
+  const nodes = new Set(diagram.nodes.map(node => node.id));
+  const groups = new Set(diagram.groups.map(group => group.id));
+  return nodes.size === diagram.nodes.length && groups.size === diagram.groups.length
+    && diagram.nodes.every(node => !node.group || groups.has(node.group))
+    && diagram.groups.every(group => diagram.nodes.some(node => node.group === group.id))
+    && diagram.edges.every(edge => nodes.has(edge.from) && nodes.has(edge.to) && edge.from !== edge.to);
+}, "Diagram IDs must be unique, groups nonempty, and references must resolve to distinct nodes");
+export type DiagramInput = z.infer<typeof DiagramInputSchema>;
+
 export const MutationSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("add"),
@@ -303,6 +328,8 @@ export const MutationSchema = z.discriminatedUnion("type", [
     layout: z.enum(["row", "column", "grid"]),
   }),
   z.strictObject({ type: z.literal("style"), shapeId, color: GeoColorSchema }),
+  DiagramInputSchema.safeExtend({ type: z.literal("diagram") }),
+  z.strictObject({ type: z.literal("label"), shapeId, text: z.string().min(1).max(120) }),
 ]);
 export type Mutation = z.infer<typeof MutationSchema>;
 
@@ -320,6 +347,7 @@ export const RunCompleteInput = z.strictObject({ id: uuid, revision: z.string().
 export const CanvasReadInput = z.strictObject({ scope: z.enum(["summary", "selection", "full"]), shapeIds: z.array(shapeId).max(500).optional() });
 export const CanvasToolInputs = {
   getCanvas: CanvasReadInput,
+  addDiagram: DiagramInputSchema.safeExtend({ requestId: uuid.optional() }),
   addNode: MutationSchema.options[0].omit({ type: true }).extend({ requestId: uuid.optional() }),
   updateNode: MutationSchema.options[1].omit({ type: true }).extend({ requestId: uuid.optional() }),
   connectNodes: MutationSchema.options[2].omit({ type: true }).extend({ requestId: uuid.optional() }),
