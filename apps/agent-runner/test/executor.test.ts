@@ -22,7 +22,7 @@ async function waitFor(predicate: () => boolean, timeout = 8000) {
 for (const mode of ["act", "propose"] as const) test(`fake ACP and real MCP ${mode} complete against room server and observer`, async (t) => {
   const ctx = await setup(); ctx.clock.t = Date.now(); t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
-  if (mode === "propose") ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 1, intent: "capture", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 4 };
+  if (mode === "propose") ctx.classifier.next = { triggerProbability: 1 };
   const observer = new EventsClient(ctx.server.port(), room.id, await ticket(u, ctx.base, room.id, "events")); await observer.ready; t.after(() => observer.close());
   const events: ExecutorEvent[] = [];
   const executor = await startRoomExecutor({ serverUrl: ctx.base, roomId: room.id, credential: { userId: u.id, secret: u.secret }, agent: agent(mode), autoClaim: true, onEvent: (event) => events.push(event) }); t.after(() => executor.close());

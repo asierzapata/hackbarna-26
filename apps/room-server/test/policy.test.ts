@@ -1,54 +1,39 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { triggerDecision, type Decision } from "../src/decision-policy";
+import { evaluationQuestions, triggerDecision, type Decision } from "../src/decision-policy";
 import { queryDemoData } from "../src/demo-data";
 import { mapEvaluationAnswers } from "../src/classifier";
 import { NodeDraftSchema, checkChartSpec } from "@kan/protocol";
 
-function decision(partial: Partial<Decision>): Decision {
-  return {
-    addressedProbability: 0,
-    worthCapturingProbability: 0,
-    intent: "none",
-    intentProbability: 0.5,
-    relatedShapeId: null,
-    needsExternalDataProbability: 0,
-    captureScore: 0,
-    ...partial,
-  };
+function decision(triggerProbability: number): Decision {
+  return { triggerProbability };
 }
 
-test("addressed exactly 0.8 does not act, 0.8001 does", () => {
-  assert.equal(triggerDecision(decision({ addressedProbability: 0.8, intent: "answer" })), null);
-  const t = triggerDecision(decision({ addressedProbability: 0.8001, intent: "answer" }));
-  assert.equal(t?.mode, "context");
+test("binary probability must be strictly greater than 0.5", () => {
+  assert.equal(triggerDecision(decision(0)), null);
+  assert.equal(triggerDecision(decision(0.5)), null);
+  assert.equal(triggerDecision(decision(0.5001))?.mode, "context");
 });
 
-test("worthCapturing exactly 0.7 does not propose, 0.7001 does when captureScore >= 2", () => {
-  assert.equal(
-    triggerDecision(decision({ worthCapturingProbability: 0.7, captureScore: 3, intent: "capture" })),
-    null,
-  );
-  const t = triggerDecision(decision({ worthCapturingProbability: 0.7001, captureScore: 2, intent: "capture" }));
-  assert.equal(t?.mode, "context");
+test("a positive binary gate schedules a check without granting edit permission", () => {
+  const trigger = triggerDecision(decision(1));
+  assert.equal(trigger?.mode, "context");
+  assert.equal(trigger?.confidence, 1);
+  assert.equal(trigger?.intent, "answer");
+  assert.match(trigger?.reason ?? "", /no canvas changes/i);
 });
 
-test("captureScore 1.99 blocks propose, 2 allows", () => {
-  assert.equal(
-    triggerDecision(decision({ worthCapturingProbability: 0.9, captureScore: 1.99, intent: "capture" })),
-    null,
-  );
-  assert.equal(
-    triggerDecision(decision({ worthCapturingProbability: 0.9, captureScore: 2, intent: "capture" }))?.mode,
-    "context",
-  );
+test("invalid gate probabilities cannot create triggers", () => {
+  for (const value of [NaN, Infinity, -Infinity, -0.1, 1.1]) assert.equal(triggerDecision(decision(value)), null);
 });
 
-test("intent none always produces no trigger", () => {
-  assert.equal(
-    triggerDecision(decision({ addressedProbability: 1, worthCapturingProbability: 1, captureScore: 4 })),
-    null,
-  );
+test("Jev receives one binary question with identity, addressee, and consent boundaries", () => {
+  const questions = evaluationQuestions();
+  assert.deepEqual(Object.keys(questions), ["shouldTrigger"]);
+  assert.equal(questions.shouldTrigger.type, "boolean");
+  assert.match(questions.shouldTrigger.instructions, /Kan is the AI canvas assistant/);
+  assert.match(questions.shouldTrigger.instructions, /named human/);
+  assert.match(questions.shouldTrigger.instructions, /does not authorize canvas edits/);
 });
 
 test("demo data: filtered 2026-09-17..18 latency rows are 155/150", () => {
@@ -69,32 +54,13 @@ test("demo data: empty window returns no fabricated rows", () => {
   assert.deepEqual(out.rows, []);
 });
 
-test("mapEvaluationAnswers validates bounds and maps fields", () => {
-  const state = { cause: { id: "e", kind: "message" as const, text: "", authorId: "u" }, recentEntries: [], shapes: [{ id: "shape:a", label: "L" }], openSuggestions: [] };
-  const answers = {
-    addressed: { probability: 0.9 },
-    worthCapturing: { probability: 0.2 },
-    intent: { choice: "update", probabilities: { update: 0.7 } },
-    relatedShape: { choice: "shape_0", probabilities: { shape_0: 1 } },
-    needsExternalData: { probability: 0.1 },
-    captureWish: { score: 3 },
-  };
-  const d = mapEvaluationAnswers(answers, state);
-  assert.equal(d.intent, "update");
-  assert.equal(d.relatedShapeId, "shape:a");
-  assert.equal(d.captureScore, 3);
-
-  assert.throws(() =>
-    mapEvaluationAnswers({ ...answers, addressed: { probability: 1.5 } }, state),
-  );
-  assert.throws(() =>
-    mapEvaluationAnswers({ ...answers, intent: { choice: "bogus", probabilities: { bogus: 1 } } }, state),
-  );
-  assert.throws(() =>
-    mapEvaluationAnswers({ ...answers, captureWish: { score: 9 } }, state),
-  );
-  const none = mapEvaluationAnswers({ ...answers, relatedShape: { choice: "none", probabilities: { none: 1 } } }, state);
-  assert.equal(none.relatedShapeId, null);
+test("mapEvaluationAnswers preserves the binary probability and validates its bounds", () => {
+  for (const probability of [0, 0.5, 0.91, 1]) {
+    assert.deepEqual(mapEvaluationAnswers({ shouldTrigger: { probability } }), { triggerProbability: probability });
+  }
+  for (const probability of [NaN, Infinity, -0.1, 1.1, "0.9", null, undefined]) {
+    assert.throws(() => mapEvaluationAnswers({ shouldTrigger: { probability } }));
+  }
 });
 
 test("chart spec rejects url/href/expr/calculate and string filters recursively", () => {

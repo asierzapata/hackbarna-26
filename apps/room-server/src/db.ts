@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const MIGRATIONS: Record<number, string> = {
   1: `
@@ -129,6 +129,11 @@ ALTER TABLE runs ADD COLUMN context TEXT;
 `,
   4: `
 ALTER TABLE rooms ADD COLUMN assistant_eagerness TEXT NOT NULL DEFAULT 'eager';
+`,
+  5: `
+ALTER TABLE rooms ADD COLUMN assistant_threshold REAL NOT NULL DEFAULT 0.5 CHECK(assistant_threshold BETWEEN 0 AND 1);
+ALTER TABLE rooms ADD COLUMN assistant_cooldown_ms INTEGER NOT NULL DEFAULT 15000 CHECK(assistant_cooldown_ms BETWEEN 0 AND 120000);
+UPDATE rooms SET assistant_cooldown_ms=CASE assistant_eagerness WHEN 'relaxed' THEN 60000 WHEN 'balanced' THEN 30000 WHEN 'insistent' THEN 5000 ELSE 15000 END;
 `,
 };
 
