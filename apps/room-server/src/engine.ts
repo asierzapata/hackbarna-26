@@ -12,12 +12,13 @@ import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
 import { createKanSchema, KAN_NODE_TYPE, kanNodeSize } from "@kan/nodes";
-import { type LiveTranscript, type TranscriptInput, AssistantResultSchema, CONTEXT_MAX_AGE_MS, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
   HUMAN_EDIT_DEBOUNCE_MS,
   PROACTIVE_COOLDOWN_MS,
+  PROACTIVE_MAX_WAIT_MS,
   explicitMention,
   triggerDecision,
   type ClassificationState,
@@ -35,6 +36,7 @@ export interface Timings {
   leaseMs: number;
   presenceTtlMs: number;
   debounceMs: number;
+  classifyMaxWaitMs: number;
   cooldownMs: number;
   ticketTtlMs: number;
   roomIdleMs: number;
@@ -46,6 +48,7 @@ export const DEFAULT_TIMINGS: Timings = {
   leaseMs: 30_000,
   presenceTtlMs: 20_000,
   debounceMs: HUMAN_EDIT_DEBOUNCE_MS,
+  classifyMaxWaitMs: PROACTIVE_MAX_WAIT_MS,
   cooldownMs: PROACTIVE_COOLDOWN_MS,
   ticketTtlMs: 30_000,
   roomIdleMs: 60_000,
@@ -124,7 +127,7 @@ export class Engine {
   private readonly schema = createKanSchema();
   private readonly rooms = new Map<string, RoomHandle>();
   private readonly classifierChains = new Map<string, Promise<void>>();
-  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; promise: Promise<void>; resolve: () => void; reject: (error: unknown) => void; previous: Promise<void> }>();
+  private readonly pendingClassification = new Map<string, { cause: Entry; timer: ReturnType<typeof setTimeout>; deadlineAt: number; swept: boolean; promise: Promise<void>; resolve: () => void; reject: (error: unknown) => void; previous: Promise<void> }>();
   private readonly lastAssigned = new Map<string, number>();
   private interval: ReturnType<typeof setInterval> | null = null;
   private broadcastQueue: RoomEvent[] = [];
@@ -258,6 +261,7 @@ export class Engine {
       createdAt: row.created_at as string,
       updatedAt: row.updated_at as string,
       assistantPaused: Boolean(row.assistant_paused),
+      assistantEagerness: (row.assistant_eagerness as AssistantEagerness | null) ?? DEFAULT_EAGERNESS,
     };
   }
 
@@ -439,6 +443,7 @@ export class Engine {
       createdAt: at,
       updatedAt: at,
       assistantPaused: false,
+      assistantEagerness: DEFAULT_EAGERNESS,
     };
 
     try {
@@ -623,25 +628,30 @@ export class Engine {
     return rows.map((r) => ({ ...this.rowToRoom(r), lastOpenedAt: r.lastOpenedAt }));
   }
 
-  patchRoom(user: { id: string; name: string }, roomId: string, input: { name?: string; assistantPaused?: boolean }) {
+  patchRoom(user: { id: string; name: string }, roomId: string, input: { name?: string; assistantPaused?: boolean; assistantEagerness?: AssistantEagerness }) {
     this.requireMember(roomId, user.id);
     const at = nowIso(this.now());
     const current = this.getRoomRow(roomId);
     const name = input.name ?? (current.name as string);
     const assistantPaused = input.assistantPaused ?? Boolean(current.assistant_paused);
+    const eagerness = input.assistantEagerness ?? ((current.assistant_eagerness as AssistantEagerness | null) ?? DEFAULT_EAGERNESS);
     this.transaction( () => {
-      this.db.prepare("UPDATE rooms SET name=?, assistant_paused=?, updated_at=? WHERE id=?").run(name, assistantPaused ? 1 : 0, at, roomId);
-      const entry: Entry = {
-        id: uuid(),
-        roomId,
-        seq: this.nextSeq(roomId),
-        at,
-        kind: "system",
-        text: `${user.name} renamed the room to "${name}"`,
-        authorId: user.id,
-        shapeIds: [],
-      };
-      this.insertEntry(roomId, entry);
+      this.db.prepare("UPDATE rooms SET name=?, assistant_paused=?, assistant_eagerness=?, updated_at=? WHERE id=?").run(name, assistantPaused ? 1 : 0, eagerness, at, roomId);
+      // Only a rename is worth a thread entry. Pacing and pause are settings,
+      // and a system entry here would itself be a classification cause.
+      if (name !== current.name) {
+        const entry: Entry = {
+          id: uuid(),
+          roomId,
+          seq: this.nextSeq(roomId),
+          at,
+          kind: "system",
+          text: `${user.name} renamed the room to "${name}"`,
+          authorId: user.id,
+          shapeIds: [],
+        };
+        this.insertEntry(roomId, entry);
+      }
     });
     if (assistantPaused) this.cancelBackgroundWork(roomId);
     this.flushBroadcasts();
@@ -958,15 +968,29 @@ export class Engine {
 
   // ---------- classification ----------
 
+  // How long to keep deferring the pending cause. Each new cause restarts the
+  // settle timer, but never past the batch's deadline, so a room that keeps
+  // talking is still checked every classifyMaxWaitMs instead of never.
+  private classificationDelay(deadlineAt: number) {
+    return Math.max(0, Math.min(this.timings.debounceMs, deadlineAt - this.now()));
+  }
+
+  /** True when the deadline, not a silence, is what will release the cause. */
+  private sweeping(deadlineAt: number) {
+    return deadlineAt - this.now() < this.timings.debounceMs;
+  }
+
   enqueueClassification(roomId: string, cause: Entry) {
     const pending = this.pendingClassification.get(roomId);
-    if (pending) { pending.cause = cause; clearTimeout(pending.timer); pending.timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs); return; }
+    if (pending) { pending.cause = cause; pending.swept = this.sweeping(pending.deadlineAt); clearTimeout(pending.timer); pending.timer = setTimeout(() => this.flushClassification(roomId), this.classificationDelay(pending.deadlineAt)); return; }
     let resolve!: () => void;
     let reject!: (error: unknown) => void;
     const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
     const previous = this.classifierChains.get(roomId) ?? Promise.resolve();
-    const timer = setTimeout(() => this.flushClassification(roomId), this.timings.debounceMs);
-    this.pendingClassification.set(roomId, { cause, timer, promise, resolve, reject, previous });
+    const maxWaitMs = this.pacing(roomId).maxWaitMs;
+    const deadlineAt = maxWaitMs > 0 ? this.now() + maxWaitMs : Number.POSITIVE_INFINITY;
+    const timer = setTimeout(() => this.flushClassification(roomId), this.classificationDelay(deadlineAt));
+    this.pendingClassification.set(roomId, { cause, timer, deadlineAt, swept: this.sweeping(deadlineAt), promise, resolve, reject, previous });
     this.classifierChains.set(roomId, promise);
     void promise.catch(() => console.error("room-server classification_persistence_error"));
   }
@@ -978,14 +1002,14 @@ export class Engine {
     // A persistence failure has to reach whoever is awaiting this room's
     // classification, but it must not poison the chain: the next cause still
     // runs, which is what lets a restart drain the durable pending queue.
-    void pending.previous.catch(() => {}).then(() => this.processCause(roomId, pending.cause)).then(pending.resolve, pending.reject);
+    void pending.previous.catch(() => {}).then(() => this.processCause(roomId, pending.cause, pending.swept)).then(pending.resolve, pending.reject);
   }
 
   classifierIdle(roomId: string): Promise<void> {
     return this.classifierChains.get(roomId) ?? Promise.resolve();
   }
 
-  private async processCause(roomId: string, cause: Entry) {
+  private async processCause(roomId: string, cause: Entry, swept = false) {
     if (this.stopping || (cause.kind !== "message" && cause.kind !== "system")) return;
     if (!this.db.prepare("SELECT 1 FROM pending_classification WHERE room_id=? AND entry_id=?").get(roomId, cause.id)) return;
     const state = this.buildClassificationState(roomId, cause);
@@ -1005,10 +1029,19 @@ export class Engine {
         status = "failed";
         output = { error: "classifier_unavailable" };
       }
+      // A cause the room has already moved past is normally dropped. A swept
+      // check is deliberately the busy case — the room was still talking when
+      // the deadline fired — so newer entries are expected and only re-anchor
+      // the decision. The assistant policy still tells it to stay silent when
+      // the subject has genuinely moved on.
       const latest = this.db.prepare("SELECT MAX(seq) AS seq FROM entries WHERE room_id=? AND seq>? AND kind IN ('message','system')").get(roomId, cause.seq) as { seq: number | null };
       if (latest.seq !== null) {
-        plan = null;
-        status = "stale";
+        if (swept) {
+          status = "swept";
+        } else {
+          plan = null;
+          status = "stale";
+        }
       }
     }
     if (this.stopping) return;
@@ -1026,11 +1059,20 @@ export class Engine {
     this.tick();
   }
 
+  // The room's own pacing, falling back to the server defaults for a room that
+  // is not in the database yet (a local canvas classifying before it is shared).
+  private pacing(roomId: string) {
+    const row = this.db.prepare("SELECT assistant_eagerness FROM rooms WHERE id=?").get(roomId) as { assistant_eagerness: string | null } | undefined;
+    if (!row) return { maxWaitMs: this.timings.classifyMaxWaitMs, cooldownMs: this.timings.cooldownMs };
+    const preset = eagernessPacing(row.assistant_eagerness);
+    return { maxWaitMs: preset.maxWaitMs, cooldownMs: preset.cooldownMs };
+  }
+
   private inCooldown(roomId: string): boolean {
     const row = this.db.prepare("SELECT last_propose_at FROM rooms WHERE id=?").get(roomId) as
       | { last_propose_at: number }
       | undefined;
-    return !!row && row.last_propose_at > 0 && this.now() - row.last_propose_at < this.timings.cooldownMs;
+    return !!row && row.last_propose_at > 0 && this.now() - row.last_propose_at < this.pacing(roomId).cooldownMs;
   }
 
   private recordDecision(roomId: string, cause: Entry, stateHash: string, status: string, output: unknown, triggerId: string | null) {

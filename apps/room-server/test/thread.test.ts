@@ -161,3 +161,106 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
 });
+
+// A conversation that never pauses used to starve the contextual check: each
+// message restarted the settle timer, so it never expired. The eagerness preset
+// caps that wait, and a cause released by the deadline tolerates the newer
+// entries that arrive while the classifier is thinking.
+function gatedClassifier(ctx: any, worthCapturing: boolean) {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  let started!: () => void;
+  const first = new Promise<void>((resolve) => { started = resolve; });
+  ctx.classifier.next = async () => {
+    started();
+    await gate;
+    return { addressedProbability: 0, worthCapturingProbability: worthCapturing ? 0.9 : 0, intent: worthCapturing ? "capture" : "none", intentProbability: 0.9, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: worthCapturing ? 3 : 0 };
+  };
+  return { open, first };
+}
+
+test("eagerness caps how long a busy room defers the contextual check", async (t) => {
+  const ctx = await setup({ timings: { debounceMs: 500 } });
+  t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
+
+  const patched = await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantEagerness: "insistent" }) });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.room.assistantEagerness, "insistent");
+
+  const { open, first } = gatedClassifier(ctx, true);
+  // Insistent allows a 4s deferral. Two messages 3.9s apart leave 100ms of it,
+  // so the second is released by the deadline rather than by a silence.
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "we keep talking about the venue" });
+  ctx.clock.advance(3_900);
+  const causeId = randomUUID();
+  await postMsg(ctx, u, room.id, { id: causeId, text: "and the budget too" });
+  await first;
+  // Still talking while the classifier thinks: this is what used to be "stale".
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "and the sponsors" });
+  open();
+  await ctx.server.engine.classifierIdle(room.id);
+
+  const status = ctx.server.engine.db.prepare("SELECT status FROM decisions WHERE entry_id=?").get(causeId)!.status;
+  assert.equal(status, "swept");
+  const triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
+  assert.equal(triggers.length, 1);
+  assert.equal(triggers[0].mode, "context");
+});
+
+test("without deadline pressure a superseded cause is still dropped as stale", async (t) => {
+  const ctx = await setup({ timings: { debounceMs: 500 } });
+  t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantEagerness: "relaxed" }) });
+
+  const { open, first } = gatedClassifier(ctx, true);
+  const causeId = randomUUID();
+  await postMsg(ctx, u, room.id, { id: causeId, text: "one question" });
+  await first;
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "never mind, moved on" });
+  open();
+  await ctx.server.engine.classifierIdle(room.id);
+
+  const decision = ctx.server.engine.db.prepare("SELECT status,trigger_id FROM decisions WHERE entry_id=?").get(causeId)!;
+  assert.equal(decision.status, "stale");
+  assert.equal(decision.trigger_id, null);
+});
+
+test("eagerness selects the contextual cooldown and survives a room reload", async (t) => {
+  const ctx = await setup();
+  t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
+  assert.equal((await api(u, ctx.base, `/rooms/${room.id}`)).body.room.assistantEagerness, "eager");
+
+  ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 0.9, intent: "capture", intentProbability: 0.9, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 3 };
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "first cause" });
+  await ctx.server.engine.classifierIdle(room.id);
+  assert.equal((await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers.length, 1);
+
+  // 20s is past eager's 15s cooldown but inside relaxed's 60s one.
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantEagerness: "relaxed" }) });
+  ctx.clock.advance(20_000);
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "second cause" });
+  await ctx.server.engine.classifierIdle(room.id);
+  assert.equal((await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers.length, 1);
+
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantEagerness: "eager" }) });
+  await postMsg(ctx, u, room.id, { id: randomUUID(), text: "third cause" });
+  await ctx.server.engine.classifierIdle(room.id);
+  assert.equal((await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers.length, 2);
+});
+
+test("a settings-only patch does not post a rename entry that would itself be a cause", async (t) => {
+  const ctx = await setup();
+  t.after(() => ctx.cleanup());
+  const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
+  const before = (await api(u, ctx.base, `/rooms/${room.id}/thread`)).body.entries.length;
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantEagerness: "insistent" }) });
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ assistantPaused: true }) });
+  assert.equal((await api(u, ctx.base, `/rooms/${room.id}/thread`)).body.entries.length, before);
+  await api(u, ctx.base, `/rooms/${room.id}`, { method: "PATCH", body: JSON.stringify({ name: "Renamed" }) });
+  const entries = (await api(u, ctx.base, `/rooms/${room.id}/thread`)).body.entries;
+  assert.equal(entries.length, before + 1);
+  assert.match(entries[entries.length - 1].text, /renamed the room to "Renamed"/);
+});

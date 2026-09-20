@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { openDb } from "../src/db";
 import { createRoomServer, type RoomServer } from "../src/server";
+import { DEFAULT_TIMINGS } from "../src/engine";
 import type { Classifier } from "../src/classifier";
 import type { VideoProvider } from "../src/video";
 import type { ClassificationState, Decision } from "../src/decision-policy";
@@ -81,7 +82,7 @@ export async function setup(overrides: {
     maxSendBuffer: overrides.maxSendBuffer,
     classifier: overrides.classifier === undefined ? classifier : overrides.classifier,
     video: overrides.video === undefined ? video : overrides.video,
-    timings: { tickMs: 0, offerMs: 5000, leaseMs: 30_000, presenceTtlMs: 20_000, debounceMs: 2000, cooldownMs: 30_000, ticketTtlMs: 30_000, roomIdleMs: 60_000, ...overrides.timings },
+    timings: { ...DEFAULT_TIMINGS, tickMs: 0, ...overrides.timings },
   });
   await new Promise<void>((res) => server.server.listen(0, "127.0.0.1", res));
   const base = `http://127.0.0.1:${server.port()}`;

@@ -1,4 +1,4 @@
-import { AssistantResultSchema, CONTEXT_COOLDOWN_MS, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, EntrySchema, explicitInvocation, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
+import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, DEFAULT_EAGERNESS, eagernessPacing, type AssistantEagerness, EntrySchema, explicitInvocation, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
 import { toViewEntry, type RoomTransport, type SendInput, type RoomSnapshot } from "./room-transport";
 import type { AssistantPreferences } from "./assistant-controller";
 import type { ThreadEntry } from "./thread";
@@ -34,7 +34,11 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
   let init: Promise<void> | undefined, release: (() => void) | undefined;
   let queue = Promise.resolve();
   let cooldownUntil = 0;
+  let pacing = eagernessPacing(DEFAULT_EAGERNESS);
   let contextTimer: ReturnType<typeof setTimeout> | undefined;
+  // Deadline for the current batch of causes: restarting the settle timer must
+  // not defer the check past it, or a room that keeps talking is never checked.
+  let contextDeadline = 0;
   let closeTimer: ReturnType<typeof setTimeout> | undefined;
   let problem: string | undefined;
   const at = () => new Date().toISOString();
@@ -143,16 +147,18 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
   const scheduleContext = () => {
     clearTimeout(contextTimer);
     if (!capable || !preferences.background || preferences.scope === "manual") return;
+    if (pacing.maxWaitMs > 0 && contextDeadline <= Date.now()) contextDeadline = Date.now() + pacing.maxWaitMs;
     contextTimer = setTimeout(() => {
+      contextDeadline = 0;
       void transact(() => {
         if (!capable || !preferences.background || Date.now() < cooldownUntil) return;
         if (entries.some((entry) => (entry.kind === "trigger" && ["pending", "offered", "running", "needs_claim"].includes(entry.trigger.status)) || ((entry.kind === "offer" || entry.kind === "suggestion") && entry.status === "open"))) return;
         const causes = entries.filter((entry) => entry.kind === "message").slice(-20).map((entry) => entry.id);
         if (!causes.length) return;
         addTrigger(causes, "context");
-        cooldownUntil = Date.now() + CONTEXT_COOLDOWN_MS;
+        cooldownUntil = Date.now() + pacing.cooldownMs;
       }).catch((error) => { problem = String(error); publish(); });
-    }, CONTEXT_SETTLE_MS);
+    }, pacing.maxWaitMs > 0 ? Math.max(0, Math.min(CONTEXT_SETTLE_MS, contextDeadline - Date.now())) : CONTEXT_SETTLE_MS);
   };
   return {
     subscribe(listener, onSnapshot) {
@@ -296,6 +302,10 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
         trigger.status = "pending"; trigger.runId = null; trigger.createdAt = Date.now();
         fresh.add(triggerId); refreshOffers();
       });
+    },
+    setAssistantEagerness(value: AssistantEagerness) {
+      pacing = eagernessPacing(value);
+      scheduleContext();
     },
     setExecutorReady(ready, name, scope, background) {
       capable = ready; agentId = name; preferences = { scope, background };

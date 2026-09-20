@@ -1,4 +1,4 @@
-import type { AssistantResult, Entry, Room, RoomEvent, User } from "@kan/protocol";
+import type { AssistantEagerness, AssistantResult, Entry, Room, RoomEvent, User } from "@kan/protocol";
 import { getInstallationProfile, type InstallationProfile } from "./installation-profile";
 
 export interface ServerRoomSummary {
@@ -10,6 +10,7 @@ export interface ServerRoomSummary {
   createdAt: string;
   updatedAt: string;
   assistantPaused?: boolean;
+  assistantEagerness?: AssistantEagerness;
   lastOpenedAt?: string | null;
 }
 
@@ -170,7 +171,7 @@ export async function publishServerRoom(payload: {
   return res.json() as Promise<PublishResult>;
 }
 
-export async function patchServerRoom(roomId: string, input: { name?: string; assistantPaused?: boolean }): Promise<RoomDetailResponse> {
+export async function patchServerRoom(roomId: string, input: { name?: string; assistantPaused?: boolean; assistantEagerness?: AssistantEagerness }): Promise<RoomDetailResponse> {
   await ensureBackendIdentity();
   const res = await authenticatedFetch(`/rooms/${roomId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
   if (!res.ok) throw new Error(`Failed to patch room: ${res.status}`);
