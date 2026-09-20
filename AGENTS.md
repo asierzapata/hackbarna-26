@@ -375,6 +375,11 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   data; following uses tldraw's native start/stop-following methods.
 - Focused media lifecycle checks: `npx tsx --test apps/desktop/test/room-media.test.ts`.
   Live multi-person media and follow-view checks still require two room clients.
+- Native call UI regression: `node scripts/call-theme.e2e.mjs` mounts the real
+  lobby and participant strip with synthetic media and a controlled subscriber.
+  It tests styling, device controls, permission states, retry and narrow layouts;
+  it does not contact Vonage or capture real devices. Set `TAURI_WEBDRIVER_URL`
+  for an isolated instance and do not drive concurrently.
 
 ## Queued bug regressions
 
