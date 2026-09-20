@@ -701,3 +701,8 @@ build or substitute a previous DMG when a fresh build fails.
   descendant: an empty draft disables Send but must not fade the textarea.
 - UI styling can be checked in an isolated native instance with a separate app
   identifier, Vite port and WebDriver port; do not drive the user's active window.
+- The landing site is static HTML and Tailwind, not React/shadcn. Its independent
+  tokens in `apps/site/src/styles.css` mirror the app's system fonts, neutral
+  surfaces, blue accents and radii. Keep them aligned without importing desktop
+  CSS. Verify the production preview at desktop and mobile widths, including
+  keyboard FAQ toggles, anchor navigation and the unchanged DMG download.

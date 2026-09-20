@@ -15,7 +15,7 @@
   </head>
   <body class="flex min-h-screen flex-col bg-paper font-sans text-ink antialiased">
     <a href="#main" class="skip-link">Skip to content</a>
-    <header class="sticky top-0 z-50 border-b border-line bg-paper/95 backdrop-blur-md">
+    <header class="site-header sticky top-0 z-50 border-b border-line">
       <div class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
         <a href="#main" aria-label="Kan home" class="flex shrink-0 items-center gap-2 text-lg font-semibold tracking-tight">
           <svg viewBox="0 0 48 48" class="size-7" aria-hidden="true">
@@ -24,7 +24,7 @@
             <circle cx="42" cy="24" r="3" class="fill-human-line" />
           </svg>
           Kan
-          <span class="ml-2 border border-line px-1.5 py-0.5 font-mono text-[10px] font-normal tracking-wide text-ink-subtle">ALPHA</span>
+          <span class="ml-1 rounded-sm bg-paper px-2 py-1 text-[10px] font-medium tracking-wide text-ink-subtle">ALPHA</span>
         </a>
         <nav aria-label="Main navigation" class="hidden items-center gap-7 text-sm text-ink-muted md:flex">
           <a href="#canvas">The canvas</a>
@@ -37,8 +37,8 @@
 
     <main id="main" class="grow" tabindex="-1">
       <!-- HERO -->
-      <section aria-labelledby="hero-title" class="mx-auto max-w-6xl px-5 pt-12 pb-9 sm:px-8 sm:pt-16 sm:pb-12">
-        <p class="eyebrow mb-4 flex items-center gap-2.5"><span class="size-1.5 bg-agent" aria-hidden="true"></span>An AI canvas for macOS</p>
+      <section aria-labelledby="hero-title" class="mx-auto max-w-6xl px-5 pt-14 pb-10 sm:px-8 sm:pt-20 sm:pb-14">
+        <p class="eyebrow mb-4 flex items-center gap-2.5"><span class="size-1.5 rounded-full bg-agent" aria-hidden="true"></span>An AI canvas for macOS</p>
         <h1 id="hero-title" class="max-w-4xl text-[2.5rem] leading-[1.08] font-semibold tracking-[-0.045em] sm:text-6xl lg:text-[4.25rem]">
           Turn scattered ideas<br class="hidden sm:block" /> into a clear plan.
         </h1>
@@ -56,10 +56,10 @@
 
       <!-- CANVAS PREVIEW -->
       <section id="canvas" aria-labelledby="canvas-title" class="mx-auto max-w-6xl px-5 sm:px-8">
-        <div class="overflow-hidden border border-line bg-card">
+        <div class="panel overflow-hidden shadow-window">
           <div class="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line px-5 py-4 sm:px-7">
             <h2 id="canvas-title" class="text-sm font-medium">A brief becomes a working plan.</h2>
-            <span class="font-mono text-xs text-ink-subtle">Illustrative example</span>
+            <span class="rounded-sm bg-paper px-2.5 py-1 text-xs text-ink-subtle">Illustrative example</span>
           </div>
           <div class="canvas-dots grid items-start gap-6 p-4 sm:p-7 lg:grid-cols-[0.85fr_1.4fr] lg:gap-10 lg:p-9">
             <div class="flex min-w-0 flex-col gap-4">
@@ -71,18 +71,18 @@
                   Plan our team offsite. Leave time to get to know each other, review the quarter,
                   and decide what comes next.
                 </p>
-                <p class="mt-4 border-l-2 border-human-line pl-3 text-sm leading-relaxed text-human">
+                <p class="mt-4 rounded-md bg-human-soft px-3 py-2.5 text-sm leading-relaxed text-human">
                   Keep the second morning free for the workshop.
                 </p>
               </article>
               <!-- What the agent is doing about it -->
-              <div class="border border-agent/30 bg-agent-soft p-5">
+              <div class="rounded-xl border border-agent/15 bg-agent-soft p-5">
                 <p class="eyebrow mb-2 text-agent">02 / Your request</p>
                 <p class="text-sm leading-relaxed">“Turn this into a two-day schedule. Put the sessions in a table next to my brief.”</p>
               </div>
             </div>
             <div class="flex min-w-0 flex-col gap-4">
-              <article class="example-card border-t-2 border-t-agent">
+              <article class="example-card">
                 <div class="mb-5 flex flex-wrap items-center justify-between gap-2">
                   <p class="eyebrow text-agent">03 / A draft to work with</p>
                   <span class="text-xs text-ink-subtle">Offsite schedule</span>
@@ -101,7 +101,7 @@
                 <p class="mt-4 text-xs leading-relaxed text-ink-subtle">The workshop stays in place. The rest is a starting point, not a final decision.</p>
               </article>
               <!-- What it wants a human to decide -->
-              <div class="flex items-start gap-3 border border-line bg-card p-4">
+              <div class="panel flex items-start gap-3 p-5">
                 <span class="mt-0.5 text-agent" aria-hidden="true">↳</span>
                 <div>
                   <h3 class="text-sm font-medium">Keep shaping it.</h3>
@@ -126,21 +126,21 @@
             ready to move, connect, and refine.
           </p>
         </div>
-        <div class="mt-9 grid gap-8 md:grid-cols-3">
-          <article class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent">01 / Plan</span>
+        <div class="mt-9 grid gap-4 md:grid-cols-3">
+          <article class="panel p-6">
+            <span class="workflow-label">01 / Plan</span>
             <h3 class="mt-3 text-lg font-semibold">Find the next step.</h3>
             <p class="mt-2 text-sm leading-relaxed text-ink-muted">Turn a rough brief into a timeline or a calendar. Keep the constraints beside the plan as it takes shape.</p>
             <p class="mt-4 text-sm leading-relaxed">“Lay out the milestones between now and launch.”</p>
           </article>
-          <article class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent">02 / Compare</span>
+          <article class="panel p-6">
+            <span class="workflow-label">02 / Compare</span>
             <h3 class="mt-3 text-lg font-semibold">See your options side by side.</h3>
             <p class="mt-2 text-sm leading-relaxed text-ink-muted">Give your notes some structure. Ask for a comparison table so the trade-offs are easier to discuss.</p>
             <p class="mt-4 text-sm leading-relaxed">“Compare these three options using the notes on my board.”</p>
           </article>
-          <article class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent">03 / Map</span>
+          <article class="panel p-6">
+            <span class="workflow-label">03 / Map</span>
             <h3 class="mt-3 text-lg font-semibold">Make the connections visible.</h3>
             <p class="mt-2 text-sm leading-relaxed text-ink-muted">Turn a process into a diagram. Rearrange the steps, edit the labels, and work through what’s missing.</p>
             <p class="mt-4 text-sm leading-relaxed">“Draw this flow and show where the decision happens.”</p>
@@ -158,11 +158,11 @@
             <a href="#room-details" class="text-link mt-5 inline-flex min-h-11 items-center text-sm">What to know about rooms <span class="ml-2" aria-hidden="true">↓</span></a>
           </div>
           <div class="flex flex-col gap-6 lg:pt-2">
-            <div class="border-l-2 border-agent/40 pl-5">
+            <div class="rounded-xl bg-paper p-6">
               <h3 class="text-base font-medium">Work on the same board.</h3>
               <p class="mt-1 text-sm leading-relaxed text-ink-muted">See each other’s changes and follow a teammate’s view as they walk you through an idea.</p>
             </div>
-            <div class="border-l-2 border-agent/40 pl-5">
+            <div class="rounded-xl bg-paper p-6">
               <h3 class="text-base font-medium">Keep the conversation beside the work.</h3>
               <p class="mt-1 text-sm leading-relaxed text-ink-muted">Rooms support video and live transcription. Final transcripts stay in the room’s conversation, alongside the board.</p>
             </div>
@@ -177,7 +177,7 @@
           <h2 id="faq-title" class="section-title">Before you begin.</h2>
           <p class="mt-4 text-sm leading-relaxed text-ink-muted">Solo canvases live on your Mac.<br />Your AI runs through your chosen provider.</p>
         </div>
-        <div class="min-w-0 border-t border-line">
+        <div class="panel min-w-0 self-start px-5 sm:px-6">
           <details class="faq-item">
             <summary>Which AI accounts can I use?</summary>
             <div class="faq-answer">
@@ -230,7 +230,7 @@
       </section>
 
       <!-- DOWNLOAD -->
-      <section id="download" aria-labelledby="download-title" class="border-t border-line bg-agent-soft/45">
+      <section id="download" aria-labelledby="download-title" class="border-t border-line bg-agent-soft">
         <div class="mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:px-8 sm:py-16 lg:grid-cols-2 lg:gap-16">
           <div>
             <img src="/app-icon.png" alt="" width="64" height="64" loading="lazy" class="mb-5 size-16" />
@@ -244,7 +244,7 @@
             <!-- TODO: state the minimum macOS version once you cut a build. -->
             <p class="mt-3 text-xs leading-relaxed text-ink-subtle">Apple Silicon (M1 or later) · DMG · Alpha</p>
           </div>
-          <div class="border border-line bg-card p-5 sm:p-7">
+          <div class="panel p-5 sm:p-7">
             <h3 class="text-base font-semibold">Your first canvas, in three steps.</h3>
             <ol class="mt-5 flex list-decimal flex-col gap-5 pl-5 text-sm marker:text-agent">
               <li class="pl-1">

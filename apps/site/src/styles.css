@@ -1,37 +1,40 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
-@import "@fontsource-variable/jetbrains-mono";
 
 /* The same tokens the app uses, restated here rather than imported: the site
    has no reason to depend on the desktop workspace, and these five colours are
    the whole system. Keep them in step with apps/desktop/src/styles.css. */
 @theme {
-  --color-paper: #fbfaf8;
+  --color-paper: #f5f5f7;
   --color-card: #ffffff;
-  --color-ink: #1a1a1a;
-  --color-ink-muted: #5f5d59;
-  --color-ink-subtle: #6e6b66;
-  --color-line: #e5e3dc;
-  --color-line-subtle: #eceae4;
-  --color-agent: #4b4de8;
-  --color-agent-soft: #eef0fd;
+  --color-ink: #1d1d1f;
+  --color-ink-muted: #6e6e73;
+  --color-ink-subtle: #6e6e73;
+  --color-line: #e2e2e7;
+  --color-line-subtle: #ededf0;
+  --color-agent: #0067d9;
+  --color-agent-soft: #f1f6ff;
   --color-human: #855716;
   --color-human-line: #d19a4a;
   --color-human-soft: #fbf5ed;
 
-  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, monospace;
 
   /* Squared, like the app's canvas chrome. */
-  --radius-sm: 0px;
-  --radius-md: 0px;
-  --radius-lg: 0px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-panel: 0 2px 8px rgb(0 0 0 / 3%);
+  --shadow-window: 0 8px 28px rgb(0 0 0 / 5%);
 }
 
 /* The canvas preview's dot field, matching the density used in the app. */
 .canvas-dots {
   background-color: var(--color-paper);
-  background-image: radial-gradient(#e2dfd7 1px, transparent 1px);
+  background-image: radial-gradient(var(--color-line) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -65,12 +68,23 @@ html {
 }
 
 @layer components {
+  .site-header {
+    background: color-mix(in srgb, var(--color-card) 88%, transparent);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+  }
+
   .button {
-    @apply inline-flex min-h-12 items-center justify-center gap-3 bg-ink px-5 py-3 text-sm font-medium text-white transition-colors;
+    @apply inline-flex min-h-12 items-center justify-center gap-3 rounded-md bg-agent px-5 py-3 text-sm font-medium text-white shadow-panel transition-colors;
   }
 
   .button:hover {
-    @apply bg-agent text-white;
+    background-color: color-mix(in srgb, var(--color-agent) 90%, var(--color-ink));
+    @apply text-white;
+  }
+
+  .button:active {
+    translate: 0 1px;
   }
 
   .button-small {
@@ -78,11 +92,11 @@ html {
   }
 
   .text-link {
-    @apply underline decoration-line underline-offset-4 hover:decoration-ink;
+    @apply text-agent underline decoration-agent/30 underline-offset-4 hover:text-agent hover:decoration-agent;
   }
 
   .eyebrow {
-    @apply font-mono text-[11px] leading-relaxed tracking-wider text-ink-subtle uppercase;
+    @apply text-xs leading-relaxed font-medium text-ink-subtle;
   }
 
   .section-title {
@@ -90,8 +104,16 @@ html {
     text-wrap: balance;
   }
 
+  .panel {
+    @apply rounded-xl border border-line bg-card shadow-panel;
+  }
+
   .example-card {
-    @apply min-w-0 border border-line bg-card p-4 sm:p-5;
+    @apply min-w-0 rounded-xl border border-line bg-card p-5 shadow-panel sm:p-6;
+  }
+
+  .workflow-label {
+    @apply inline-flex items-center rounded-sm bg-agent-soft px-2.5 py-1 text-xs font-medium text-agent;
   }
 
   .schedule {
@@ -121,11 +143,11 @@ html {
   }
 
   .faq-item {
-    @apply border-b border-line;
+    @apply border-b border-line last:border-b-0;
   }
 
   .faq-item summary {
-    @apply cursor-pointer py-5 pr-3 text-sm leading-relaxed font-medium;
+    @apply cursor-pointer rounded-md py-5 pr-3 text-base leading-relaxed font-medium transition-colors hover:text-agent;
   }
 
   .faq-item summary::marker {
