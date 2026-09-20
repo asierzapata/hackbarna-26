@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS } from "./assistant-policy";
+import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, MAX_ASSISTANT_COOLDOWN_MS } from "./assistant-policy";
 
 export * from "./assistant-policy";
 export * from "./diagnostics";
@@ -134,6 +134,12 @@ export type NodeDraft = z.infer<typeof NodeDraftSchema>;
 export const UserSchema = z.strictObject({ id: uuid, name: z.string().min(1).max(80) });
 export type User = z.infer<typeof UserSchema>;
 
+export const AssistantSettingsSchema = z.strictObject({
+  assistantThreshold: z.number().min(0).max(1),
+  assistantCooldownMs: z.number().int().min(0).max(MAX_ASSISTANT_COOLDOWN_MS),
+});
+export type AssistantSettings = z.infer<typeof AssistantSettingsSchema>;
+
 export const RoomSchema = z.strictObject({
   id: uuid,
   localCanvasId: uuid,
@@ -144,6 +150,8 @@ export const RoomSchema = z.strictObject({
   updatedAt: isoDate,
   assistantPaused: z.boolean().optional().default(false),
   assistantEagerness: z.enum(ASSISTANT_EAGERNESS).optional().default(DEFAULT_EAGERNESS),
+  assistantThreshold: AssistantSettingsSchema.shape.assistantThreshold.optional(),
+  assistantCooldownMs: AssistantSettingsSchema.shape.assistantCooldownMs.optional(),
 });
 export type Room = z.infer<typeof RoomSchema>;
 
@@ -329,7 +337,9 @@ export const PatchRoomInput = z.strictObject({
   name: z.string().min(1).max(120).optional(),
   assistantPaused: z.boolean().optional(),
   assistantEagerness: z.enum(ASSISTANT_EAGERNESS).optional(),
-}).refine((value) => value.name !== undefined || value.assistantPaused !== undefined || value.assistantEagerness !== undefined, "at least one field is required");
+  assistantThreshold: AssistantSettingsSchema.shape.assistantThreshold.optional(),
+  assistantCooldownMs: AssistantSettingsSchema.shape.assistantCooldownMs.optional(),
+}).refine((value) => Object.values(value).some((field) => field !== undefined), "at least one field is required");
 export const JoinInput = z.strictObject({ code: z.string().min(1).max(32) });
 export const ImportedMessageInput = z.strictObject({
   id: uuid,

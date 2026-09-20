@@ -12,7 +12,7 @@ import { type TLBaseShape } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
 import { createKanSchema, KAN_NODE_TYPE, kanNodeSize } from "@kan/nodes";
-import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
+import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
   EXPLICIT_TRIGGER,
@@ -262,6 +262,8 @@ export class Engine {
       updatedAt: row.updated_at as string,
       assistantPaused: Boolean(row.assistant_paused),
       assistantEagerness: (row.assistant_eagerness as AssistantEagerness | null) ?? DEFAULT_EAGERNESS,
+      assistantThreshold: Number(row.assistant_threshold ?? DEFAULT_ASSISTANT_THRESHOLD),
+      assistantCooldownMs: Number(row.assistant_cooldown_ms ?? CONTEXT_COOLDOWN_MS),
     };
   }
 
@@ -444,6 +446,8 @@ export class Engine {
       updatedAt: at,
       assistantPaused: false,
       assistantEagerness: DEFAULT_EAGERNESS,
+      assistantThreshold: DEFAULT_ASSISTANT_THRESHOLD,
+      assistantCooldownMs: CONTEXT_COOLDOWN_MS,
     };
 
     try {
@@ -628,15 +632,17 @@ export class Engine {
     return rows.map((r) => ({ ...this.rowToRoom(r), lastOpenedAt: r.lastOpenedAt }));
   }
 
-  patchRoom(user: { id: string; name: string }, roomId: string, input: { name?: string; assistantPaused?: boolean; assistantEagerness?: AssistantEagerness }) {
+  patchRoom(user: { id: string; name: string }, roomId: string, input: { name?: string; assistantPaused?: boolean; assistantEagerness?: AssistantEagerness; assistantThreshold?: number; assistantCooldownMs?: number }) {
     this.requireMember(roomId, user.id);
     const at = nowIso(this.now());
     const current = this.getRoomRow(roomId);
     const name = input.name ?? (current.name as string);
     const assistantPaused = input.assistantPaused ?? Boolean(current.assistant_paused);
     const eagerness = input.assistantEagerness ?? ((current.assistant_eagerness as AssistantEagerness | null) ?? DEFAULT_EAGERNESS);
+    const threshold = input.assistantThreshold ?? Number(current.assistant_threshold);
+    const cooldownMs = input.assistantCooldownMs ?? (input.assistantEagerness ? eagernessPacing(eagerness).cooldownMs : Number(current.assistant_cooldown_ms));
     this.transaction( () => {
-      this.db.prepare("UPDATE rooms SET name=?, assistant_paused=?, assistant_eagerness=?, updated_at=? WHERE id=?").run(name, assistantPaused ? 1 : 0, eagerness, at, roomId);
+      this.db.prepare("UPDATE rooms SET name=?, assistant_paused=?, assistant_eagerness=?, assistant_threshold=?, assistant_cooldown_ms=?, updated_at=? WHERE id=?").run(name, assistantPaused ? 1 : 0, eagerness, threshold, cooldownMs, at, roomId);
       // Only a rename is worth a thread entry. Pacing and pause are settings,
       // and a system entry here would itself be a classification cause.
       if (name !== current.name) {
@@ -1022,9 +1028,9 @@ export class Engine {
     if (!explicit && this.classifier) {
       try {
         const decision = await this.classifier.decide(state);
-        output = decision;
-        plan = triggerDecision(decision);
-        if (decision.relatedShapeId && !anchors.includes(decision.relatedShapeId)) anchors.push(decision.relatedShapeId);
+        const triggerThreshold = Number(this.getRoomRow(roomId).assistant_threshold);
+        output = { ...decision, triggerThreshold };
+        plan = triggerDecision(decision, triggerThreshold);
       } catch {
         status = "failed";
         output = { error: "classifier_unavailable" };
@@ -1062,10 +1068,10 @@ export class Engine {
   // The room's own pacing, falling back to the server defaults for a room that
   // is not in the database yet (a local canvas classifying before it is shared).
   private pacing(roomId: string) {
-    const row = this.db.prepare("SELECT assistant_eagerness FROM rooms WHERE id=?").get(roomId) as { assistant_eagerness: string | null } | undefined;
+    const row = this.db.prepare("SELECT assistant_eagerness,assistant_cooldown_ms FROM rooms WHERE id=?").get(roomId) as { assistant_eagerness: string | null; assistant_cooldown_ms: number } | undefined;
     if (!row) return { maxWaitMs: this.timings.classifyMaxWaitMs, cooldownMs: this.timings.cooldownMs };
     const preset = eagernessPacing(row.assistant_eagerness);
-    return { maxWaitMs: preset.maxWaitMs, cooldownMs: preset.cooldownMs };
+    return { maxWaitMs: preset.maxWaitMs, cooldownMs: row.assistant_cooldown_ms };
   }
 
   private inCooldown(roomId: string): boolean {

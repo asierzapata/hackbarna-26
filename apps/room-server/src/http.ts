@@ -3,6 +3,9 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { ZodError, z } from "zod";
 import {
   ALLOWED_ASSET_TYPES,
+  CONTEXT_COOLDOWN_MS,
+  DEFAULT_ASSISTANT_THRESHOLD,
+  MAX_ASSISTANT_COOLDOWN_MS,
   CanvasReadInput,
   ClaimInput,
   CreateRoomInput,
@@ -23,6 +26,7 @@ import {
   SuggestionInput,
 } from "@kan/protocol";
 import type { Engine } from "./engine";
+import { CLASSIFIER_POLICY_VERSION } from "./decision-policy";
 import { ApiError, badRequest, tooLarge, tooMany } from "./errors";
 
 const MAX_JSON_BODY = 8 * 1024 * 1024;
@@ -146,7 +150,17 @@ export function createApp(engine: Engine, allowedOrigins: string[]) {
   };
 
   app.get("/health", (c) =>
-    c.json({ ok: true, classifier: engine.classifier ? "jev" : "disabled", video: !!engine.video }),
+    c.json({
+      ok: true,
+      classifier: engine.classifier ? "jev" : "disabled",
+      video: !!engine.video,
+      assistantSettings: {
+        version: 1,
+        policy: CLASSIFIER_POLICY_VERSION,
+        threshold: { min: 0, max: 1, default: DEFAULT_ASSISTANT_THRESHOLD },
+        cooldownMs: { min: 0, max: MAX_ASSISTANT_COOLDOWN_MS, default: CONTEXT_COOLDOWN_MS },
+      },
+    }),
   );
 
   app.post("/users/register", async (c) => {

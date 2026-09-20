@@ -38,7 +38,7 @@ async function launch(dir: string) {
 test("actual server main process: startup health two-user rooms messages events graceful shutdown and restart", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kan-main-test-"));
   const first = await launch(dir); t.after(async () => { await first.stop(); rmSync(dir, { recursive: true, force: true }); });
-  const health = await (await fetch(`${first.base}/health`)).json(); assert.deepEqual(health, { ok: true, classifier: "disabled", video: false });
+  const health = await (await fetch(`${first.base}/health`)).json(); assert.deepEqual(health, { ok: true, classifier: "disabled", video: false, assistantSettings: { version: 1, policy: "binary-context-v1", threshold: { min: 0, max: 1, default: 0.5 }, cooldownMs: { min: 0, max: 120_000, default: 15_000 } } });
   const owner = await registerUser(first.base, "Owner"), member = await registerUser(first.base, "Member");
   const room = await createRoom(owner, first.base);
   assert.equal((await api(member, first.base, "/rooms/join", { method: "POST", body: JSON.stringify({ code: room.code }) })).status, 200);

@@ -9,6 +9,7 @@ import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, EAGERNESS_PACING, type Assistan
 
 import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRun, completeServerRun } from "@/lib/api-client";
 import { useCanvas } from "./canvas-context";
+import { RoomAssistantSettings } from "./RoomAssistantSettings";
 import { assistantCanvasRecords, applyAssistantOperations } from "@/lib/assistant-canvas";
 import type { AgentEntry, AgentStep, OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
 import { PENDING_SEQ } from "@/lib/thread";
@@ -501,29 +502,36 @@ export function ChatPanel({
             Allow background checks using my agent
             <Switch checked={backgroundChecks} onCheckedChange={setBackgroundChecks} />
           </label>
-          <label className="flex items-center justify-between gap-2 text-muted-foreground">
-            <span className="flex flex-col">
-              Eagerness
-              <span className="text-[10px]">{EAGERNESS_PACING[eagerness].description}</span>
-            </span>
-            <NativeSelect
-              size="sm"
-              aria-label="Assistant eagerness"
-              data-testid="assistant-eagerness"
-              value={eagerness}
-              onChange={(event) => {
-                const next = event.target.value as AssistantEagerness;
-                if (!ASSISTANT_EAGERNESS.includes(next)) return;
-                setEagerness(next);
-                if (online && roomId) void patchServerRoom(roomId, { assistantEagerness: next }).catch(() => undefined);
-              }}
-            >
-              {ASSISTANT_EAGERNESS.map((value) => (
-                <NativeSelectOption key={value} value={value}>{EAGERNESS_PACING[value].label}</NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-          {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(() => undefined); }} /></label> : null}
+          {online ? (
+            <RoomAssistantSettings
+              key={roomId}
+              room={roomSnapshot.room}
+              disabled={!roomSnapshot.ready || !roomId}
+              onSave={async (settings) => (await patchServerRoom(roomId!, settings)).room}
+            />
+          ) : (
+            <label className="flex items-center justify-between gap-2 text-muted-foreground">
+              <span className="flex flex-col">
+                Eagerness
+                <span className="text-[10px]">{EAGERNESS_PACING[eagerness].description}</span>
+              </span>
+              <NativeSelect
+                size="sm"
+                aria-label="Assistant eagerness"
+                data-testid="assistant-eagerness"
+                value={eagerness}
+                onChange={(event) => {
+                  const next = event.target.value as AssistantEagerness;
+                  if (ASSISTANT_EAGERNESS.includes(next)) setEagerness(next);
+                }}
+              >
+                {ASSISTANT_EAGERNESS.map((value) => (
+                  <NativeSelectOption key={value} value={value}>{EAGERNESS_PACING[value].label}</NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </label>
+          )}
+          {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(reportError); }} /></label> : null}
           {transcription && <div className="flex flex-col gap-1 text-muted-foreground">
             <span>{transcription.status}</span>
             {transcription.error && <div role="status" className="flex items-center gap-2"><span>{transcription.error}</span><Button variant="outline" size="xs" onClick={transcription.retry}>Retry transcription</Button></div>}

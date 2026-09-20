@@ -24,7 +24,7 @@
     "server": "tsx apps/room-server/src/main.ts",
     "test": "npm run test:backend && npm run test:desktop",
     "test:backend": "tsx --test apps/room-server/test/*.test.ts apps/agent-runner/test/*.test.ts",
-    "test:desktop": "tsx --tsconfig apps/desktop/tsconfig.json --test apps/desktop/test/*.test.ts",
+    "test:desktop": "tsx --tsconfig apps/desktop/tsconfig.json --test apps/desktop/test/*.test.ts apps/desktop/test/*.test.tsx",
     "runner": "tsx apps/agent-runner/src/main.ts",
     "typecheck:backend": "tsc -p tsconfig.backend.json",
     "prepare": "git config core.hooksPath .githooks || true"

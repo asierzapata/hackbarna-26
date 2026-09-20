@@ -111,15 +111,7 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
 
   // addressed above the threshold: a context trigger, never an act one — only
   // an explicit invocation authorizes the assistant to touch the canvas.
-  ctx.classifier.next = {
-    addressedProbability: 0.95,
-    worthCapturingProbability: 0,
-    intent: "answer",
-    intentProbability: 0.9,
-    relatedShapeId: null,
-    needsExternalDataProbability: 0,
-    captureScore: 0,
-  };
+  ctx.classifier.next = { triggerProbability: 0.95 };
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "what is up" });
   await ctx.server.engine.classifierIdle(room.id);
   let triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
@@ -130,21 +122,13 @@ test("classifier context paths preserve consent and cooldown, failure is gracefu
 
   // worth capturing, past the cooldown the first one set
   ctx.clock.advance(ctx.server.engine.timings.cooldownMs);
-  ctx.classifier.next = {
-    addressedProbability: 0.1,
-    worthCapturingProbability: 0.9,
-    intent: "capture",
-    intentProbability: 0.8,
-    relatedShapeId: null,
-    needsExternalDataProbability: 0,
-    captureScore: 3,
-  };
+  ctx.classifier.next = { triggerProbability: 0.9 };
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "we decided X" });
   await ctx.server.engine.classifierIdle(room.id);
   triggers = (await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers;
   assert.equal(triggers.length, 2);
   assert.equal(triggers[1].mode, "context");
-  assert.equal(triggers[1].intent, "capture");
+  assert.equal(triggers[1].intent, "answer");
 
   // a second inferred trigger inside the cooldown is suppressed
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "we decided Y too" });
@@ -174,7 +158,7 @@ function gatedClassifier(ctx: any, worthCapturing: boolean) {
   ctx.classifier.next = async () => {
     started();
     await gate;
-    return { addressedProbability: 0, worthCapturingProbability: worthCapturing ? 0.9 : 0, intent: worthCapturing ? "capture" : "none", intentProbability: 0.9, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: worthCapturing ? 3 : 0 };
+    return { triggerProbability: worthCapturing ? 0.9 : 0 };
   };
   return { open, first };
 }
@@ -233,7 +217,7 @@ test("eagerness selects the contextual cooldown and survives a room reload", asy
   const u = await registerUser(ctx.base), room = await createRoom(u, ctx.base);
   assert.equal((await api(u, ctx.base, `/rooms/${room.id}`)).body.room.assistantEagerness, "eager");
 
-  ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 0.9, intent: "capture", intentProbability: 0.9, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 3 };
+  ctx.classifier.next = { triggerProbability: 0.9 };
   await postMsg(ctx, u, room.id, { id: randomUUID(), text: "first cause" });
   await ctx.server.engine.classifierIdle(room.id);
   assert.equal((await api(u, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers.length, 1);

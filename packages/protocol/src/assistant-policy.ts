@@ -5,6 +5,8 @@ export const CONTEXT_SETTLE_MS = 2_000;
 // runs on the first of "the room went quiet" or "this long has passed".
 export const CONTEXT_MAX_WAIT_MS = 10_000;
 export const CONTEXT_COOLDOWN_MS = 15_000;
+export const DEFAULT_ASSISTANT_THRESHOLD = 0.5;
+export const MAX_ASSISTANT_COOLDOWN_MS = 120_000;
 
 // How pushy the contextual assistant is, as a named pair of the only two knobs
 // that actually pace it: how long a pending cause can be deferred before it is
