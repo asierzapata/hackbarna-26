@@ -106,6 +106,7 @@ export const MapDraftSchema = z.strictObject({
   center: mapCenterSchema.optional().describe("Optional map center"),
   zoom: z.number().finite().min(0).max(22).optional().describe("Optional map zoom"),
   style: z.enum(["streets", "aquarelle", "light", "dark", "satellite", "outdoor"]).optional().describe("Map style; defaults to Aquarelle"),
+  sourceNote: z.string().max(500).optional().describe("Source or reference for the map"),
 });
 
 const calendarDate = z.iso.date().refine((value) => value >= "0001-01-01", "Date must be in years 0001–9999");

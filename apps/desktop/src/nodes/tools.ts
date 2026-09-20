@@ -567,6 +567,9 @@ export function createCanvasTools(editor: Editor, assertActive?: () => void) {
             ...(parsed.patch.style !== undefined
               ? { style: parsed.patch.style }
               : {}),
+            ...(parsed.patch.sourceNote !== undefined
+              ? { sourceNote: parsed.patch.sourceNote }
+              : {}),
             selectedMarker,
           };
           break;

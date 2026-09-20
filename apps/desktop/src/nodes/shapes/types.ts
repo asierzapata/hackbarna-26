@@ -68,6 +68,7 @@ export type MapShapeProps = {
   center: { lat: number; lng: number } | null;
   zoom: number | null;
   style: MapNodeStyle;
+  sourceNote?: string;
   selectedMarker: number;
 };
 
@@ -245,6 +246,7 @@ export const mapShapeProps = {
     "satellite",
     "outdoor",
   ),
+  sourceNote: T.optional(T.string),
   selectedMarker: T.number,
 };
 

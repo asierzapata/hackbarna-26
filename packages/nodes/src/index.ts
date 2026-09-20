@@ -43,6 +43,7 @@ export const kanMapShapeProps = {
   center: T.nullable(T.object({ lat: T.number, lng: T.number })),
   zoom: T.nullable(T.number),
   style: T.literalEnum("streets", "aquarelle", "light", "dark", "satellite", "outdoor"),
+  sourceNote: T.optional(T.string),
   selectedMarker: T.number,
 };
 

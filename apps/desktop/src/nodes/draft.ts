@@ -116,6 +116,7 @@ export function draftToShapePartial(
           center: draft.center ?? null,
           zoom: draft.zoom ?? null,
           style: draft.style ?? "aquarelle",
+          sourceNote: draft.sourceNote ?? "",
           selectedMarker: -1,
         },
       };
@@ -228,6 +229,7 @@ export function shapeToSummary(shape: KanShape) {
         })),
         center: shape.props.center,
         zoom: shape.props.zoom,
+        sourceNote: shape.props.sourceNote,
         selectedMarker: shape.props.selectedMarker,
       };
     case "kan-timeline":

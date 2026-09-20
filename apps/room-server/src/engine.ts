@@ -2555,6 +2555,7 @@ function mapShapeProps(draft: Extract<NodeDraft, { type: "map" }>) {
     center: draft.center ?? null,
     zoom: draft.zoom ?? null,
     style: draft.style ?? "aquarelle",
+    sourceNote: draft.sourceNote ?? "",
     selectedMarker: -1,
   };
 }

@@ -114,6 +114,7 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
       center: null,
       zoom: null,
       style: "aquarelle",
+      sourceNote: "",
       selectedMarker: -1,
     };
   }
@@ -336,6 +337,7 @@ export class MapShapeUtil extends BaseBoxShapeUtil<MapShape> {
         <NodeCard
           type="map"
           title={shape.props.title}
+          description={shape.props.sourceNote || undefined}
           headerMeta={
             !hasMaptilerKey ? (
               <Badge variant="outline">demo tiles</Badge>

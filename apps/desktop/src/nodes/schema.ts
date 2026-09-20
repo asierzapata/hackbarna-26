@@ -84,6 +84,7 @@ export const mapDraft = z.object({
   center: mapCenter.optional(),
   zoom: z.number().min(0).max(22).optional(),
   style: mapStyle.optional().describe("Defaults to Aquarelle"),
+  sourceNote: z.string().optional().describe("Source or reference for the map"),
 });
 export const logoDraft = z.object({
   type: z.literal("logo"),
