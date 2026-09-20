@@ -14,6 +14,9 @@
       content="An infinite canvas you work on with an agent. Native macOS, alpha."
     />
     <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/app-icon.png" />
+    <meta property="og:image" content="/app-icon.png" />
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body class="bg-paper text-ink font-sans antialiased flex min-h-screen flex-col">
@@ -23,7 +26,11 @@
      <div class="mx-auto flex h-full max-w-5xl items-center justify-between px-6 md:px-10">
       <div class="flex items-center gap-3">
         <a href="#" class="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
-          <span class="inline-block h-3 w-3 bg-ink"></span>
+          <svg viewBox="0 0 48 48" class="h-6 w-6 shrink-0" aria-hidden="true">
+            <path fill="currentColor" d="M8 3h7v9l-7 7V3ZM34 3h8L22 23v-2h-4L34 3ZM15 22h7v7h-7v-7ZM23 28l20 17h-9L19 30h4v-2ZM8 37l5-6 2 2v12H8v-8Z" />
+            <circle cx="6" cy="35" r="5" class="fill-agent" />
+            <circle cx="42" cy="24" r="3" class="fill-human-line" />
+          </svg>
           Kan
         </a>
         <span class="font-mono text-xs text-ink-subtle">macOS</span>
@@ -67,6 +74,7 @@
           <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
           <a
             href="/kan-alpha.dmg"
+            download="kan-alpha.dmg"
             class="inline-flex items-center justify-center bg-ink px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-black"
           >
             Download the alpha
@@ -363,6 +371,13 @@
       <!-- DOWNLOAD -->
       <section id="download" class="mx-auto max-w-5xl px-6 py-20 md:px-10">
         <div class="mx-auto max-w-xl text-center">
+          <img
+            src="/app-icon.png"
+            alt=""
+            width="88"
+            height="88"
+            class="mx-auto mb-5 h-22 w-22"
+          />
           <span class="font-mono text-xs tracking-wider text-ink-subtle uppercase">Alpha</span>
           <h2 class="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Try it</h2>
           <p class="mt-3 text-sm leading-relaxed text-ink-muted">
@@ -374,15 +389,16 @@
             <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
             <a
               href="/kan-alpha.dmg"
+              download="kan-alpha.dmg"
               class="inline-flex items-center justify-center bg-ink px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-black"
             >
               Download Kan for macOS
             </a>
           </div>
 
-          <!-- TODO: fill in the real minimum macOS version and architecture once you cut a build. -->
+          <!-- TODO: state the minimum macOS version once you cut a build. -->
           <p class="mt-4 font-mono text-[11px] text-ink-subtle">
-            macOS · requires a Devin or OpenAI Codex subscription
+            macOS · Apple Silicon (M1 or later) · bring a Devin or OpenAI Codex account
           </p>
 
           <div class="mt-8 border border-line bg-card p-4 text-left text-xs leading-relaxed text-ink-muted">
@@ -398,7 +414,11 @@
     <footer class="w-full border-t border-line bg-paper px-6 py-10 text-xs text-ink-muted md:px-10">
       <div class="mx-auto flex max-w-5xl flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
         <div class="flex items-center gap-3">
-          <span class="inline-block h-2.5 w-2.5 bg-ink"></span>
+          <svg viewBox="0 0 48 48" class="h-5 w-5 shrink-0" aria-hidden="true">
+            <path fill="currentColor" d="M8 3h7v9l-7 7V3ZM34 3h8L22 23v-2h-4L34 3ZM15 22h7v7h-7v-7ZM23 28l20 17h-9L19 30h4v-2ZM8 37l5-6 2 2v12H8v-8Z" />
+            <circle cx="6" cy="35" r="5" class="fill-agent" />
+            <circle cx="42" cy="24" r="3" class="fill-human-line" />
+          </svg>
           <span class="font-medium text-ink">Kan</span>
           <span class="text-ink-subtle">· macOS</span>
         </div>
