@@ -1990,7 +1990,7 @@ export class Engine {
           parentId: targetPageId,
           isLocked: false,
           opacity: 1,
-          props: isMap ? mapShapeProps(op.draft) : isTable ? tableShapeProps(op.draft) : isLogo ? logoShapeProps(op.draft) : { ...size, draft: op.draft },
+          props: op.draft.type === "map" ? mapShapeProps(op.draft) : op.draft.type === "table" ? tableShapeProps(op.draft) : op.draft.type === "logo" ? logoShapeProps(op.draft) : { ...size, draft: op.draft },
           meta: { provenance },
         } as unknown as UnknownRecord;
         planned.set(id, shape);

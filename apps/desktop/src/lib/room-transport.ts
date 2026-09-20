@@ -100,7 +100,7 @@ function toSteps(steps: unknown[]): AgentStep[] {
 }
 
 function draftLabel(draft: NodeDraft): string {
-  return draft.type === "concept" ? draft.label : draft.title;
+  return draft.type === "concept" ? draft.label : draft.type === "logo" ? draft.name || draft.domain : draft.title;
 }
 
 /**

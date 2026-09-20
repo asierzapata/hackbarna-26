@@ -84,16 +84,17 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       if (near) topLevel(near);
       const viewport = editor.getViewportPageBounds();
       const origin = diagramPlacement([...current.values(), ...puts], near?.parentId ?? editor.getCurrentPageId(), { x: viewport.x + 80, y: viewport.y + 80 });
-      const preview = draftToShapePartial(operation.draft, id, { x: 0, y: 0 });
-      const size = preview.props as { w: number; h: number };
+      const richDraft = operation.draft.type === "calendar" || operation.draft.type === "map" || operation.draft.type === "table" || operation.draft.type === "logo" ? operation.draft : undefined;
+      const preview = richDraft ? draftToShapePartial(richDraft, id, { x: 0, y: 0 }) : undefined;
+      const size = (preview?.props ?? { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT }) as { w: number; h: number };
       const nearBounds = near ? editor.getShapePageBounds(near) : undefined;
-      const overlapBounds = nearBounds && placementByType[operation.draft.type] === "overlap" ? nearBounds : undefined;
+      const overlapBounds = nearBounds && richDraft && placementByType[richDraft.type] === "overlap" ? nearBounds : undefined;
       const position = {
         x: operation.x ?? (overlapBounds ? overlapBounds.x + overlapBounds.w - size.w / 2 : origin.x),
         y: operation.y ?? (overlapBounds ? overlapBounds.y - size.h / 2 : near?.y ?? origin.y),
       };
-      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map" || operation.draft.type === "table" || operation.draft.type === "logo"
-        ? { ...draftToShapePartial(operation.draft, id, position), parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
+      const shape: TLShapePartial = preview
+        ? { ...preview, ...position, parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
         : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
       touched.add(id);

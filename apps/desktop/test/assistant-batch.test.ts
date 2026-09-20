@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { toRichText, type TLShape, type TLShapeId, type TLShapePartial } from "@tldraw/tlschema";
 import type { Editor } from "tldraw";
-import type { Mutation } from "@kan/protocol";
+import type { Mutation, NodeDraft } from "@kan/protocol";
+import { toViewEntry } from "../src/lib/room-transport";
 const { applyAssistantOperations }: typeof import("../src/lib/assistant-canvas") = await import(process.env.KAN_GALTEA_CANVAS_MODULE ?? "../src/lib/assistant-canvas");
 
 function fixture() {
@@ -33,6 +34,40 @@ function fixture() {
     createBindings: () => {},
   } as unknown as Editor;
   return { editor, shapes, writes, initial };
+}
+
+for (const draft of [
+  { type: "decision", title: "Launch decision", bullets: ["Await approval"] },
+  { type: "concept", label: "Launch" },
+] satisfies NodeDraft[]) {
+  test(`adding a shared ${draft.type} does not use the rich-node converter`, () => {
+    const { editor, shapes } = fixture();
+    applyAssistantOperations(editor, [{ type: "add", shapeId: "shape:new", draft }], { entryId: "shared-add" });
+    const shape = shapes.get("shape:new" as TLShapeId)!;
+    assert.equal(shape.type, "kan-node");
+    assert.deepEqual((shape.props as { draft: unknown }).draft, draft);
+  });
+}
+
+for (const position of [{}, { x: 25, y: 45 }]) {
+  test(`a logo overlaps its near shape unless coordinates are explicit: ${JSON.stringify(position)}`, () => {
+    const { editor, shapes } = fixture();
+    applyAssistantOperations(editor, [{ type: "add", shapeId: "shape:logo", nearShapeId: "shape:launch", draft: { type: "logo", domain: "example.com" }, ...position }], { entryId: "logo-add" });
+    const shape = shapes.get("shape:logo" as TLShapeId)!;
+    assert.equal(shape.type, "kan-logo");
+    assert.equal(shape.x, position.x ?? 320);
+    assert.equal(shape.y, position.y ?? 20);
+  });
+}
+
+for (const name of ["Example", undefined, ""]) {
+  test(`logo suggestions use a name or domain as their label: ${JSON.stringify(name)}`, () => {
+    const entry = toViewEntry({ id: "suggestion", seq: 1, at: "2026-09-20T12:00:00Z", roomId: "room", kind: "suggestion", triggerId: "trigger", runId: "run", draft: { type: "logo", domain: "example.com", name }, status: "open", shapeId: null });
+    assert.equal(entry?.kind, "suggestion");
+    if (entry?.kind !== "suggestion") throw new Error("Expected a suggestion");
+    assert.equal(entry.proposal.label, name || "example.com");
+    assert.equal(entry.quote, name || "example.com");
+  });
 }
 
 const style: Mutation = { type: "style", shapeId: "shape:launch", color: "blue" };
