@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { directCanvasResult } from "@kan/protocol";
+import { AssistantResultSchema, directCanvasResult } from "@kan/protocol";
 import { createLocalTransport } from "../src/lib/local-transport";
 import type { Entry } from "@kan/protocol";
 
@@ -37,9 +37,31 @@ test("queued explicit drawing tolerates newer messages but never a human canvas 
       await transport.send({ id: crypto.randomUUID(), text: "@kan make the box green", anchors: [], files: [] });
       if (changed) color = "orange";
       const completion = () => transport.completeLocal(lease!.runId, { id: crypto.randomUUID(), revision: captured.revision, result: directCanvasResult("act", captured.value)! });
-      if (changed) await assert.rejects(completion, /canvas or discussion changed/);
+      if (changed) await assert.rejects(completion, /canvas changed while this action was running/);
       else await completion();
       assert.equal(applied, !changed);
     } finally { unsubscribe(); }
   }
+});
+
+test("queued explicit actions survive newer messages", async () => {
+  let saved: Entry[] = [], applied = false;
+  const transport = createLocalTransport({ canvasId: crypto.randomUUID(), userId: crypto.randomUUID(),
+    storage: { read: async () => saved, write: async (_id, entries) => { saved = structuredClone(entries); } },
+    getCanvas: () => [shape], applyOperations: () => { applied = true; return []; },
+  });
+  const unsubscribe = transport.subscribe(() => {});
+  try {
+    transport.setExecutorReady(true, "fixture", "own", false);
+    await transport.send({ id: crypto.randomUUID(), text: "@kan add a concept", anchors: [], files: [] });
+    const lease = await transport.claimTrigger(transport.snapshot().triggers[0].id);
+    const captured = await transport.getLocalContext(lease!.runId);
+    await transport.send({ id: crypto.randomUUID(), text: "Here is one more sentence", anchors: [], files: [] });
+    const result = AssistantResultSchema.parse({
+      kind: "act", text: "Added the concept.", sources: [],
+      operations: [{ type: "add", draft: { type: "concept", label: "keep going" } }],
+    });
+    await transport.completeLocal(lease!.runId, { id: crypto.randomUUID(), revision: captured.revision, result });
+    assert.equal(applied, true);
+  } finally { unsubscribe(); }
 });

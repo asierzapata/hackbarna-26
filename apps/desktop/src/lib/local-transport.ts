@@ -1,4 +1,4 @@
-import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, DEFAULT_EAGERNESS, eagernessPacing, type AssistantEagerness, EntrySchema, explicitInvocation, isDrawingResult, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
+import { AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_SETTLE_MS, DEFAULT_EAGERNESS, eagernessPacing, type AssistantEagerness, EntrySchema, explicitInvocation, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Trigger } from "@kan/protocol";
 import { toViewEntry, type RoomTransport, type SendInput, type RoomSnapshot } from "./room-transport";
 import type { AssistantPreferences } from "./assistant-controller";
 import type { ThreadEntry } from "./thread";
@@ -234,7 +234,7 @@ export function createLocalTransport(options: LocalTransportOptions): LocalTrans
         }
         if (await revision() !== context.revision) {
           if (trigger.mode !== "act") result = { kind: "silent" };
-          else if (result.kind !== "reply" && !(trigger.source === "explicit" && isDrawingResult(result) && canvasRevision() === context.canvasRevision)) throw new Error("The canvas or discussion changed. Retry this request with current context.");
+          else if (result.kind !== "reply" && canvasRevision() !== context.canvasRevision) throw new Error("The canvas changed while this action was running. Retry this request with current context.");
         }
         if (result.kind === "act") turn.touchedShapeIds = options.applyOperations(result.operations, { entryId: turn.id, runId, agentId, byUserId: options.userId });
         if (result.kind === "offer") entries.push({ ...base(), kind: "offer", triggerId: trigger.id, runId, title: result.title, request: result.request, text: result.text, sources: result.sources, status: "open", resolvedBy: null, resultTriggerId: null, revision: context.revision });

@@ -345,7 +345,7 @@ test("data/query requires a live lease and calls demo data verbatim", async (t) 
 // A room that stayed perfectly still for all of them is the rare case, not the
 // common one, so act-mode completion has to say which results survive drift:
 // a reply writes nothing and does, anything touching the canvas does not.
-test("act mode: a reply survives room drift, a mutation still conflicts", async (t) => {
+test("act mode: replies and mutations survive discussion drift", async (t) => {
   const ctx = await setup({ classifier: null });
   t.after(() => ctx.cleanup());
   const u = await registerUser(ctx.base);
@@ -395,8 +395,8 @@ test("act mode: a reply survives room drift, a mutation still conflicts", async 
     sources: [{ kind: "entry", id: second.causeEntryIds[0] }],
     operations: [{ type: "add", draft: { type: "concept", label: "too late" } }],
   });
-  assert.equal(acted.status, 409, JSON.stringify(acted.body));
-  assert.ok(!ctx.server.engine.canvasRecords(room.id).some((r: any) => r.typeName === "shape"));
+  assert.equal(acted.status, 200, JSON.stringify(acted.body));
+  assert.ok(ctx.server.engine.canvasRecords(room.id).some((r: any) => r.typeName === "shape" && r.props?.draft?.label === "too late"));
 
   ev.close();
 });
