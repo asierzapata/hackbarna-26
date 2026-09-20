@@ -12,7 +12,7 @@
  * here may widen it — `toViewEntry` is the only place the two vocabularies
  * meet.
  */
-import type { Entry, ExecutorPresence, Lease, LiveTranscript, NodeDraft, Room, TranscriptInput, User } from "@kan/protocol";
+import type { AssistantEagerness, Entry, ExecutorPresence, Lease, LiveTranscript, NodeDraft, Room, TranscriptInput, User } from "@kan/protocol";
 import { EventsServerMessage } from "@kan/protocol";
 import {
   cancelServerTrigger,
@@ -66,6 +66,8 @@ export interface RoomTransport {
   retryTrigger(triggerId: string): Promise<void>;
   claimTrigger(triggerId: string): Promise<Lease | null>;
   setExecutorReady(ready: boolean, agentId: string, scope: "own" | "room" | "manual", background: boolean): void;
+  /** Local canvases pace themselves; online rooms carry this on the room record. */
+  setAssistantEagerness?(value: AssistantEagerness): void;
   snapshot(): RoomSnapshot;
 }
 

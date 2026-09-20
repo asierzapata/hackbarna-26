@@ -1,5 +1,5 @@
 import type { Editor } from "tldraw";
-import type { Room } from "@kan/protocol";
+import { DEFAULT_EAGERNESS, type Room } from "@kan/protocol";
 import {
   getCanvasEntry,
   markCanvasOnline,
@@ -93,6 +93,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
           createdAt: entry.createdAt,
           updatedAt: entry.updatedAt,
           assistantPaused: false,
+          assistantEagerness: DEFAULT_EAGERNESS,
         },
         created: false,
       };
@@ -117,6 +118,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
           createdAt: entry.createdAt,
           updatedAt: new Date().toISOString(),
           assistantPaused: false,
+          assistantEagerness: DEFAULT_EAGERNESS,
         },
         created: false,
       };
@@ -142,6 +144,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
             createdAt: match.createdAt,
             updatedAt: match.updatedAt,
             assistantPaused: match.assistantPaused ?? false,
+            assistantEagerness: match.assistantEagerness ?? DEFAULT_EAGERNESS,
           },
           created: false,
         };
@@ -259,6 +262,7 @@ export async function publishCanvas(options: PublishCanvasOptions): Promise<Publ
             createdAt: match.createdAt,
             updatedAt: match.updatedAt,
             assistantPaused: match.assistantPaused ?? false,
+            assistantEagerness: match.assistantEagerness ?? DEFAULT_EAGERNESS,
           },
           created: false,
         };

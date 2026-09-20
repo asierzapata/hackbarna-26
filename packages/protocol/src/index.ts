@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS } from "./assistant-policy";
 
 export * from "./assistant-policy";
 export * from "./diagnostics";
@@ -142,6 +143,7 @@ export const RoomSchema = z.strictObject({
   createdAt: isoDate,
   updatedAt: isoDate,
   assistantPaused: z.boolean().optional().default(false),
+  assistantEagerness: z.enum(ASSISTANT_EAGERNESS).optional().default(DEFAULT_EAGERNESS),
 });
 export type Room = z.infer<typeof RoomSchema>;
 
@@ -326,7 +328,8 @@ export const PatchMeInput = z.strictObject({ name: z.string().min(1).max(80) });
 export const PatchRoomInput = z.strictObject({
   name: z.string().min(1).max(120).optional(),
   assistantPaused: z.boolean().optional(),
-}).refine((value) => value.name !== undefined || value.assistantPaused !== undefined, "at least one field is required");
+  assistantEagerness: z.enum(ASSISTANT_EAGERNESS).optional(),
+}).refine((value) => value.name !== undefined || value.assistantPaused !== undefined || value.assistantEagerness !== undefined, "at least one field is required");
 export const JoinInput = z.strictObject({ code: z.string().min(1).max(32) });
 export const ImportedMessageInput = z.strictObject({
   id: uuid,

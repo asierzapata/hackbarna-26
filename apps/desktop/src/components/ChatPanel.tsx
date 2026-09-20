@@ -4,6 +4,8 @@ import { ConversationSimulator, ThreadPanel } from "./thread";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import { NativeSelect, NativeSelectOption } from "./ui/native-select";
+import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, EAGERNESS_PACING, type AssistantEagerness } from "@kan/protocol";
 
 import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRun, completeServerRun } from "@/lib/api-client";
 import { useCanvas } from "./canvas-context";
@@ -120,6 +122,7 @@ export function ChatPanel({
   const [assistantScope, setAssistantScope] = React.useState<"own" | "room" | "manual">("own");
   const [backgroundChecks, setBackgroundChecks] = React.useState(false);
   const [assistantPaused, setAssistantPaused] = React.useState(false);
+  const [eagerness, setEagerness] = React.useState<AssistantEagerness>(DEFAULT_EAGERNESS);
 
   const editorRef = React.useRef(editor);
   editorRef.current = editor;
@@ -183,20 +186,25 @@ export function ChatPanel({
     const saved = roomId ? localStorage.getItem(`kan-assistant:${roomId}`) : null;
     if (!saved) return;
     try {
-      const value = JSON.parse(saved) as { scope?: "own" | "room" | "manual"; background?: boolean };
+      const value = JSON.parse(saved) as { scope?: "own" | "room" | "manual"; background?: boolean; eagerness?: AssistantEagerness };
       if (value.scope) setAssistantScope(value.scope);
       if (value.background !== undefined) setBackgroundChecks(value.background);
+      if (value.eagerness && ASSISTANT_EAGERNESS.includes(value.eagerness)) setEagerness(value.eagerness);
     } catch {}
   }, [roomId]);
 
   React.useEffect(() => {
     if (!roomId) return;
-    localStorage.setItem(`kan-assistant:${roomId}`, JSON.stringify({ scope: assistantScope, background: backgroundChecks }));
-  }, [assistantScope, backgroundChecks, roomId]);
+    localStorage.setItem(`kan-assistant:${roomId}`, JSON.stringify({ scope: assistantScope, background: backgroundChecks, eagerness }));
+  }, [assistantScope, backgroundChecks, eagerness, roomId]);
 
   React.useEffect(() => {
     transport.setExecutorReady(agent.status.state === "ready", agent.status.agent ?? "Kan", assistantScope, backgroundChecks);
   }, [agent.status.agent, agent.status.state, assistantScope, backgroundChecks, transport]);
+
+  React.useEffect(() => {
+    transport.setAssistantEagerness?.(eagerness);
+  }, [eagerness, transport]);
 
   /** Upsert by id: a replay and a live append are the same operation. */
   const upsert = React.useCallback((entry: ThreadEntry) => {
@@ -221,6 +229,7 @@ export function ChatPanel({
       }
       setRoomSnapshot(snapshot);
       if (snapshot.ready && snapshot.room?.assistantPaused !== undefined) setAssistantPaused(snapshot.room.assistantPaused);
+      if (snapshot.ready && snapshot.room?.assistantEagerness) setEagerness(snapshot.room.assistantEagerness);
     });
   }, [transport, upsert]);
 
@@ -491,6 +500,28 @@ export function ChatPanel({
           <label className="flex items-center justify-between gap-2 text-muted-foreground">
             Allow background checks using my agent
             <Switch checked={backgroundChecks} onCheckedChange={setBackgroundChecks} />
+          </label>
+          <label className="flex items-center justify-between gap-2 text-muted-foreground">
+            <span className="flex flex-col">
+              Eagerness
+              <span className="text-[10px]">{EAGERNESS_PACING[eagerness].description}</span>
+            </span>
+            <NativeSelect
+              size="sm"
+              aria-label="Assistant eagerness"
+              data-testid="assistant-eagerness"
+              value={eagerness}
+              onChange={(event) => {
+                const next = event.target.value as AssistantEagerness;
+                if (!ASSISTANT_EAGERNESS.includes(next)) return;
+                setEagerness(next);
+                if (online && roomId) void patchServerRoom(roomId, { assistantEagerness: next }).catch(() => undefined);
+              }}
+            >
+              {ASSISTANT_EAGERNESS.map((value) => (
+                <NativeSelectOption key={value} value={value}>{EAGERNESS_PACING[value].label}</NativeSelectOption>
+              ))}
+            </NativeSelect>
           </label>
           {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(() => undefined); }} /></label> : null}
           {transcription && <div className="flex flex-col gap-1 text-muted-foreground">
