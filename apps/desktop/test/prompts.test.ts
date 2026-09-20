@@ -24,6 +24,15 @@ test("execution prompts default substantive work to the canvas without duplicati
   assert.doesNotMatch(buildAssistantPrompt("act", input), /Requests to discuss a topic can receive a brief useful answer without canvas changes/);
 });
 
+test("execution prompts favor useful first drafts over unnecessary questions", () => {
+  for (const prompt of [buildAssistantPrompt("act", {}), buildCanvasPrompt("Plan a launch"), buildRunnerPrompt(context("Plan a launch"))]) {
+    assert.match(prompt, /Choose sensible defaults for scope, format, style and layout/);
+    assert.match(prompt, /Ask at most one short, focused question only when a missing detail blocks safe, correct progress/);
+    assert.match(prompt, /Do not end completed work with an unsolicited follow-up question/);
+    assert.match(prompt, /Never invent measurements, sources, agreements, owners or dates/);
+  }
+});
+
 test("canvas-first guidance preserves preview-only modes and concise chat exceptions", () => {
   for (const mode of ["context", "propose"] as const) {
     const prompt = buildAssistantPrompt(mode, {});
