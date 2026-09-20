@@ -14,6 +14,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { canvasToolDefinitions } from "@/lib/canvas-agent";
 import { canvasThinkingTargets } from "@/lib/agent-thinking";
+import { applyToolCall } from "@/lib/agent-steps";
+import type { AgentStep } from "@/lib/thread";
 import { buildAssistantPrompt, directCanvasResult, type AssistantResult } from "@kan/protocol";
 import { parseStructuredOutput } from "@/lib/assistant-controller";
 import { useQaSource } from "@/lib/qa-source";
@@ -58,6 +60,21 @@ type SessionUpdate =
   | { sessionUpdate: "tool_call"; toolCallId: string; title?: string; kind?: string; status?: string }
   | { sessionUpdate: "tool_call_update"; toolCallId: string; title?: string; kind?: string; status?: string }
   | { sessionUpdate: string };
+
+/**
+ * What the current turn is doing, for the thread to render.
+ *
+ * Client-only and deliberately not part of any entry: the room owns entries,
+ * and this is gone the moment the turn ends. `turnId` is here so a consumer
+ * can tell whose activity this is rather than painting it onto the wrong run.
+ */
+export interface AgentActivityState {
+  turnId: string | null;
+  steps: AgentStep[];
+  thought?: string;
+}
+
+const idleActivity: AgentActivityState = { turnId: null, steps: [] };
 
 /** A tool call as the thread wants it: `kind` and `title` may arrive apart. */
 export interface AgentToolCall {
@@ -115,6 +132,8 @@ interface AgentApi {
     runId?: string
   ) => Promise<AssistantResult>;
   busy: boolean;
+  /** Live tool calls and reasoning for the turn in flight. */
+  activity: AgentActivityState;
   thinkingShapeIds: string[];
   cancel: () => Promise<void>;
 }
@@ -132,6 +151,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const [preferences, setPreferences] = React.useState<AgentPreferences | null>(null);
   const generation = React.useRef(0);
   const [thinkingShapeIds, setThinkingShapeIds] = React.useState<string[]>([]);
+  const [activity, setActivity] = React.useState<AgentActivityState>(idleActivity);
   useQaSource("agent", () => ({
     state: status.state, provider: status.provider, model: status.models?.current,
     message: status.message, busy, thinkingShapeIds, diagnostics: getDiagnostics(),
@@ -149,6 +169,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     if (!isTauri()) return;
     let mounted = true;
     setThinkingShapeIds([]);
+    setActivity(idleActivity);
     setBusy(false);
     const request = ++generation.current;
     setStatus({ state: "connecting" });
@@ -162,14 +183,29 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     });
 
     const updates = listen<{ turnId: string; update: SessionUpdate }>("agent:update", ({ payload: envelope }) => {
+      // A structured turn has no handlers — its answer is the command's
+      // return value — but it still reports activity, and that is the whole
+      // point of the rail. So the turn id is the gate, not the handlers.
       const active = handlers.current;
-      if (!active || envelope.turnId !== turnId.current) return;
+      if (envelope.turnId !== turnId.current) return;
       const payload = envelope.update;
 
       switch (payload.sessionUpdate) {
         case "agent_message_chunk": {
           const text = (payload as { content?: { text?: string } }).content?.text;
-          if (text) active.onText?.(text);
+          if (text) active?.onText?.(text);
+          break;
+        }
+        case "agent_thought_chunk": {
+          const text = (payload as { content?: { text?: string } }).content?.text;
+          if (!text) break;
+          // One line, replaced as it streams. A side panel has no room for a
+          // full thought log, and nobody reads one anyway.
+          setActivity((previous) =>
+            previous.turnId === envelope.turnId
+              ? { ...previous, thought: text.replace(/\s+/g, " ").trim() }
+              : previous
+          );
           break;
         }
         case "tool_call":
@@ -178,12 +214,18 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
             toolCallId: string;
             status?: string;
           };
-          active.onTool?.({
+          const update: AgentToolCall = {
             id: call.toolCallId,
             title: call.title,
             kind: call.kind,
             status: call.status ?? "pending",
-          });
+          };
+          active?.onTool?.(update);
+          setActivity((previous) =>
+            previous.turnId === envelope.turnId
+              ? { ...previous, steps: applyToolCall(previous.steps, update, performance.now()) }
+              : previous
+          );
           break;
         }
       }
@@ -224,6 +266,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       turnId.current = null;
       setBusy(false);
       setThinkingShapeIds([]);
+      setActivity(idleActivity);
       // Losing a live connection is worth reporting; following our own
       // sign-out (which already reset the status) is not.
       setStatus((prev) =>
@@ -250,6 +293,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
   const api: AgentApi = {
     status,
     busy,
+    activity,
     thinkingShapeIds,
     preferences,
     setModel: async (modelId) => {
@@ -279,6 +323,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
     },
     signOut: async () => {
       setThinkingShapeIds([]);
+      setActivity(idleActivity);
       handlers.current = null;
       ++generation.current;
       setStatus({ state: "connecting" });
@@ -295,6 +340,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       cancelledTurn.current = activeId;
       handlers.current = null;
       setThinkingShapeIds([]);
+      setActivity(idleActivity);
       if (activeId) await invoke("agent_cancel", { turnId: activeId });
     },
     prompt: async (text, next) => {
@@ -306,6 +352,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       cancelledTurn.current = null;
       const startedAt = performance.now();
       next.onTrace?.(id);
+      setActivity({ turnId: id, steps: [] });
       recordDiagnostic({ event: "prompt.started", turnId: id, provider: status.provider ?? undefined, model: status.models?.current ?? undefined, phase: "tools" });
       handlers.current = next;
       setThinkingShapeIds(next.canvas?.shapeIds ?? []);
@@ -330,6 +377,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
           turnId.current = null;
           handlers.current = null;
           setThinkingShapeIds([]);
+          setActivity(idleActivity);
           setBusy(false);
         }
       }
@@ -340,6 +388,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
       const direct = directCanvasResult(mode, context);
       const id = runId ?? crypto.randomUUID();
       turnId.current = id;
+      setActivity({ turnId: id, steps: [] });
       setThinkingShapeIds(shapeIds ?? []);
       setBusy(true);
       let abortHandler: (() => void) | undefined;
@@ -378,6 +427,7 @@ export function AgentProvider({ children, canvasId }: { children: React.ReactNod
         if (turnId.current === id) {
           turnId.current = null;
           setThinkingShapeIds([]);
+          setActivity(idleActivity);
           setBusy(false);
         }
       }

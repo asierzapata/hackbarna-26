@@ -411,17 +411,31 @@ fn reader_loop(
                         if let Some(buffer) = buffer.as_mut() {
                             let matches_buffer = session_id == Some(buffer.session_id.as_str()) && ACTIVE_TURN.lock().unwrap().as_ref().is_some_and(|turn| turn.turn_id == buffer.turn_id && turn.conn_id == conn_id && !turn.cancelled);
                             if !matches_buffer { continue; }
-                            if update.get("sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk") {
-                                if let Some(chunk) = update.pointer("/content/text").and_then(Value::as_str) {
-                                    if !buffer.overflow {
-                                        if buffer.text.len().saturating_add(chunk.len()) > MAX_STRUCTURED_BYTES {
-                                            buffer.overflow = true;
-                                            buffer.text.clear();
-                                        } else {
-                                            buffer.text.push_str(chunk);
+                            match update.get("sessionUpdate").and_then(Value::as_str) {
+                                // The turn's answer. It is parsed as one JSON
+                                // document at the end, so it is buffered here
+                                // rather than streamed.
+                                Some("agent_message_chunk") => {
+                                    if let Some(chunk) = update.pointer("/content/text").and_then(Value::as_str) {
+                                        if !buffer.overflow {
+                                            if buffer.text.len().saturating_add(chunk.len()) > MAX_STRUCTURED_BYTES {
+                                                buffer.overflow = true;
+                                                buffer.text.clear();
+                                            } else {
+                                                buffer.text.push_str(chunk);
+                                            }
                                         }
                                     }
                                 }
+                                // Activity, not answer. A structured turn used
+                                // to drop these, so the thread had nothing to
+                                // say but "Working" for the whole run.
+                                Some("tool_call") | Some("tool_call_update") | Some("agent_thought_chunk") => {
+                                    if app.emit_to("main", "agent:update", json!({"turnId": buffer.turn_id, "update": update})).is_err() {
+                                        diagnostics::record(Some(&app), json!({"event":"protocol.delivery_failed", "turnId":buffer.turn_id, "connectionId":conn_id.to_string(), "failure":diagnostics::failure("RESULT_DELIVERY_FAILED", "ipc", "unknown")}));
+                                    }
+                                }
+                                _ => {}
                             }
                         } else if let Some(session_id) = session_id {
                             canvas_mcp.record_tool_call(session_id, update);
