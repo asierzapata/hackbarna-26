@@ -33,7 +33,9 @@ declare module "@tldraw/tlschema" {
 
 /** Every draft kind carries a heading, but not under the same key. */
 function draftTitle(draft: NodeDraft): string {
-  return draft.type === "concept" ? draft.label : draft.title;
+  if (draft.type === "concept") return draft.label;
+  if (draft.type === "logo") return draft.name ?? draft.domain;
+  return draft.title;
 }
 
 function DraftBody({ draft }: { draft: NodeDraft }) {
@@ -89,6 +91,9 @@ function DraftBody({ draft }: { draft: NodeDraft }) {
           {draft.sourceNote ? <span>{draft.sourceNote}</span> : null}
         </div>
       );
+
+    case "logo":
+      return <span className="text-muted-foreground">{draft.domain}</span>;
   }
 }
 

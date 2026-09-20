@@ -3,7 +3,7 @@ import type { Editor } from "tldraw";
 import { diagramPlacement, KAN_NODE_HEIGHT, KAN_NODE_WIDTH, planDiagram } from "@kan/nodes";
 import { MutationSchema, type Mutation } from "@kan/protocol";
 import { createCanvasTools } from "@/nodes/tools";
-import { draftToShapePartial } from "@/nodes/draft";
+import { draftToShapePartial, placementByType } from "@/nodes/draft";
 
 type Bounds = { x: number; y: number; w: number; h: number };
 
@@ -84,8 +84,15 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       if (near) topLevel(near);
       const viewport = editor.getViewportPageBounds();
       const origin = diagramPlacement([...current.values(), ...puts], near?.parentId ?? editor.getCurrentPageId(), { x: viewport.x + 80, y: viewport.y + 80 });
-      const position = { x: operation.x ?? origin.x, y: operation.y ?? near?.y ?? origin.y };
-      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map" || operation.draft.type === "table"
+      const preview = draftToShapePartial(operation.draft, id, { x: 0, y: 0 });
+      const size = preview.props as { w: number; h: number };
+      const nearBounds = near ? editor.getShapePageBounds(near) : undefined;
+      const overlapBounds = nearBounds && placementByType[operation.draft.type] === "overlap" ? nearBounds : undefined;
+      const position = {
+        x: operation.x ?? (overlapBounds ? overlapBounds.x + overlapBounds.w - size.w / 2 : origin.x),
+        y: operation.y ?? (overlapBounds ? overlapBounds.y - size.h / 2 : near?.y ?? origin.y),
+      };
+      const shape: TLShapePartial = operation.draft.type === "calendar" || operation.draft.type === "map" || operation.draft.type === "table" || operation.draft.type === "logo"
         ? { ...draftToShapePartial(operation.draft, id, position), parentId: near?.parentId ?? editor.getCurrentPageId(), meta: { provenance } }
         : { id, type: "kan-node", parentId: near?.parentId ?? editor.getCurrentPageId(), ...position, props: { w: KAN_NODE_WIDTH, h: KAN_NODE_HEIGHT, draft: operation.draft }, meta: { provenance } };
       puts.push(shape);
@@ -104,8 +111,11 @@ export function applyAssistantOperations(editor: Editor, input: Mutation[], prov
       } else if (shape.type === "kan-table" && operation.draft.type === "table") {
         const next = draftToShapePartial(operation.draft, shape.id, { x: shape.x, y: shape.y });
         puts.push({ ...shape, ...next, props: { ...shape.props, ...next.props }, meta: { ...shape.meta, provenance } } as TLShapePartial);
+      } else if (shape.type === "kan-logo" && operation.draft.type === "logo") {
+        const next = draftToShapePartial(operation.draft, shape.id, { x: shape.x, y: shape.y });
+        puts.push({ ...shape, ...next, props: { ...shape.props, ...next.props }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       } else {
-        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards, maps, tables, or rich calendars can be updated by this action");
+        if (shape.type !== "kan-node") throw new Error("Only shared Kan cards, maps, tables, logos, or rich calendars can be updated by this action");
         puts.push({ ...shape, props: { ...shape.props, draft: operation.draft }, meta: { ...shape.meta, provenance } } as TLShapePartial);
       }
       touched.add(shape.id);

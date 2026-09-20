@@ -11,7 +11,7 @@ import {
 import { type TLBaseShape, type TLShapeId } from "@tldraw/tlschema";
 import { type UnknownRecord } from "@tldraw/store";
 import { getIndexAbove, type IndexKey } from "@tldraw/utils";
-import { createKanSchema, diagramPlacement, KAN_MAP_TYPE, KAN_NODE_TYPE, KAN_TABLE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
+import { createKanSchema, diagramPlacement, KAN_LOGO_TYPE, KAN_MAP_TYPE, KAN_NODE_TYPE, KAN_TABLE_TYPE, kanNodeSize, planDiagram } from "@kan/nodes";
 import { type LiveTranscript, type TranscriptInput, type AssistantEagerness, AssistantResultSchema, CONTEXT_MAX_AGE_MS, CONTEXT_COOLDOWN_MS, DEFAULT_ASSISTANT_THRESHOLD, DEFAULT_EAGERNESS, eagernessPacing, EvidenceSourcesSchema, RegisterInput, SnapshotRecordSchema, shapeId as ShapeIdSchema, type AssistantResult, type Entry, type Lease, type Mutation, type NodeDraft, type Room, type RoomEvent, type Trigger } from "@kan/protocol";
 import { generateRoomCode } from "./util";
 import {
@@ -1961,6 +1961,10 @@ export class Engine {
         const id = (op.shapeId ?? `shape:${deterministicId(`add`, runKey(requestId, i))}`) as `shape:${string}`;
         if (get(id)) throw conflict(`shape ${id} already exists`);
         const origin = diagramPlacement([...current.values(), ...planned.values()] as unknown as TLBaseShape<string, Record<string, unknown>>[], pageId, { x: 0, y: 0 });
+        const isMap = op.draft.type === "map";
+        const isTable = op.draft.type === "table";
+        const isLogo = op.draft.type === "logo";
+        const size = kanNodeSize(op.draft.type);
         let x = op.x ?? origin.x;
         let y = op.y ?? origin.y;
         let targetPageId = pageId;
@@ -1969,17 +1973,16 @@ export class Engine {
           if (!near || (near as { typeName?: string }).typeName !== "shape") throw badRequest(`nearShapeId ${op.nearShapeId} not found`);
           if (!near.parentId.startsWith("page:") || near.rotation !== 0) throw badRequest("unsupported near coordinate space");
           targetPageId = near.parentId;
-          if (op.x === undefined) x = near.x + ((near.props?.w as number) ?? 200) + 80;
-          if (op.y === undefined) y = near.y;
+          const nearWidth = (near.props?.w as number) ?? 200;
+          if (op.x === undefined) x = isLogo ? near.x + nearWidth - size.w / 2 : near.x + nearWidth + 80;
+          if (op.y === undefined) y = isLogo ? near.y - size.h / 2 : near.y;
         }
         if (!Number.isFinite(x) || !Number.isFinite(y)) throw badRequest("coordinates must be finite");
         maxIndex = getIndexAbove(maxIndex);
-        const isMap = op.draft.type === "map";
-        const isTable = op.draft.type === "table";
         const shape: UnknownRecord = {
           id,
           typeName: "shape",
-          type: isMap ? KAN_MAP_TYPE : isTable ? KAN_TABLE_TYPE : KAN_NODE_TYPE,
+          type: isMap ? KAN_MAP_TYPE : isTable ? KAN_TABLE_TYPE : isLogo ? KAN_LOGO_TYPE : KAN_NODE_TYPE,
           x,
           y,
           rotation: 0,
@@ -1987,7 +1990,7 @@ export class Engine {
           parentId: targetPageId,
           isLocked: false,
           opacity: 1,
-          props: op.draft.type === "map" ? mapShapeProps(op.draft) : op.draft.type === "table" ? tableShapeProps(op.draft) : { ...kanNodeSize(op.draft.type), draft: op.draft },
+          props: isMap ? mapShapeProps(op.draft) : isTable ? tableShapeProps(op.draft) : isLogo ? logoShapeProps(op.draft) : { ...size, draft: op.draft },
           meta: { provenance },
         } as unknown as UnknownRecord;
         planned.set(id, shape);
@@ -1996,11 +1999,11 @@ export class Engine {
       } else if (op.type === "update") {
         const existing = get(op.shapeId) as TLBaseShape<string, Record<string, unknown>> | undefined;
         if (!existing || existing.typeName !== "shape") throw badRequest(`shape ${op.shapeId} not found`);
-        if (existing.type !== KAN_NODE_TYPE && existing.type !== KAN_MAP_TYPE && existing.type !== KAN_TABLE_TYPE) throw badRequest("only Kan node, map, or table shapes can be updated");
-        if ((existing.type === KAN_MAP_TYPE) !== (op.draft.type === "map") || (existing.type === KAN_TABLE_TYPE) !== (op.draft.type === "table")) throw badRequest("rich node updates require a matching draft");
+        if (existing.type !== KAN_NODE_TYPE && existing.type !== KAN_MAP_TYPE && existing.type !== KAN_TABLE_TYPE && existing.type !== KAN_LOGO_TYPE) throw badRequest("only Kan node, map, table, or logo shapes can be updated");
+        if ((existing.type === KAN_MAP_TYPE) !== (op.draft.type === "map") || (existing.type === KAN_TABLE_TYPE) !== (op.draft.type === "table") || (existing.type === KAN_LOGO_TYPE) !== (op.draft.type === "logo")) throw badRequest("rich node updates require a matching draft");
         const next = {
           ...existing,
-          props: existing.type === KAN_MAP_TYPE ? mapShapeProps(op.draft as Extract<NodeDraft, { type: "map" }>) : existing.type === KAN_TABLE_TYPE ? tableShapeProps(op.draft as Extract<NodeDraft, { type: "table" }>) : { ...existing.props, draft: op.draft },
+          props: existing.type === KAN_MAP_TYPE ? mapShapeProps(op.draft as Extract<NodeDraft, { type: "map" }>) : existing.type === KAN_TABLE_TYPE ? tableShapeProps(op.draft as Extract<NodeDraft, { type: "table" }>) : existing.type === KAN_LOGO_TYPE ? logoShapeProps(op.draft as Extract<NodeDraft, { type: "logo" }>) : { ...existing.props, draft: op.draft },
           meta: { ...existing.meta, provenance },
         } as unknown as UnknownRecord;
         planned.set(op.shapeId, next);
@@ -2555,7 +2558,17 @@ function mapShapeProps(draft: Extract<NodeDraft, { type: "map" }>) {
     center: draft.center ?? null,
     zoom: draft.zoom ?? null,
     style: draft.style ?? "aquarelle",
+    sourceNote: draft.sourceNote ?? "",
     selectedMarker: -1,
+  };
+}
+
+function logoShapeProps(draft: Extract<NodeDraft, { type: "logo" }>) {
+  return {
+    ...kanNodeSize("logo"),
+    domain: draft.domain,
+    name: draft.name ?? "",
+    note: draft.note ?? "",
   };
 }
 
@@ -2572,8 +2585,7 @@ function shapeLabel(shape: UnknownRecord): string {
   if (s.type === KAN_NODE_TYPE) {
     const draft = props.draft as NodeDraft | undefined;
     if (draft) {
-      const label =
-        draft.type === "concept" ? draft.label : draft.title;
+      const label = draft.type === "concept" ? draft.label : draft.type === "logo" ? draft.name ?? draft.domain : draft.title;
       if (label) return label.slice(0, 240);
     }
   }
