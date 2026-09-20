@@ -81,10 +81,11 @@ try {
     }).catch(error=>{t.error=String(error);}); return true;
   `);
   await waitFor("!!document.querySelector('#call-theme .room-prejoin__preview')");
-  assert.equal(style(".room-prejoin__preview", "borderRadius"), "0px");
-  assert.equal(style(".room-prejoin__you", "borderRadius"), "0px");
-  assert.equal(style(".room-video__initials", "borderRadius"), "0px");
-  assert.match(style("#prejoin-title", "fontFamily"), /JetBrains/);
+  assert.equal(style(".room-prejoin__preview", "borderRadius"), "16px");
+  assert.equal(style(".room-prejoin__settings", "borderRadius"), "16px");
+  assert.equal(style(".room-prejoin__you", "borderRadius"), "8px");
+  assert.equal(style(".room-video__initials", "borderRadius"), "50%");
+  assert.match(style("#prejoin-title", "fontFamily"), /-apple-system|BlinkMacSystemFont/);
   click("Turn camera on");
   await waitFor("document.querySelector('#call-theme video')?.videoWidth > 0");
   click("Unmute microphone");
@@ -94,7 +95,7 @@ try {
   run("const select=document.querySelector('#call-theme #room-video-input');select.value='fixture-camera';select.dispatchEvent(new Event('change',{bubbles:true}));return true;");
   await waitFor("window.__callTheme.media.getSnapshot().video.deviceId === 'fixture-camera' && !window.__callTheme.media.getSnapshot().video.pending");
   drive("shot", "/tmp/kan-call-lobby.png");
-  console.log("PASS square lobby, shared heading font, synthetic camera preview, device selection and microphone toggles");
+  console.log("PASS rounded lobby, system heading font, synthetic camera preview, device selection and microphone toggles");
 
   for (const dark of [false, true]) {
     run(`document.documentElement.classList.toggle('dark',${dark});return true;`);
@@ -103,31 +104,31 @@ try {
   run("document.documentElement.classList.toggle('dark',window.__callTheme.dark);window.__callTheme.denied=true;return true;");
   click("Turn camera off");click("Turn camera on");
   await waitFor("document.querySelector('#call-theme').textContent.includes('permission is blocked')");
-  assert.equal(evaluate("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Join room').disabled"), false);
+  assert.equal(evaluate("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Join canvas').disabled"), false);
   run("window.__callTheme.denied=false;window.__callTheme.pending=true;return true;");
   click("Turn camera on");
   await waitFor("!!document.querySelector('#call-theme .room-prejoin__pending')");
-  assert.equal(style(".room-prejoin__pending", "borderRadius"), "0px");
-  assert.equal(evaluate("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Join room').disabled"), true);
+  assert.equal(style(".room-prejoin__pending", "borderRadius"), "8px");
+  assert.equal(evaluate("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Join canvas').disabled"), true);
   run("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Join without devices').click();return true;");
   await waitFor("!!document.querySelector('#call-theme .room-video__tile') && !!window.__callTheme.editor");
   run("window.__callTheme.pending=false;window.__callTheme.release(new MediaStream([window.__callTheme.video.getVideoTracks()[0].clone()]));return true;");
   await waitFor("window.__callTheme.subscriptions.length > 0");
   assert.equal(evaluate("window.__callTheme.subscriptions[0].options.showControls"), false);
-  assert.equal(style(".room-video__tile", "borderRadius"), "0px");
-  assert.equal(style(".room-video__muted", "borderRadius"), "0px");
-  assert.equal(style(".room-video__status", "borderRadius"), "0px");
+  assert.equal(style(".room-video__tile", "borderRadius"), "12px");
+  assert.equal(style(".room-video__muted", "borderRadius"), "8px");
+  assert.equal(style(".room-video__status", "borderRadius"), "999px");
   assert.equal(style(".room-video__footer", "borderTopWidth"), "1px");
-  assert.match(style(".room-video__footer", "fontFamily"), /JetBrains/);
+  assert.match(style(".room-video__footer", "fontFamily"), /-apple-system|BlinkMacSystemFont/);
   await waitFor("document.querySelector('#call-theme .room-video__stream video')?.videoWidth > 0");
   drive("shot", "/tmp/kan-call-participants.png");
-  console.log("PASS denied/pending lobby states, join without devices, remote synthetic video, square tiles/labels and footer divider");
+  console.log("PASS denied/pending lobby states, join without devices, remote synthetic video, rounded tiles/labels and footer divider");
 
   click("Turn camera on");await waitFor("!!document.querySelector('#call-theme .room-video__local')");
   click("Turn camera off");await waitFor("!document.querySelector('#call-theme .room-video__local')");
   run("window.__callTheme.subscriptions[0].handlers.audioBlocked();return true;");
   await waitFor("document.querySelector('#call-theme').textContent.includes('Enable sound')");
-  assert.equal(style(".room-video__notice", "borderRadius"), "0px");
+  assert.equal(style(".room-video__notice", "borderRadius"), "8px");
   run("[...document.querySelectorAll('#call-theme button')].find(b=>b.textContent==='Enable sound').click();return true;");
   await waitFor("!document.querySelector('#call-theme .room-video__notice')");
   run("window.__callTheme.fail(true);return true;");

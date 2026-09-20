@@ -225,7 +225,7 @@ export function CalendarView({ props, onChange: update }: {
                     >
                       <span>{Number(date.slice(-2))}</span>
                       {dayEvents.length ? (
-                        <span className="kan-calendar__event-count text-[10px]">
+                        <span className="kan-calendar__event-count text-xs">
                           {dayEvents.length}{" "}
                           {dayEvents.length === 1 ? "event" : "events"}
                         </span>
@@ -247,7 +247,7 @@ export function CalendarView({ props, onChange: update }: {
                         {formatDate(selectedDate)}
                       </h4>
                       {selectedEvents.length ? (
-                        <span className="text-[11px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {selectedEvents.length}{" "}
                           {selectedEvents.length === 1 ? "event" : "events"}
                         </span>
@@ -269,7 +269,7 @@ export function CalendarView({ props, onChange: update }: {
                             <p className="break-words font-medium">
                               {event.title}
                             </p>
-                            <p className="text-[11px] text-muted-foreground">
+                            <p className="text-xs text-muted-foreground">
                               {eventDateLabel(event)}
                             </p>
                             {event.description ? (
@@ -278,7 +278,7 @@ export function CalendarView({ props, onChange: update }: {
                               </p>
                             ) : null}
                             {event.sourceNote ? (
-                              <p className="break-words text-[11px] text-muted-foreground">
+                              <p className="break-words text-xs text-muted-foreground">
                                 Source: {event.sourceNote}
                               </p>
                             ) : null}

@@ -21,7 +21,7 @@ export function SuggestionCard({ entry }: { entry: SuggestionEntry }) {
       <MessageContent>
         <Bubble
           variant="ghost"
-          className="w-full border border-solid border-border border-s-2 border-s-suggestion bg-suggestion-subtle p-3"
+          className="w-full rounded-lg border border-solid border-border border-s-2 border-s-suggestion bg-suggestion-subtle p-3"
         >
           <BubbleContent className="flex w-full flex-col gap-2.5">
             <div className="flex items-center gap-2 text-xs">
@@ -62,7 +62,7 @@ export function SuggestionCard({ entry }: { entry: SuggestionEntry }) {
               </Badge>
               {entry.status && entry.status !== "open" ? <Badge variant="outline">{entry.status}</Badge> : null}
             </div>
-            {entry.draft ? <pre className="max-h-32 overflow-auto bg-background px-2 py-1 text-[10px] text-muted-foreground">{JSON.stringify(entry.draft, null, 2)}</pre> : null}
+            {entry.draft ? <pre className="max-h-32 overflow-auto bg-background px-2 py-1 text-xs text-muted-foreground">{JSON.stringify(entry.draft, null, 2)}</pre> : null}
 
             <Button variant="link" size="xs" onClick={() => onReply?.(entry)}>Reply</Button>
             {entry.status === "open" || !entry.status ? <div className="flex flex-wrap items-center gap-2">

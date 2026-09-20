@@ -67,8 +67,8 @@ export function UserMessageEntry({
         <Bubble
           variant="ghost"
           className={cn(
-            "w-full border border-solid border-border bg-muted p-2.5",
-            isSelf && "border-foreground/20",
+            "w-full rounded-lg px-2 py-3",
+            isSelf && "bg-muted/40",
             pending && "opacity-60"
           )}
         >
@@ -81,7 +81,7 @@ export function UserMessageEntry({
               ) : null}
             </MessageHeader>
 
-            <MentionText text={entry.text} className="text-xs leading-relaxed" />
+            <MentionText text={entry.text} className="text-base leading-relaxed" />
 
             {entry.attachments?.length ? (
               <AttachmentGroup>

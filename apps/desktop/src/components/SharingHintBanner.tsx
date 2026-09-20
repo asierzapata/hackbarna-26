@@ -29,7 +29,7 @@ export function SharingHintBanner({ onMakeOnline }: SharingHintBannerProps) {
     <div
       role="region"
       aria-label="Sharing introduction"
-      className="absolute top-3 right-4 z-40 max-w-sm rounded-none border border-border bg-card/95 backdrop-blur-sm p-3.5 shadow-md animate-in fade-in slide-in-from-top-2 duration-200"
+      className="absolute top-3 right-4 z-40 max-w-sm rounded-lg border border-border bg-card/95 backdrop-blur-sm p-3.5 shadow-md animate-in fade-in slide-in-from-top-2 duration-200"
     >
       <div className="flex items-start gap-2.5">
         <RiInformationLine className="size-4 text-primary shrink-0 mt-0.5" />
@@ -43,7 +43,7 @@ export function SharingHintBanner({ onMakeOnline }: SharingHintBannerProps) {
               size="xs"
               variant="default"
               onClick={handleDismiss}
-              className="text-[11px] h-6 px-2 font-medium"
+              className="text-xs h-6 px-2 font-medium"
             >
               Got it
             </Button>
@@ -55,7 +55,7 @@ export function SharingHintBanner({ onMakeOnline }: SharingHintBannerProps) {
                   void handleDismiss();
                   onMakeOnline();
                 }}
-                className="text-[11px] h-6 px-2 gap-1"
+                className="text-xs h-6 px-2 gap-1"
               >
                 <RiCloudLine className="size-3" />
                 Make online

@@ -125,7 +125,7 @@ export function CanvasCard({
 
         <span
           className={cn(
-            "absolute left-3 top-3 inline-flex items-center gap-1 rounded-md bg-card/95 px-2 py-1 text-[11px] font-medium text-muted-foreground shadow-xs",
+            "absolute left-3 top-3 inline-flex items-center gap-1 rounded-md bg-card/95 px-2 py-1 text-xs font-medium text-muted-foreground shadow-xs",
           )}
         >
           {online ? (
@@ -149,7 +149,7 @@ export function CanvasCard({
           </button>
         )}
 
-        <div className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1.5 font-mono text-xs text-muted-foreground">
           <RiTimeLine className="size-3 shrink-0" />
           <span className="truncate">{formatDate(item.lastActivity)}</span>
           {item.inviteCode ? (
@@ -162,13 +162,13 @@ export function CanvasCard({
           ) : null}
         </div>
 
-        <div className="mt-1 flex items-center gap-1">
+        <div className="mt-1 flex flex-wrap items-center gap-1">
           <Button
             size="xs"
             variant="ghost"
             onClick={onRename}
             disabled={isRenaming}
-            className="gap-1 text-[11px]"
+            className="gap-1 text-xs"
           >
             <RiEditLine className="size-3" />
             Rename
@@ -180,7 +180,7 @@ export function CanvasCard({
               variant="ghost"
               onClick={onDuplicate}
               disabled={isDuplicating}
-              className="gap-1 text-[11px]"
+              className="gap-1 text-xs"
               title="Create an independent offline copy"
             >
               {isDuplicating ? (
@@ -199,7 +199,7 @@ export function CanvasCard({
             variant="ghost"
             onClick={onRemove}
             disabled={isRemoving}
-            className="ml-auto gap-1 text-[11px] text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            className="ml-auto gap-1 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             title={
               online
                 ? "Leave this room; it stays for everyone else"
@@ -277,7 +277,7 @@ export function CanvasRenameEditor({
         <RiCloseLine />
       </Button>
       {error ? (
-        <p className="basis-full text-[10px] text-destructive" role="alert">
+        <p className="basis-full text-xs text-destructive" role="alert">
           {error}
         </p>
       ) : null}

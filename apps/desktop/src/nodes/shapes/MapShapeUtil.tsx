@@ -78,7 +78,7 @@ function createBrandMarkerElement(markerData: MapMarker, selected: boolean) {
 
   const fallback = document.createElement("span");
   fallback.className =
-    "font-heading text-[10px] font-semibold text-muted-foreground";
+    "font-heading text-xs font-semibold text-muted-foreground";
   fallback.textContent = brandInitials(brand.name);
 
   const brandfetchUrl = brandfetchImageUrl(brand.domain);

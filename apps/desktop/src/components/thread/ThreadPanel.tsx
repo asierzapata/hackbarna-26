@@ -2,7 +2,6 @@ import * as React from "react";
 import { RiCloseLine, RiSearchLine } from "@remixicon/react";
 import { cn } from "cn";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -11,7 +10,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
-import { Kbd } from "@/components/ui/kbd";
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -131,23 +129,19 @@ export function ThreadPanel({
       <aside
         aria-label="Thread"
         className={cn(
-          "flex h-full w-[440px] shrink-0 flex-col border-s border-border bg-background font-mono text-xs",
+          "@container/thread flex h-full w-[440px] min-w-0 shrink-0 flex-col border-s border-border bg-card font-sans text-sm",
           className,
         )}
       >
-        <header className="flex flex-col gap-2 border-b border-border px-3 py-2">
+        <header className="flex flex-col gap-2 border-b border-border px-4 py-3">
           <div className="flex items-center gap-2">
-            <Badge className="gap-1.5">
-              <span aria-hidden className="size-2 bg-primary-foreground" />
-              Thread
-            </Badge>
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {channel}
-            </span>
+            <h2 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight" title={channel}>
+              Conversation
+            </h2>
             {headerAction}
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="icon-sm"
               aria-label="Search the thread"
               aria-expanded={searchOpen}
               data-testid="thread-search-toggle"
@@ -162,13 +156,13 @@ export function ThreadPanel({
             </Button>
             {onClose ? (
               <Button
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="icon-sm"
                 aria-label="Close thread"
+                title="Close conversation (Esc)"
                 onClick={onClose}
               >
-                <Kbd>Esc</Kbd>
-                <RiCloseLine data-icon="inline-end" />
+                <RiCloseLine />
               </Button>
             ) : null}
           </div>
@@ -207,7 +201,7 @@ export function ThreadPanel({
           <MessageScroller className="flex-1 border-b border-border">
             <MessageScrollerViewport>
               {rows.length ? (
-                <MessageScrollerContent className="gap-3 p-3">
+                <MessageScrollerContent className="gap-4 p-4">
                   {rows.map((row) => (
                     <MessageScrollerItem
                       key={row.id}
@@ -242,12 +236,12 @@ export function ThreadPanel({
                 <Empty className="h-full">
                   <EmptyHeader>
                     <EmptyTitle>
-                      {search.trim() ? "No matches" : "Nothing here yet"}
+                      {search.trim() ? "No matches" : "A place to think together"}
                     </EmptyTitle>
                     <EmptyDescription>
                       {search.trim()
                         ? `Nothing in this thread matches "${search.trim()}".`
-                        : "Start talking or type a message, the thread records both."}
+                        : "Share an idea, ask a question, or select something on the canvas to discuss it."}
                     </EmptyDescription>
                   </EmptyHeader>
                 </Empty>
@@ -257,14 +251,14 @@ export function ThreadPanel({
           </MessageScroller>
         </MessageScrollerProvider>
 
-        <div className="flex flex-col gap-2 p-3">
+        <div className="flex flex-col gap-3 bg-background/60 p-4">
           <ThreadComposer
             anchors={anchors}
             {...composer}
             replyTo={replyTo}
             onClearReply={() => setReplyTo(undefined)}
           />
-          <div className="flex items-center justify-between gap-2 text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
             <span>
               {search.trim()
                 ? `${rows.length} of ${entries.length} ${plural(entries.length, "entry", "entries")}`

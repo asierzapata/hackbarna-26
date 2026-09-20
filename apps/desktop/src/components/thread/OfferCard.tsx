@@ -14,7 +14,7 @@ export function OfferCard({ entry }: { entry: OfferEntry }) {
   return (
     <Message align="start">
       <MessageContent>
-        <Bubble variant="ghost" className="w-full border border-solid border-agent bg-background p-3">
+        <Bubble variant="ghost" className="w-full rounded-lg border border-solid border-agent/20 bg-agent-subtle/60 p-3">
           <BubbleContent className="flex flex-col gap-2">
             <div className="flex items-center gap-2"><Badge variant="secondary">Offer</Badge><strong className="truncate">{entry.title}</strong></div>
             <p className="text-muted-foreground">{entry.text}</p>

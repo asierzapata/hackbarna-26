@@ -101,7 +101,7 @@ function StepRow({ step }: { step: AgentStep }) {
         {step.summary}
       </span>
       {step.target ? <AnchorChip anchor={step.target} onJump={onJumpToNode} /> : null}
-      <span className="ms-auto shrink-0 tabular-nums text-[10px] text-muted-foreground/70">
+      <span className="ms-auto shrink-0 tabular-nums text-xs text-muted-foreground/70">
         {step.state === "error"
           ? (step.error ?? "failed")
           : typeof step.durationMs === "number"

@@ -72,7 +72,7 @@ export function AssistantMenu({
       <DropdownMenuTrigger
         render={
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
             data-testid="assistant-menu"
             data-ready={ready}
@@ -87,7 +87,7 @@ export function AssistantMenu({
             ready ? "bg-primary" : "bg-muted-foreground",
           )}
         />
-        <span className="max-w-32 truncate">Kan · {summary}</span>
+        <span className="max-w-32 truncate">Kan<span className="hidden @[380px]/thread:inline"> · {summary}</span></span>
         <RiArrowDownSLine data-icon="inline-end" />
       </DropdownMenuTrigger>
 
@@ -116,7 +116,7 @@ export function AssistantMenu({
             >
               <span className="flex flex-col items-start">
                 <span>{label}</span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {description}
                 </span>
               </span>
@@ -137,7 +137,7 @@ export function AssistantMenu({
               >
                 <span className="flex flex-col items-start">
                   <span>Lend my agent to the room</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     Runs requests other people raise, not only mine
                   </span>
                 </span>
@@ -158,7 +158,7 @@ export function AssistantMenu({
               >
                 <span className="flex flex-col items-start">
                   <span>Pause contextual assistance</span>
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     Affects everyone in the room
                   </span>
                 </span>

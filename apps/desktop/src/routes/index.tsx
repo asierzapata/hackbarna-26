@@ -343,7 +343,7 @@ function CatalogPage() {
             size="sm"
             variant="outline"
             onClick={() => setJoinDialogOpen(true)}
-            className="h-7 gap-1.5 font-sans text-xs"
+            className="h-7 gap-1.5"
           >
             <RiLoginBoxLine className="size-3.5" />
             Join canvas
@@ -353,7 +353,7 @@ function CatalogPage() {
             size="sm"
             variant="default"
             onClick={() => setCreateDialogOpen(true)}
-            className="h-7 gap-1.5 font-sans text-xs"
+            className="h-7 gap-1.5"
           >
             <RiAddLine className="size-3.5" />
             New canvas
@@ -376,7 +376,7 @@ function CatalogPage() {
             {!isServerReachable ? (
               <Badge
                 variant="destructive"
-                className="h-5 gap-1 px-1.5 font-mono text-[10px]"
+                className="h-5 gap-1 px-1.5 font-mono text-xs"
               >
                 <RiWifiOffLine className="size-2.5" /> Disconnected
               </Badge>
@@ -395,8 +395,8 @@ function CatalogPage() {
                   onClick={() => setFilter(option.value)}
                   className={
                     filter === option.value
-                      ? "rounded-md bg-card px-3 py-1 text-[13px] font-medium text-foreground shadow-sm"
-                      : "rounded-md px-3 py-1 text-[13px] text-muted-foreground hover:text-foreground"
+                      ? "rounded-md bg-card px-3 py-1 text-sm font-medium text-foreground shadow-sm"
+                      : "rounded-md px-3 py-1 text-sm text-muted-foreground hover:text-foreground"
                   }
                 >
                   {option.label}

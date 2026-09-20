@@ -655,7 +655,7 @@ function ModelSettings({ model }: { model: AiModel }) {
       ) : null}
       {model.supportsFast || model.supportsThinking ? (
         <div className="flex flex-col gap-0.5">
-          <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Modes
           </span>
           {model.supportsFast ? (
@@ -695,7 +695,7 @@ function SettingGroup({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <span className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
       {options.map((option) => (
