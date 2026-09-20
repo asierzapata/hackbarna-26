@@ -58,7 +58,6 @@ export interface ThreadPanelProps extends ThreadActions {
   /** Ambient state for the footer status bar, e.g. the call transcript state. */
   footerStatus?: React.ReactNode;
   /** Extra controls under the header, e.g. dev tools. */
-  toolbar?: React.ReactNode;
   /** Client-only render state: what is unacknowledged, streaming, interim. */
   view?: ThreadViewState;
   onClose?: () => void;
@@ -91,7 +90,6 @@ export function ThreadPanel({
   headerAction,
   status,
   footerStatus,
-  toolbar,
   view,
   onClose,
   composer,
@@ -204,8 +202,6 @@ export function ThreadPanel({
             {status}
           </div>
         ) : null}
-
-        {toolbar}
 
         <MessageScrollerProvider autoScroll>
           <MessageScroller className="flex-1 border-b border-border">

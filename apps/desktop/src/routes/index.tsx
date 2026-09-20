@@ -281,8 +281,8 @@ function CatalogPage() {
   ];
 
   return (
-    <div className="flex min-h-full w-full flex-col bg-background">
-      <header className="header-bar">
+    <div className="flex h-full w-full flex-col overflow-y-auto bg-background">
+      <header className="header-bar sticky top-0 z-20 shrink-0">
         <div className="header-bar__brand flex items-center gap-2">
           <span>// KAN</span>
           {userName ? (

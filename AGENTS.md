@@ -184,8 +184,8 @@ The agent never touches tldraw directly; it goes through the tool layer.
   `groupNodes`, `getCanvas`. Every input is zod-parsed first.
 - In dev, `window.__kan = { editor, tools }` and `window.__kanErrors` exist.
   There is no node demo palette, node scenario runner, or automatic canvas
-  seeding; nodes remain available through the tool layer. Existing room data
-  and the separate thread conversation simulator are preserved. Drive tools with
+  seeding; nodes remain available through the tool layer. Existing room data is
+  preserved; the thread conversation simulator is gone. Drive tools with
   `node scripts/drive.mjs eval 'window.__kan.tools.getCanvas()'`.
 
 The rich node tools currently operate on offline desktop canvases; they are
@@ -198,10 +198,10 @@ remain denied. Online canvases retain only the shared renderer; publishing
 rich-node snapshots requires that follow-up schema integration. Offline canvases
 register both renderers, preserve duplicated initial records, and reuse
 `CanvasProvider`.
-Run `node scripts/canvas-tools.e2e.mjs` for tool-layer coverage, and
-`node scripts/local-agent.e2e.mjs` with Devin signed in to verify the real local
-agent creates the two-day calendar, venue map, and sponsors table. Both tests
-clean their own canvas and restore the original page. Do not drive concurrently.
+Run `node scripts/canvas-tools.e2e.mjs` for tool-layer coverage. It cleans its
+own canvas and restores the original page. Do not drive concurrently. The old
+`local-agent.e2e.mjs` drove the deleted conversation simulator and went with it;
+real local-agent coverage now goes through the chat composer.
 
 Keys: `apps/desktop/src/lib/config.ts` zod-parses `VITE_MAPTILER_KEY` and
 `VITE_BRANDFETCH_CLIENT_ID` from the root `.env.local` (see `.env.example`).
@@ -413,8 +413,9 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 - `packages/protocol/src/diagnostics.ts` defines content-free events and typed
   failures. Desktop traces join frontend, Rust ACP, and native MCP events by
   turn/request IDs. Structured assistant turns use the lease run ID as their
-  turn ID. Regular chat/Ask Kan uses structured turns; the conversation simulator
-  uses the local canvas MCP path. Do not assume a failed Ask Kan request used MCP.
+  turn ID. Regular chat/Ask Kan uses structured turns; prompts on an offline
+  canvas use the local canvas MCP path. Do not assume a failed Ask Kan request
+  used MCP.
 - `Report bug` → `View diagnostics` previews/copies the recent trace. Local agent
   entries also expose per-turn diagnostics. QA reports include frozen metadata
   traces. Optional error-stack/stderr capture is memory-only, expires after five
@@ -498,11 +499,29 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 - `ThreadPanel` has three slots: `headerAction` (the chip), `status` (one
   transient line, rendered only when non-empty: agent busy with Cancel, then
   errors) and `footerStatus` (ambient state such as the call transcript). Do
-  not put always-set text in `status` or the slot becomes permanent.
-- `ConversationSimulator` is a dev fixture and is mounted only under
-  `import.meta.env.DEV`. It stays a plain row rather than moving into the
-  assistant menu because a menu unmounts on click and `local-agent.e2e.mjs`
-  polls its `data-testid=conversation-simulator` dataset while it plays.
+  not put always-set text in `status` or the slot becomes permanent. The old
+  `toolbar` slot went away with the conversation simulator that used it.
 - `lib/config.ts` treats a blank `VITE_*` key as absent. Vite injects `""` for a
   key present but empty in `.env.local`, and the old `.min(1).optional()`
   crashed the whole app on boot over an optional key.
+
+## App icon packaging
+
+- `apps/desktop/src-tauri/icons/Kan.icon` is the editable Icon Composer source.
+  Tauri CLI 2.11.4 compiles it into `Assets.car` and sets `CFBundleIconName`
+  during macOS bundling; keep `icon.icns` alongside it for older macOS versions.
+  Native icon compilation requires full Xcode 26+ with first-launch components
+  installed; verify with `xcrun actool --version`.
+- Run `node scripts/generate-icons.mjs` on macOS after changing the artwork.
+  It regenerates the macOS fallback through `actool` and desktop PNG/ICO sizes
+  through Tauri from `icons/source.png`, the flattened Composer PNG export.
+  Update that export too when the design changes. Mobile outputs stay temporary.
+- For an icon-only update to an already-built alpha, run
+  `npm run tauri -- bundle --bundles app,dmg --config '{"productName":"Kan Alpha","identifier":"com.asierzapata.kan.alpha","bundle":{"macOS":{"signingIdentity":"-"}}}'`.
+  This repackages the existing release executable; it does not compile current
+  source. Use `build` instead of `bundle` for a fresh full build. Outputs live in
+  `apps/desktop/src-tauri/target/release/bundle/`. Ad-hoc signing is not notarization.
+- Verify both `CFBundleIconFile` and `CFBundleIconName` in the packaged plist,
+  inspect `Assets.car` with `xcrun assetutil --info`, verify the signature with
+  `codesign --verify --deep --strict`, and launch the actual `.app` to check the
+  macOS icon. A dev WebDriver window does not exercise packaged icon resources.

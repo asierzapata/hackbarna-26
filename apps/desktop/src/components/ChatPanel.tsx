@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { AssistantMenu, ConversationSimulator, ThreadPanel } from "./thread";
+import { AssistantMenu, ThreadPanel } from "./thread";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
 import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, type AssistantEagerness } from "@kan/protocol";
@@ -10,19 +10,16 @@ import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRu
 import { useCanvas } from "./canvas-context";
 import { RoomAssistantSettings } from "./RoomAssistantSettings";
 import { assistantCanvasRecords, applyAssistantOperations } from "@/lib/assistant-canvas";
-import type { AgentEntry, AgentStep, OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
+import type { OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
 import { PENDING_SEQ } from "@/lib/thread";
 import { createWsTransport, type RoomTransport } from "@/lib/room-transport";
 
 import { createLocalTransport, type LocalTransport } from "@/lib/local-transport";
-import { useAgent, type AgentToolCall } from "./agent-context";
+import { useAgent } from "./agent-context";
 import { runAssistantTurn, startLeaseExecution, type LeaseExecution, type LeasePhase } from "@/lib/assistant-controller";
-import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
 import { type AiModelSelection } from "@/components/ui/ai-model-select";
-import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
-import { createCanvasTools } from "@/nodes/tools";
 import { useQaSource } from "@/lib/qa-source";
 
 const DEFAULT_USER = "You";
@@ -51,14 +48,6 @@ function readAssistantSettings(roomId: string | undefined): AssistantSettings {
 }
 const AGENT = "assistant";
 
-/** ACP tool statuses, in the thread's vocabulary. */
-const stepStates: Record<string, AgentStep["state"]> = {
-  pending: "running",
-  in_progress: "running",
-  completed: "done",
-  failed: "error",
-};
-
 export function ChatReopenButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
@@ -70,20 +59,6 @@ export function ChatReopenButton({ onClick }: { onClick: () => void }) {
       Open chat
     </Button>
   );
-}
-
-/** Folds a tool call into the step list, in place if we have seen its id. */
-function mergeStep(steps: AgentStep[], call: AgentToolCall): AgentStep[] {
-  const index = steps.findIndex((step) => step.id === call.id);
-  const previous = index === -1 ? undefined : steps[index];
-  const step: AgentStep = {
-    id: call.id,
-    tool: call.kind ?? previous?.tool ?? "tool",
-    summary: call.title ?? previous?.summary ?? call.status,
-    state: stepStates[call.status] ?? "running",
-  };
-  if (index === -1) return [...steps, step];
-  return steps.map((existing, i) => (i === index ? step : existing));
 }
 
 function withoutId(ids: ReadonlySet<string>, id: string) {
@@ -135,8 +110,6 @@ export function ChatPanel({
 }) {
   const agent = useAgent();
   const { editor, jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
-  const canvasTools = React.useMemo(() => editor && !online ? createCanvasTools(editor) : null, [editor, online]);
-  const transcript = React.useRef<ConversationLine[]>([]);
   const cancelRef = React.useRef(agent.cancel);
   cancelRef.current = agent.cancel;
   React.useEffect(() => () => { void cancelRef.current(); }, [roomId]);
@@ -211,12 +184,9 @@ export function ChatPanel({
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
-  const [streamingIds, setStreamingIds] = React.useState<ReadonlySet<string>>(
-    new Set()
-  );
   useQaSource("chat", () => ({
-    roomId, online, entries, pendingIds: [...pendingIds], streamingIds: [...streamingIds],
-    transcript: transcript.current, runFailures: runFailures.current,
+    roomId, online, entries, pendingIds: [...pendingIds],
+    runFailures: runFailures.current,
   }));
   const models = agent.status.models?.available ?? [];
   const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
@@ -336,107 +306,6 @@ export function ChatPanel({
   }, [agent.status.state, assistantPaused, online, roomSnapshot]);
   React.useEffect(() => () => { activeLease.current?.controller.abort(); }, [transport]);
 
-  /**
-   * Feeds one line of a scripted conversation into the thread as a transcript
-   * entry, the way live call transcription would once it exists. Carries
-   * `PENDING_SEQ` for the same reason `askAgent` does: nothing has numbered
-   * it, and voice has no wire kind yet (see `room-transport.ts`).
-   */
-  async function simulateLine(line: ConversationLine, index: number) {
-    if (index === 0) transcript.current = [];
-    transcript.current.push(line);
-    upsert({
-      id: crypto.randomUUID(),
-      seq: PENDING_SEQ,
-      kind: "transcript",
-      at: new Date().toISOString(),
-      authorId: line.speaker,
-      text: line.text,
-      trigger: line.trigger,
-    });
-    if (shouldActOnLine(line)) {
-      if (!canvasTools || agent.status.state !== "ready") throw new Error("Connect Devin on an offline canvas before running this conversation.");
-      await askAgent(line.text, modelSelection, [...transcript.current]);
-    }
-  }
-
-  /** Patches one agent entry in place while its turn streams. */
-  function patchAgent(id: string, fn: (entry: AgentEntry) => AgentEntry) {
-    setEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === id && entry.kind === "agent" ? fn(entry) : entry
-      )
-    );
-  }
-
-  /**
-   * One prompt turn against the host's agent. Text arrives in chunks, so the
-   * entry is appended empty and filled as it streams.
-   *
-   * These turns are local: the agent runs on this machine, and until the room
-   * server exists there is nowhere to publish them. They carry `PENDING_SEQ`
-   * so they sort after everything the room has numbered.
-   */
-  async function askAgent(
-    text: string,
-    selectedModel: AiModelSelection,
-    context: ConversationLine[] = [],
-  ) {
-    const id = `agent-${crypto.randomUUID()}`;
-    const startedAt = Date.now();
-    const model = models.find((item) => item.id === selectedModel.id);
-
-    upsert({
-      id,
-      seq: PENDING_SEQ,
-      kind: "agent",
-      at: new Date().toISOString(),
-      authorId: AGENT,
-      model: model?.label ?? agent.status.agent ?? agent.status.providerLabel ?? "Agent",
-      text: "",
-    });
-    setStreamingIds((prev) => new Set(prev).add(id));
-
-    try {
-      const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
-      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds) : text, {
-        onTrace: (traceId) => patchAgent(id, (entry) => ({ ...entry, traceId, status: "running" })),
-        canvas: canvasTools && roomId ? {
-          id: roomId,
-          shapeIds,
-          execute: (name, input, assertActive) => {
-            const pageId = editor?.getCurrentPageId();
-            const guarded = editor ? createCanvasTools(editor, () => { assertActive?.(); if (editor.getCurrentPageId() !== pageId) throw new Error("Canvas page is no longer active"); }) : canvasTools;
-            const result = executeCanvasTool(guarded, name, name === "addNode" ? {
-              ...(input as object),
-              provenance: { entryId: id, runId: id, agentId: AGENT, byUserId: userId },
-            } : input);
-            return result;
-          },
-        } : undefined,
-        onText: (chunk) =>
-          patchAgent(id, (entry) => ({ ...entry, text: entry.text + chunk })),
-        onTool: (call) =>
-          patchAgent(id, (entry) => ({
-            ...entry,
-            steps: mergeStep(entry.steps ?? [], call),
-          })),
-      });
-      patchAgent(id, (entry) => ({ ...entry, status: "done" }));
-    } catch (error) {
-      const cancelled = error instanceof Error && error.name === "AbortError";
-      patchAgent(id, (entry) => ({
-        ...entry,
-        status: cancelled ? "cancelled" : "failed",
-        text: `${entry.text}${entry.text ? "\n\n" : ""}${cancelled ? "Turn cancelled. Any completed changes were kept." : `The agent could not complete this turn: ${describeError(error)}`}`,
-      }));
-      throw error;
-    } finally {
-      setStreamingIds((prev) => withoutId(prev, id));
-      patchAgent(id, (entry) => ({ ...entry, durationMs: Date.now() - startedAt }));
-    }
-  }
-
   React.useEffect(() => {
     void getInstallationProfile().then((p) => {
       if (p?.name) {
@@ -487,9 +356,6 @@ export function ChatPanel({
     const humans = roomSnapshot.members.map((member) => ({ id: member.id, name: member.id === userId ? userName : member.name, kind: "human" as const }));
     const known = new Set(humans.map((member) => member.id));
     if (!known.has(userId)) { humans.unshift({ id: userId, name: userName, kind: "human" as const }); known.add(userId); }
-    for (const participant of hackathonConversation.participants) {
-      if (!known.has(participant.id)) { humans.push({ ...participant, kind: "human" as const }); known.add(participant.id); }
-    }
     const agents = roomSnapshot.executors.filter((executor) => executor.agentId).map((executor) => ({ id: executor.agentId, name: executor.agentId, kind: "agent" as const, operatorId: executor.userId }));
     if (!agents.some((participant) => participant.id === AGENT)) agents.push({ id: AGENT, name: agent.status.agent ?? "Kan", kind: "agent", operatorId: userId });
     return [...humans, ...agents];
@@ -544,10 +410,9 @@ export function ChatPanel({
     () => ({
       interimIds: new Set(liveEntries.map((line) => line.id)),
       pendingIds,
-      streamingIds,
       entryOrder: entryOrderRef.current,
     }),
-    [pendingIds, streamingIds, liveEntries]
+    [pendingIds, liveEntries]
   );
 
   return (
@@ -592,23 +457,6 @@ export function ChatPanel({
       }
       status={status}
       footerStatus={transcription ? <span>{transcription.status}</span> : undefined}
-      toolbar={
-        import.meta.env.DEV ? (
-          <div className="border-b border-border">
-            {/* Dev only. This is a test fixture, not a product control, and it
-                used to own the most prominent button in the panel. It stays a
-                plain row rather than moving into the assistant menu because a
-                menu unmounts on click and the driver polls its dataset while
-                it plays. */}
-            <ConversationSimulator
-              script={hackathonConversation}
-              onLine={simulateLine}
-              disabled={agent.status.state !== "ready" || !canvasTools || agent.busy}
-              onStop={() => void agent.cancel()}
-            />
-          </div>
-        ) : null
-      }
       onClose={onClose}
       onJumpToNode={jumpToNode}
       resolveAnchorLabel={labelForNode}

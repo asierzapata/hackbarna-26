@@ -8,7 +8,8 @@
  *
  * Reachability is probed when the dialog opens rather than on the catalog, so
  * an installation that never goes online never pings the backend just for
- * sitting on the home screen.
+ * sitting on the home screen. Online is preselected — it is what most canvases
+ * want to be — and falls back to offline if the probe says the server is gone.
  */
 import * as React from "react";
 import {
@@ -94,7 +95,7 @@ export function CreateCanvasDialog({
   onCreated,
 }: CreateCanvasDialogProps) {
   const [name, setName] = React.useState("Untitled Canvas");
-  const [mode, setMode] = React.useState<CanvasMode>("offline");
+  const [mode, setMode] = React.useState<CanvasMode>("online");
   const [reachability, setReachability] =
     React.useState<Reachability>("checking");
   const [isCreating, setIsCreating] = React.useState(false);
@@ -106,7 +107,7 @@ export function CreateCanvasDialog({
     if (!open) return;
 
     setName("Untitled Canvas");
-    setMode("offline");
+    setMode("online");
     setError(null);
     setIsCreating(false);
     setReachability("checking");
@@ -224,7 +225,7 @@ export function CreateCanvasDialog({
               <ModeCard
                 mode="online"
                 selected={mode === "online"}
-                disabled={isCreating || !onlineAvailable}
+                disabled={isCreating || reachability === "unreachable"}
                 onSelect={() => setMode("online")}
                 title="Online"
                 description="Shared through the server. Invite people to edit and call."
@@ -269,7 +270,7 @@ export function CreateCanvasDialog({
               type="submit"
               variant="default"
               size="sm"
-              disabled={isCreating || !name.trim()}
+              disabled={isCreating || !name.trim() || (mode === "online" && !onlineAvailable)}
               className="gap-1.5"
             >
               {isCreating ? (
