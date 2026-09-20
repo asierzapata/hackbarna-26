@@ -684,6 +684,17 @@ From the repo root, on an Apple Silicon Mac:
    builds `@kan/site` and publishes `apps/site/dist`. Only push or trigger the
    hosted deployment when explicitly asked; a local build is not a live deploy.
 
+For a local CLI deployment, use `npx --yes vercel@59.16.0 deploy --prod
+--project kan --scope asier-zapata-fernndezs-projects` from the repo root.
+Run the same command with `--dry --json` instead of `--prod` first and inspect
+its file list. The CLI does not honor this repo's Git ignore rules: without
+`.vercelignore`, it includes native build caches and local database files.
+The checked-in allowlist uploads only the site's source/assets, workspace
+manifests, lockfile, and build configuration. Add new site assets explicitly.
+Avoid `vercel link` here: it can replace root `.env.local` with pulled values.
+After deployment, verify `https://www.getkan.dev/kan-alpha.dmg` against the
+staged SHA-256; `https://getkan.dev` redirects to the `www` domain.
+
 The current download is arm64-only, not an Intel/universal build. The build helper
 rejects other host architectures so it cannot silently replace the advertised
 Apple Silicon download with an incompatible binary. Ad-hoc signing is not Apple
