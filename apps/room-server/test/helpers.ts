@@ -21,13 +21,7 @@ export class ManualClock {
 export class StubClassifier implements Classifier {
   calls: ClassificationState[] = [];
   next: Decision | ((s: ClassificationState) => Decision | Promise<Decision>) = {
-    addressedProbability: 0,
-    worthCapturingProbability: 0,
-    intent: "none",
-    intentProbability: 1,
-    relatedShapeId: null,
-    needsExternalDataProbability: 0,
-    captureScore: 0,
+    triggerProbability: 0,
   };
   async decide(state: ClassificationState): Promise<Decision> {
     this.calls.push(state);

@@ -1,40 +1,52 @@
 import * as React from "react";
 
-import { ConversationSimulator, ThreadPanel } from "./thread";
+import { AssistantMenu, ThreadPanel } from "./thread";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
-import { NativeSelect, NativeSelectOption } from "./ui/native-select";
-import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, EAGERNESS_PACING, type AssistantEagerness } from "@kan/protocol";
+import { Spinner } from "./ui/spinner";
+import { ASSISTANT_EAGERNESS, DEFAULT_EAGERNESS, type AssistantEagerness } from "@kan/protocol";
+import { fromChimeIn, toChimeIn, type AssistantScope, type ChimeIn } from "@/lib/assistant-settings";
 
 import { getServerRunContext, heartbeatServerRun, patchServerRoom, patchServerRun, completeServerRun } from "@/lib/api-client";
 import { useCanvas } from "./canvas-context";
+import { RoomAssistantSettings } from "./RoomAssistantSettings";
 import { assistantCanvasRecords, applyAssistantOperations } from "@/lib/assistant-canvas";
-import type { AgentEntry, AgentStep, OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
+import type { OfferEntry, SuggestionEntry, ThreadEntry, TriggerEntry } from "@/lib/thread";
 import { PENDING_SEQ } from "@/lib/thread";
 import { createWsTransport, type RoomTransport } from "@/lib/room-transport";
 
 import { createLocalTransport, type LocalTransport } from "@/lib/local-transport";
-import { useAgent, type AgentToolCall } from "./agent-context";
+import { useAgent } from "./agent-context";
 import { runAssistantTurn, startLeaseExecution, type LeaseExecution, type LeasePhase } from "@/lib/assistant-controller";
-import { hackathonConversation, type ConversationLine } from "@/lib/conversation-script";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
 import { type AiModelSelection } from "@/components/ui/ai-model-select";
-import { buildCanvasPrompt, executeCanvasTool, shouldActOnLine } from "@/lib/canvas-agent";
-import { createCanvasTools } from "@/nodes/tools";
 import { useQaSource } from "@/lib/qa-source";
 
 const DEFAULT_USER = "You";
-const AGENT = "assistant";
 
-/** ACP tool statuses, in the thread's vocabulary. */
-const stepStates: Record<string, AgentStep["state"]> = {
-  pending: "running",
-  in_progress: "running",
-  completed: "done",
-  failed: "error",
-};
+interface AssistantSettings {
+  scope: AssistantScope;
+  background: boolean;
+  eagerness: AssistantEagerness;
+}
+
+const ASSISTANT_DEFAULTS: AssistantSettings = { scope: "own", background: false, eagerness: DEFAULT_EAGERNESS };
+
+function readAssistantSettings(roomId: string | undefined): AssistantSettings {
+  const saved = roomId ? localStorage.getItem(`kan-assistant:${roomId}`) : null;
+  if (!saved) return ASSISTANT_DEFAULTS;
+  try {
+    const value = JSON.parse(saved) as Partial<AssistantSettings>;
+    return {
+      scope: value.scope === "own" || value.scope === "room" || value.scope === "manual" ? value.scope : ASSISTANT_DEFAULTS.scope,
+      background: typeof value.background === "boolean" ? value.background : ASSISTANT_DEFAULTS.background,
+      eagerness: value.eagerness && ASSISTANT_EAGERNESS.includes(value.eagerness) ? value.eagerness : ASSISTANT_DEFAULTS.eagerness,
+    };
+  } catch {
+    return ASSISTANT_DEFAULTS;
+  }
+}
+const AGENT = "assistant";
 
 export function ChatReopenButton({ onClick }: { onClick: () => void }) {
   return (
@@ -47,20 +59,6 @@ export function ChatReopenButton({ onClick }: { onClick: () => void }) {
       Open chat
     </Button>
   );
-}
-
-/** Folds a tool call into the step list, in place if we have seen its id. */
-function mergeStep(steps: AgentStep[], call: AgentToolCall): AgentStep[] {
-  const index = steps.findIndex((step) => step.id === call.id);
-  const previous = index === -1 ? undefined : steps[index];
-  const step: AgentStep = {
-    id: call.id,
-    tool: call.kind ?? previous?.tool ?? "tool",
-    summary: call.title ?? previous?.summary ?? call.status,
-    state: stepStates[call.status] ?? "running",
-  };
-  if (index === -1) return [...steps, step];
-  return steps.map((existing, i) => (i === index ? step : existing));
 }
 
 function withoutId(ids: ReadonlySet<string>, id: string) {
@@ -112,17 +110,33 @@ export function ChatPanel({
 }) {
   const agent = useAgent();
   const { editor, jumpToNode, selectedAnchors, shapeCount, labelForNode } = useCanvas();
-  const canvasTools = React.useMemo(() => editor && !online ? createCanvasTools(editor) : null, [editor, online]);
-  const transcript = React.useRef<ConversationLine[]>([]);
   const cancelRef = React.useRef(agent.cancel);
   cancelRef.current = agent.cancel;
   React.useEffect(() => () => { void cancelRef.current(); }, [roomId]);
   const [userName, setUserName] = React.useState(DEFAULT_USER);
   const [userId, setUserId] = React.useState(DEFAULT_USER);
-  const [assistantScope, setAssistantScope] = React.useState<"own" | "room" | "manual">("own");
-  const [backgroundChecks, setBackgroundChecks] = React.useState(false);
+  const [assistantScope, setAssistantScope] = React.useState<AssistantScope>(() => readAssistantSettings(roomId).scope);
+  const [backgroundChecks, setBackgroundChecks] = React.useState(() => readAssistantSettings(roomId).background);
   const [assistantPaused, setAssistantPaused] = React.useState(false);
-  const [eagerness, setEagerness] = React.useState<AssistantEagerness>(DEFAULT_EAGERNESS);
+  const [eagerness, setEagerness] = React.useState<AssistantEagerness>(() => readAssistantSettings(roomId).eagerness);
+  /**
+   * Which room the three settings above currently hold.
+   *
+   * They are read at first render rather than restored in an effect: both
+   * effects run in the same commit, so a writer effect would persist the
+   * defaults over whatever a reader effect had just queued, and StrictMode's
+   * second pass would read those defaults back. Every assistant setting
+   * silently reverted on reload. Resetting during render instead of in an
+   * effect keeps that true when the room changes without a remount.
+   */
+  const settingsRoom = React.useRef(roomId);
+  if (settingsRoom.current !== roomId) {
+    settingsRoom.current = roomId;
+    const saved = readAssistantSettings(roomId);
+    setAssistantScope(saved.scope);
+    setBackgroundChecks(saved.background);
+    setEagerness(saved.eagerness);
+  }
 
   const editorRef = React.useRef(editor);
   editorRef.current = editor;
@@ -170,29 +184,15 @@ export function ChatPanel({
   const [pendingIds, setPendingIds] = React.useState<ReadonlySet<string>>(
     new Set()
   );
-  const [streamingIds, setStreamingIds] = React.useState<ReadonlySet<string>>(
-    new Set()
-  );
   useQaSource("chat", () => ({
-    roomId, online, entries, pendingIds: [...pendingIds], streamingIds: [...streamingIds],
-    transcript: transcript.current, runFailures: runFailures.current,
+    roomId, online, entries, pendingIds: [...pendingIds],
+    runFailures: runFailures.current,
   }));
   const models = agent.status.models?.available ?? [];
   const modelSelection: AiModelSelection = { id: agent.status.models?.current ?? "" };
   const [roomSnapshot, setRoomSnapshot] = React.useState(() => transport.snapshot());
   const activeLease = React.useRef<LeaseExecution | undefined>(undefined);
   const attempts = React.useRef(new Set<string>());
-  React.useEffect(() => {
-    const saved = roomId ? localStorage.getItem(`kan-assistant:${roomId}`) : null;
-    if (!saved) return;
-    try {
-      const value = JSON.parse(saved) as { scope?: "own" | "room" | "manual"; background?: boolean; eagerness?: AssistantEagerness };
-      if (value.scope) setAssistantScope(value.scope);
-      if (value.background !== undefined) setBackgroundChecks(value.background);
-      if (value.eagerness && ASSISTANT_EAGERNESS.includes(value.eagerness)) setEagerness(value.eagerness);
-    } catch {}
-  }, [roomId]);
-
   React.useEffect(() => {
     if (!roomId) return;
     localStorage.setItem(`kan-assistant:${roomId}`, JSON.stringify({ scope: assistantScope, background: backgroundChecks, eagerness }));
@@ -306,107 +306,6 @@ export function ChatPanel({
   }, [agent.status.state, assistantPaused, online, roomSnapshot]);
   React.useEffect(() => () => { activeLease.current?.controller.abort(); }, [transport]);
 
-  /**
-   * Feeds one line of a scripted conversation into the thread as a transcript
-   * entry, the way live call transcription would once it exists. Carries
-   * `PENDING_SEQ` for the same reason `askAgent` does: nothing has numbered
-   * it, and voice has no wire kind yet (see `room-transport.ts`).
-   */
-  async function simulateLine(line: ConversationLine, index: number) {
-    if (index === 0) transcript.current = [];
-    transcript.current.push(line);
-    upsert({
-      id: crypto.randomUUID(),
-      seq: PENDING_SEQ,
-      kind: "transcript",
-      at: new Date().toISOString(),
-      authorId: line.speaker,
-      text: line.text,
-      trigger: line.trigger,
-    });
-    if (shouldActOnLine(line)) {
-      if (!canvasTools || agent.status.state !== "ready") throw new Error("Connect Devin on an offline canvas before running this conversation.");
-      await askAgent(line.text, modelSelection, [...transcript.current]);
-    }
-  }
-
-  /** Patches one agent entry in place while its turn streams. */
-  function patchAgent(id: string, fn: (entry: AgentEntry) => AgentEntry) {
-    setEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === id && entry.kind === "agent" ? fn(entry) : entry
-      )
-    );
-  }
-
-  /**
-   * One prompt turn against the host's agent. Text arrives in chunks, so the
-   * entry is appended empty and filled as it streams.
-   *
-   * These turns are local: the agent runs on this machine, and until the room
-   * server exists there is nowhere to publish them. They carry `PENDING_SEQ`
-   * so they sort after everything the room has numbered.
-   */
-  async function askAgent(
-    text: string,
-    selectedModel: AiModelSelection,
-    context: ConversationLine[] = [],
-  ) {
-    const id = `agent-${crypto.randomUUID()}`;
-    const startedAt = Date.now();
-    const model = models.find((item) => item.id === selectedModel.id);
-
-    upsert({
-      id,
-      seq: PENDING_SEQ,
-      kind: "agent",
-      at: new Date().toISOString(),
-      authorId: AGENT,
-      model: model?.label ?? agent.status.agent ?? agent.status.providerLabel ?? "Agent",
-      text: "",
-    });
-    setStreamingIds((prev) => new Set(prev).add(id));
-
-    try {
-      const shapeIds = context.length ? [] : selectedAnchors.map((anchor) => anchor.nodeId);
-      await agent.prompt(canvasTools ? buildCanvasPrompt(text, context, shapeIds, canvasTools.getCanvas({ scope: "summary" })) : text, {
-        onTrace: (traceId) => patchAgent(id, (entry) => ({ ...entry, traceId, status: "running" })),
-        canvas: canvasTools && roomId ? {
-          id: roomId,
-          shapeIds,
-          execute: (name, input, assertActive) => {
-            const pageId = editor?.getCurrentPageId();
-            const guarded = editor ? createCanvasTools(editor, () => { assertActive?.(); if (editor.getCurrentPageId() !== pageId) throw new Error("Canvas page is no longer active"); }) : canvasTools;
-            const result = executeCanvasTool(guarded, name, name === "addNode" ? {
-              ...(input as object),
-              provenance: { entryId: id, runId: id, agentId: AGENT, byUserId: userId },
-            } : input);
-            return result;
-          },
-        } : undefined,
-        onText: (chunk) =>
-          patchAgent(id, (entry) => ({ ...entry, text: entry.text + chunk })),
-        onTool: (call) =>
-          patchAgent(id, (entry) => ({
-            ...entry,
-            steps: mergeStep(entry.steps ?? [], call),
-          })),
-      });
-      patchAgent(id, (entry) => ({ ...entry, status: "done" }));
-    } catch (error) {
-      const cancelled = error instanceof Error && error.name === "AbortError";
-      patchAgent(id, (entry) => ({
-        ...entry,
-        status: cancelled ? "cancelled" : "failed",
-        text: `${entry.text}${entry.text ? "\n\n" : ""}${cancelled ? "Turn cancelled. Any completed changes were kept." : `The agent could not complete this turn: ${describeError(error)}`}`,
-      }));
-      throw error;
-    } finally {
-      setStreamingIds((prev) => withoutId(prev, id));
-      patchAgent(id, (entry) => ({ ...entry, durationMs: Date.now() - startedAt }));
-    }
-  }
-
   React.useEffect(() => {
     void getInstallationProfile().then((p) => {
       if (p?.name) {
@@ -457,13 +356,53 @@ export function ChatPanel({
     const humans = roomSnapshot.members.map((member) => ({ id: member.id, name: member.id === userId ? userName : member.name, kind: "human" as const }));
     const known = new Set(humans.map((member) => member.id));
     if (!known.has(userId)) { humans.unshift({ id: userId, name: userName, kind: "human" as const }); known.add(userId); }
-    for (const participant of hackathonConversation.participants) {
-      if (!known.has(participant.id)) { humans.push({ ...participant, kind: "human" as const }); known.add(participant.id); }
-    }
     const agents = roomSnapshot.executors.filter((executor) => executor.agentId).map((executor) => ({ id: executor.agentId, name: executor.agentId, kind: "agent" as const, operatorId: executor.userId }));
     if (!agents.some((participant) => participant.id === AGENT)) agents.push({ id: AGENT, name: agent.status.agent ?? "Kan", kind: "agent", operatorId: userId });
     return [...humans, ...agents];
   }, [agent.status.agent, roomSnapshot.executors, roomSnapshot.members, userId, userName]);
+
+  const chimeIn = toChimeIn(assistantScope, eagerness);
+  /** Scope to restore when leaving "only when asked": lending survives going quiet. */
+  const lastActiveScope = React.useRef<AssistantScope>(assistantScope === "manual" ? "own" : assistantScope);
+  if (assistantScope !== "manual") lastActiveScope.current = assistantScope;
+  const applyChimeIn = React.useCallback((value: ChimeIn) => {
+    const next = fromChimeIn(value, lastActiveScope.current);
+    setAssistantScope(next.scope);
+    if (!next.eagerness) return;
+    setEagerness(next.eagerness);
+    if (online && roomId) void patchServerRoom(roomId, { assistantEagerness: next.eagerness }).catch(() => undefined);
+  }, [online, roomId]);
+
+  /**
+   * The one transient line above the stream.
+   *
+   * Only one of these can matter at a time and each is more urgent than the
+   * one below it, so this is a priority list rather than a stack of rows. The
+   * ambient transcription status is not here on purpose: it is always set, so
+   * showing it would make the "only when there is something to say" slot
+   * permanent. It lives in the footer instead.
+   */
+  const status = React.useMemo(() => {
+    if (agent.busy) {
+      return (
+        <>
+          <Spinner className="size-3" />
+          <span className="flex-1">Kan is working</span>
+          <Button variant="outline" size="xs" onClick={() => void agent.cancel()}>Cancel</Button>
+        </>
+      );
+    }
+    const error = actionError ?? roomSnapshot.error ?? transcription?.error;
+    if (!error) return null;
+    return (
+      <>
+        <span role="status" className="flex-1 text-destructive">{error}</span>
+        {transcription?.error === error ? (
+          <Button variant="outline" size="xs" onClick={transcription.retry}>Retry</Button>
+        ) : null}
+      </>
+    );
+  }, [actionError, agent, roomSnapshot.error, transcription]);
 
   const liveEntries = React.useMemo(() => (roomSnapshot.transcripts ?? []).filter((line) => !entries.some((entry) => entry.id === line.id)).map((line) => ({ ...line, kind: "transcript" as const, seq: PENDING_SEQ })), [roomSnapshot.transcripts, entries]);
   const visibleEntries = React.useMemo(() => [...entries, ...liveEntries], [entries, liveEntries]);
@@ -471,72 +410,53 @@ export function ChatPanel({
     () => ({
       interimIds: new Set(liveEntries.map((line) => line.id)),
       pendingIds,
-      streamingIds,
       entryOrder: entryOrderRef.current,
     }),
-    [pendingIds, streamingIds, liveEntries]
+    [pendingIds, liveEntries]
   );
 
   return (
     <ThreadPanel
       className={className}
-      channel={roomId ? `room/${roomId.slice(0, 8)}` : "#feature-kickoff"}
+      channel={roomId ? `canvas/${roomId.slice(0, 8)}` : "#feature-kickoff"}
       entries={visibleEntries}
       participants={participants}
       currentUserId={userId}
       anchors={selectedAnchors}
       canvasNodeCount={shapeCount}
       view={view}
-      toolbar={
-        <div className="flex flex-col gap-2 border-b border-border p-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-muted-foreground">Kan · personal agent</span>
-            <ToggleGroup value={[assistantScope]} onValueChange={(value) => { const next = value[0]; if (next === "own" || next === "room" || next === "manual") setAssistantScope(next); }} size="sm" variant="outline">
-              <ToggleGroupItem value="own">My requests</ToggleGroupItem>
-              <ToggleGroupItem value="room">Help room</ToggleGroupItem>
-              <ToggleGroupItem value="manual">Manual</ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-          <label className="flex items-center justify-between gap-2 text-muted-foreground">
-            Allow background checks using my agent
-            <Switch checked={backgroundChecks} onCheckedChange={setBackgroundChecks} />
-          </label>
-          <label className="flex items-center justify-between gap-2 text-muted-foreground">
-            <span className="flex flex-col">
-              Eagerness
-              <span className="text-[10px]">{EAGERNESS_PACING[eagerness].description}</span>
-            </span>
-            <NativeSelect
-              size="sm"
-              aria-label="Assistant eagerness"
-              data-testid="assistant-eagerness"
-              value={eagerness}
-              onChange={(event) => {
-                const next = event.target.value as AssistantEagerness;
-                if (!ASSISTANT_EAGERNESS.includes(next)) return;
-                setEagerness(next);
-                if (online && roomId) void patchServerRoom(roomId, { assistantEagerness: next }).catch(() => undefined);
-              }}
-            >
-              {ASSISTANT_EAGERNESS.map((value) => (
-                <NativeSelectOption key={value} value={value}>{EAGERNESS_PACING[value].label}</NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-          {online ? <label className="flex items-center justify-between gap-2 text-muted-foreground">Pause contextual assistance<Switch checked={assistantPaused} onCheckedChange={(value) => { setAssistantPaused(value); void patchServerRoom(roomId!, { assistantPaused: value }).catch(() => undefined); }} /></label> : null}
-          {transcription && <div className="flex flex-col gap-1 text-muted-foreground">
-            <span>{transcription.status}</span>
-            {transcription.error && <div role="status" className="flex items-center gap-2"><span>{transcription.error}</span><Button variant="outline" size="xs" onClick={transcription.retry}>Retry transcription</Button></div>}
-          </div>}
-          {actionError || roomSnapshot.error ? <p role="status">{actionError ?? roomSnapshot.error}</p> : null}
-          <ConversationSimulator
-            script={hackathonConversation}
-            onLine={simulateLine}
-            disabled={agent.status.state !== "ready" || !canvasTools || agent.busy}
-            onStop={() => void agent.cancel()}
-          />
-        </div>
+      headerAction={
+        <AssistantMenu
+          ready={agent.status.state === "ready"}
+          agentName={agent.status.agent ?? undefined}
+          chimeIn={chimeIn}
+          onChimeInChange={applyChimeIn}
+          room={
+            online && roomId
+              ? {
+                  lend: assistantScope === "room",
+                  onLendChange: (value) => setAssistantScope(value ? "room" : "own"),
+                  backgroundChecks,
+                  onBackgroundChecksChange: setBackgroundChecks,
+                  paused: assistantPaused,
+                  onPausedChange: (value) => {
+                    setAssistantPaused(value);
+                    void patchServerRoom(roomId, { assistantPaused: value }).catch(reportError);
+                  },
+                  settings: roomSnapshot.room ? (
+                    <RoomAssistantSettings
+                      room={roomSnapshot.room}
+                      disabled={!roomSnapshot.ready}
+                      onSave={async (settings) => (await patchServerRoom(roomId, settings)).room}
+                    />
+                  ) : undefined,
+                }
+              : undefined
+          }
+        />
       }
+      status={status}
+      footerStatus={transcription ? <span>{transcription.status}</span> : undefined}
       onClose={onClose}
       onJumpToNode={jumpToNode}
       resolveAnchorLabel={labelForNode}

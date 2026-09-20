@@ -11,10 +11,7 @@ const state: ClassificationState = {
   cause: { id: "entry:test", kind: "message", text: "We agreed to launch on Monday.", authorId: "user:test" },
   recentEntries: [], shapes: [{ id: "shape:launch", label: "Launch plan" }], openSuggestions: [],
 };
-const decision: Decision = {
-  addressedProbability: 0, worthCapturingProbability: 0.95, intent: "capture", intentProbability: 0.95,
-  relatedShapeId: "shape:launch", needsExternalDataProbability: 0, captureScore: 3,
-};
+const decision: Decision = { triggerProbability: 0.95 };
 const completion = (content: unknown = decision, finishReason = "stop") => Response.json({
   choices: [{ finish_reason: finishReason, message: { content: JSON.stringify(content) } }],
 });
@@ -57,9 +54,9 @@ test("Nebius requests bounded structured output with policy separate from untrus
   assert.equal(calls, 1);
 });
 
-test("Nebius rejects malformed decisions, unknown shapes, refusals, and truncated output", async () => {
+test("Nebius rejects malformed probabilities, extra fields, refusals, and truncated output", async () => {
   const invalid = [
-    { ...decision, addressedProbability: 1.1 }, { ...decision, captureScore: -1 },
+    { triggerProbability: 1.1 }, { triggerProbability: -1 }, { triggerProbability: "0.9" },
     { ...decision, intent: "act" }, { ...decision, relatedShapeId: "shape:invented" },
     { ...decision, operations: [{ type: "remove" }] }, {},
   ];
@@ -96,12 +93,12 @@ test("Nebius bounds context before transmission and keeps credentials out of ser
   const classifier = new NebiusClassifier("private-key", "custom-model", async (_url, init) => {
     calls++;
     assert.equal(JSON.parse(String(init?.body)).model, "custom-model");
-    return completion({ ...decision, relatedShapeId: null });
+    return completion(decision);
   });
   assert.ok(!JSON.stringify(classifier).includes("private-key"));
   await assert.rejects(classifier.decide({ ...state, cause: { ...state.cause, text: "x".repeat(128_001) } }), /context too large/);
   assert.equal(calls, 0);
-  assert.equal((await classifier.decide({ ...state, shapes: [] })).relatedShapeId, null);
+  assert.equal((await classifier.decide({ ...state, shapes: [] })).triggerProbability, 0.95);
 });
 
 test("Nebius attaches the existing classifier deadline to the request", async (t) => {
@@ -121,7 +118,7 @@ test("Nebius decisions flow through real HTTP and WebSocket room policy without 
   let fail = false;
   const classifier = new NebiusClassifier("test-key", undefined, async () => {
     calls++;
-    return fail ? new Response("private details", { status: 503 }) : completion({ ...decision, relatedShapeId: null });
+    return fail ? new Response("private details", { status: 503 }) : completion(decision);
   });
   const ctx = await setup({ classifier, video: null, timings: { debounceMs: 1 } });
   t.after(() => ctx.cleanup());

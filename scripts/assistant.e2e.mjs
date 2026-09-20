@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 const root = new URL("..", import.meta.url).pathname;
 const drive = (...args) => execFileSync("node", ["scripts/drive.mjs", ...args], { cwd: root, encoding: "utf8" });
 const snapshot = JSON.parse(drive("snapshot"));
-if (!snapshot.buttons.includes("My requests") || !snapshot.buttons.includes("Help room") || !snapshot.buttons.includes("Manual")) throw new Error("assistant controls are not mounted");
+// The scope toggle group, the eagerness select and the background-checks
+// switch all moved behind the single assistant chip in the thread header.
+if (!snapshot.buttons.some((label) => label.startsWith("Kan assistant:"))) throw new Error("the assistant menu is not mounted");
 drive("fill", "textarea", "ordinary assistant e2e message");
 drive("clickText", "Send");
 const after = JSON.parse(drive("snapshot"));

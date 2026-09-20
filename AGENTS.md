@@ -184,8 +184,8 @@ The agent never touches tldraw directly; it goes through the tool layer.
   `groupNodes`, `getCanvas`. Every input is zod-parsed first.
 - In dev, `window.__kan = { editor, tools }` and `window.__kanErrors` exist.
   There is no node demo palette, node scenario runner, or automatic canvas
-  seeding; nodes remain available through the tool layer. Existing room data
-  and the separate thread conversation simulator are preserved. Drive tools with
+  seeding; nodes remain available through the tool layer. Existing room data is
+  preserved; the thread conversation simulator is gone. Drive tools with
   `node scripts/drive.mjs eval 'window.__kan.tools.getCanvas()'`.
 
 The rich node tools currently operate on offline desktop canvases; they are
@@ -198,10 +198,10 @@ remain denied. Online canvases retain only the shared renderer; publishing
 rich-node snapshots requires that follow-up schema integration. Offline canvases
 register both renderers, preserve duplicated initial records, and reuse
 `CanvasProvider`.
-Run `node scripts/canvas-tools.e2e.mjs` for tool-layer coverage, and
-`node scripts/local-agent.e2e.mjs` with Devin signed in to verify the real local
-agent creates the two-day calendar, venue map, and sponsors table. Both tests
-clean their own canvas and restore the original page. Do not drive concurrently.
+Run `node scripts/canvas-tools.e2e.mjs` for tool-layer coverage. It cleans its
+own canvas and restores the original page. Do not drive concurrently. The old
+`local-agent.e2e.mjs` drove the deleted conversation simulator and went with it;
+real local-agent coverage now goes through the chat composer.
 
 Keys: `apps/desktop/src/lib/config.ts` zod-parses `VITE_MAPTILER_KEY` and
 `VITE_BRANDFETCH_CLIENT_ID` from the root `.env.local` (see `.env.example`).
@@ -413,8 +413,9 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 - `packages/protocol/src/diagnostics.ts` defines content-free events and typed
   failures. Desktop traces join frontend, Rust ACP, and native MCP events by
   turn/request IDs. Structured assistant turns use the lease run ID as their
-  turn ID. Regular chat/Ask Kan uses structured turns; the conversation simulator
-  uses the local canvas MCP path. Do not assume a failed Ask Kan request used MCP.
+  turn ID. Regular chat/Ask Kan uses structured turns; prompts on an offline
+  canvas use the local canvas MCP path. Do not assume a failed Ask Kan request
+  used MCP.
 - `Report bug` → `View diagnostics` previews/copies the recent trace. Local agent
   entries also expose per-turn diagnostics. QA reports include frozen metadata
   traces. Optional error-stack/stderr capture is memory-only, expires after five
@@ -487,7 +488,7 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   Do not replace another running server or point verification at user data.
 - `NEBIUS_CLASSIFIER_MODEL` overrides the default
   `Qwen/Qwen3-30B-A3B-Instruct-2507`. Requests use Nebius's fixed HTTPS endpoint,
-  shared evaluation criteria, strict JSON validation, known-shape checks, an
+  shared binary `shouldTrigger` criteria and validated `triggerProbability`, an
   8-second deadline, at most 512 output tokens and no automatic retries.
   Context above 128 KB is rejected before transmission. Model probabilities
   are self-reported estimates, not calibrated scores or permission to mutate.
@@ -515,6 +516,9 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   stored row. It never overwrites/deletes datasets or automatically retries a
   write. History and model decisions are JSON-encoded string columns. Data Lab
   displays application-scored results, not a Nebius-managed evaluation job.
+  Historical JSONL rows preserve their original multi-field decisions; they are
+  not reruns of the merged binary policy. New runs record the current policy
+  version in their provenance. No historical scores are rewritten on migration.
   Checks: `node --import tsx --test apps/room-server/test/nebius-datalab.test.ts`.
 
 ## Prompts and timestamped conversation tests
@@ -588,3 +592,100 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
   Round 2 uses uploaded curated cases, not new Galtea-generated prompts. API judge
   metrics require `input` and `actual_output`; `conversation_turns` is rejected by
   the current API, so complete conversations are ingested as session traces.
+
+## Thread panel header
+
+- The header is one row: `Thread` badge, channel, the assistant chip, search,
+  close. The three-way filter tabs (Everything / Messages / Agent activity) are
+  gone; `buildThreadRows(entries, search, view)` takes a search query instead,
+  matched by `matchesSearch` over body text plus anchors, attachments, agent
+  step summaries, suggestion quotes and offer titles. Contextual and propose
+  triggers are now always hidden, since only the deleted tab revealed them.
+- `AssistantMenu` (`components/thread/AssistantMenu.tsx`) is the single
+  assistant control. Scope, eagerness, background checks and the room pause all
+  live in it. `lib/assistant-settings.ts` collapses scope+eagerness into one
+  `ChimeIn` ladder (`asked` = `scope: "manual"`, then the four eagerness
+  levels). It derives rather than migrates: `kan-assistant:<roomId>` and the
+  server's `assistantEagerness` keep their existing shape. Whose triggers the
+  agent runs (`own` vs `room`) stays a separate switch, shown only online.
+- Assistant settings are read at **first render**, not restored in an effect.
+  A reader effect and the writer effect run in the same commit, so the writer
+  persisted the defaults over the restore and StrictMode's second pass read
+  those defaults back: every setting reverted on reload. Room changes reset the
+  state during render for the same reason.
+- `ThreadPanel` has three slots: `headerAction` (the chip), `status` (one
+  transient line, rendered only when non-empty: agent busy with Cancel, then
+  errors) and `footerStatus` (ambient state such as the call transcript). Do
+  not put always-set text in `status` or the slot becomes permanent. The old
+  `toolbar` slot went away with the conversation simulator that used it.
+- `lib/config.ts` treats a blank `VITE_*` key as absent. Vite injects `""` for a
+  key present but empty in `.env.local`, and the old `.min(1).optional()`
+  crashed the whole app on boot over an optional key.
+
+## App icon packaging
+
+- `apps/desktop/src-tauri/icons/Kan.icon` is the editable Icon Composer source.
+  Releases bundle the checked-in `icons/Assets.car`; Tauri discovers its icon name
+  and sets `CFBundleIconName`. Keep `icon.icns` for older macOS versions. This
+  avoids recompiling unchanged artwork on every release: Xcode 27's `actool` has
+  returned `Bad file descriptor` even when its version check succeeds.
+- Run `node scripts/generate-icons.mjs` on macOS after changing the artwork.
+  It refreshes both `Assets.car` and the macOS fallback through `actool`, and
+  desktop PNG/ICO sizes through Tauri from `icons/source.png`, the flattened
+  Composer PNG export. Update that export too when the design changes. Commit
+  the source and generated assets together. Regeneration requires working full
+  Xcode 26+ with first-launch components installed. Mobile outputs stay temporary.
+- For an icon-only update to an already-built alpha, run
+  `npm run tauri -- bundle --bundles app,dmg --config '{"productName":"Kan Alpha","identifier":"com.asierzapata.kan.alpha","bundle":{"macOS":{"signingIdentity":"-"}}}'`.
+  This repackages the existing release executable; it does not compile current
+  source. Use `build` instead of `bundle` for a fresh full build. Outputs live in
+  `apps/desktop/src-tauri/target/release/bundle/`. Ad-hoc signing is not notarization.
+- Verify both `CFBundleIconFile` and `CFBundleIconName` in the packaged plist,
+  inspect `Assets.car` with `xcrun assetutil --info`, verify the signature with
+  `codesign --verify --deep --strict`, and launch the actual `.app` to check the
+  macOS icon. A dev WebDriver window does not exercise packaged icon resources.
+- `components/KanBrand.tsx` provides the compact, theme-aware SVG plus wordmark
+  for both headers and the full bundled Composer PNG for onboarding. The icon is
+  decorative beside the welcome heading; the canvas link retains its explicit
+  back arrow and accessible navigation label. Header foreground/background must
+  use the paired theme tokens, not the legacy always-white `--surface`.
+- Branding checks: `npx tsx --tsconfig apps/desktop/tsconfig.json --test
+  apps/desktop/test/kan-brand.test.tsx`. Native verification should cover both
+  onboarding steps, the catalog and canvas headers, back navigation, and light/dark
+  contrast. Use a separate app identifier and Vite port for fresh onboarding so
+  the user's profile and canvases are not changed.
+
+## Deploying a new alpha download
+
+The landing site serves the current macOS Apple Silicon alpha from
+**`apps/site/public/kan-alpha.dmg`**, at the stable URL **`/kan-alpha.dmg`**.
+Replace that file for each release; both site download buttons use this path.
+
+From the repo root, on an Apple Silicon Mac:
+
+1. Commit the app changes to release. Keep version metadata consistent if bumping
+   the version; the build script reads the DMG version from `tauri.conf.json`.
+2. Run `node scripts/build-alpha.mjs`. It performs a fresh Tauri release build
+   (not `tauri bundle` of an old executable), using product name `Kan Alpha`,
+   identifier `com.asierzapata.kan.alpha`, ad-hoc signing, and no WebDriver feature.
+   It checks the app signature and DMG integrity, then atomically replaces
+   `apps/site/public/kan-alpha.dmg` and prints its size and SHA-256.
+3. Smoke-test `apps/desktop/src-tauri/target/release/bundle/macos/Kan Alpha.app`.
+   Exercise the actual packaged app and keep a canvas open beyond five seconds
+   to catch production-only licensing failures. The script requires a nonempty
+   `VITE_TLDRAW_LICENSE_KEY` from the build environment/root `.env.local`; presence
+   alone does not establish that the license is valid. Never commit env files.
+4. Run `npm run build -w @kan/site`. Vite copies the public DMG into
+   `apps/site/dist/kan-alpha.dmg`. Preview the built site with
+   `npm run preview -w @kan/site`, verify the download returns the real DMG (not
+   HTML), and compare its SHA-256 with the staged file.
+5. Commit `apps/site/public/kan-alpha.dmg` together with any release/site changes,
+   then deploy the landing site through its Vercel project. Root `vercel.json`
+   builds `@kan/site` and publishes `apps/site/dist`. Only push or trigger the
+   hosted deployment when explicitly asked; a local build is not a live deploy.
+
+The current download is arm64-only, not an Intel/universal build. The build helper
+rejects other host architectures so it cannot silently replace the advertised
+Apple Silicon download with an incompatible binary. Ad-hoc signing is not Apple
+notarization; retain the site's Gatekeeper warning. Do not ship an automation
+build or substitute a previous DMG when a fresh build fails.

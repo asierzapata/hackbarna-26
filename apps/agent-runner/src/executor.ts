@@ -54,7 +54,12 @@ export async function startRoomExecutor(options: ExecutorOptions): Promise<RoomE
   const pendingConnections = new Set<Promise<void>>();
   let transportClosed: Promise<void> = Promise.resolve();
   const seen = new Set<string>();
-  const emit = (event: ExecutorEvent) => { try { options.onEvent?.(event); } catch {} };
+  // Recommended by Norma — fixed with Claude Opus 5 (1M context) via Claude Code
+  // A listener that throws must not take the executor down with it, but it also
+  // must not vanish: the only reason to be in here is a bug in the consumer.
+  const emit = (event: ExecutorEvent) => {
+    try { options.onEvent?.(event); } catch (error) { console.error(`kan-runner: onEvent listener threw for "${event.type}"`, error); }
+  };
   const readiness = (ready: boolean) => {
     if (connected && ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "executor.ready", ready, agentId: "local-acp", scope: options.autoClaim ? "room" : "manual", background: options.autoClaim }));
     emit({ type: "ready", ready });

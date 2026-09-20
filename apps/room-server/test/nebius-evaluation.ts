@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import type { Decision } from "../src/decision-policy";
+import { CLASSIFIER_POLICY_VERSION, type Decision } from "../src/decision-policy";
 import { NebiusDecisionSchema } from "../src/nebius-classifier";
 
 export const scenarios = [
@@ -12,6 +12,16 @@ export const scenarios = [
   { id: "already-answered", text: "Thanks, that answers my question. Nothing else is needed.", history: ["What time is the demo?", "The demo is at 14:00."], shouldTrigger: false },
 ];
 
+const probability = z.number().min(0).max(1);
+const LegacyDecisionSchema = z.object({
+  addressedProbability: probability,
+  worthCapturingProbability: probability,
+  intent: z.enum(["answer", "capture", "update", "lookup", "evidence", "align", "none"]),
+  intentProbability: probability,
+  relatedShapeId: z.string().nullable(),
+  needsExternalDataProbability: probability,
+  captureScore: z.number().min(0).max(4),
+}).strict();
 const RowSchema = z.object({
   suite: z.literal("Kan — Nebius classifier smoke evaluation"),
   evaluation_type: z.literal("application_smoke_test"),
@@ -27,7 +37,7 @@ const RowSchema = z.object({
   actual_trigger: z.boolean(),
   passed: z.boolean(),
   provider_ms: z.number().int().min(0),
-  model_decision: NebiusDecisionSchema,
+  model_decision: z.union([NebiusDecisionSchema, LegacyDecisionSchema]),
   canvas_unchanged: z.boolean(),
   coverage: z.literal("Live Nebius inference and room HTTP/WebSocket policy; no native UI or downstream agent execution"),
 }).strict();
@@ -37,7 +47,7 @@ export function makeEvaluationRow(scenario: typeof scenarios[number], decision: 
   return {
     suite: "Kan — Nebius classifier smoke evaluation",
     evaluation_type: "application_smoke_test",
-    provenance: "Live CLI evaluation with synthetic fixtures; not a Nebius-managed evaluation job",
+    provenance: `Live CLI evaluation with synthetic fixtures; policy ${CLASSIFIER_POLICY_VERSION}; not a Nebius-managed evaluation job`,
     provider: "nebius", model, case_id: scenario.id, input: scenario.text, history: scenario.history ?? [], synthetic_only: true,
     expected_behavior: scenario.shouldTrigger ? "Trigger a contextual check, without authorizing a canvas mutation" : "Stay silent",
     expected_trigger: scenario.shouldTrigger, actual_trigger: actualTrigger, passed: actualTrigger === scenario.shouldTrigger,

@@ -259,7 +259,7 @@ test("context mode: mutation denied, structured draft approval is atomic and opp
   const u2 = await registerUser(ctx.base, "p2");
   const room = await createRoom(u1, ctx.base);
   await api(u2, ctx.base, "/rooms/join", { method: "POST", body: JSON.stringify({ code: room.code }) });
-  ctx.classifier.next = { addressedProbability: 0.1, worthCapturingProbability: 0.95, intent: "capture", intentProbability: 0.8, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 3 };
+  ctx.classifier.next = { triggerProbability: 0.95 };
   await api(u1, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "decision: use sqlite" }) });
   await ctx.server.engine.classifierIdle(room.id);
   const trig = (await api(u1, ctx.base, `/rooms/${room.id}/triggers`)).body.triggers[0];

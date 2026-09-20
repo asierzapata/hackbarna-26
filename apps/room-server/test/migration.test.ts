@@ -19,9 +19,9 @@ test("legacy migrations backfill event payload, asset membership, and assistant 
     const entry = { id: entryId, roomId, seq: 1, at, kind: "message", authorId: userId, text: "latest available legacy payload", anchors: [], attachments: [] };
     db.prepare("INSERT INTO entries(room_id,seq,id,kind,data,at) VALUES (?,?,?,?,?,?)").run(roomId, 1, entryId, "message", JSON.stringify(entry), at);
     db.prepare("INSERT INTO events(room_id,cursor,type,entry_id,at,data) VALUES (?,?,?,?,?,?)").run(roomId, 1, "entry.upsert", entryId, at, null);
-    db.exec("DROP TABLE asset_rooms; DROP TABLE pending_classification; ALTER TABLE events DROP COLUMN data; ALTER TABLE rooms DROP COLUMN assistant_paused; ALTER TABLE rooms DROP COLUMN assistant_eagerness; ALTER TABLE runs DROP COLUMN context; UPDATE meta SET v='1' WHERE k='schema_version'");
+    db.exec("DROP TABLE asset_rooms; DROP TABLE pending_classification; ALTER TABLE events DROP COLUMN data; ALTER TABLE rooms DROP COLUMN assistant_paused; ALTER TABLE rooms DROP COLUMN assistant_eagerness; ALTER TABLE rooms DROP COLUMN assistant_threshold; ALTER TABLE rooms DROP COLUMN assistant_cooldown_ms; ALTER TABLE runs DROP COLUMN context; UPDATE meta SET v='1' WHERE k='schema_version'");
     db.close(); db = openDb(path);
-    assert.equal(db.prepare("SELECT v FROM meta WHERE k='schema_version'").get()!.v, "4");
+    assert.equal(db.prepare("SELECT v FROM meta WHERE k='schema_version'").get()!.v, "5");
     assert.equal(db.prepare("SELECT assistant_eagerness FROM rooms WHERE id=?").get(roomId)!.assistant_eagerness, "eager");
     assert.equal(db.prepare("SELECT room_id FROM asset_rooms WHERE asset_id=?").get(assetId)!.room_id, roomId);
     assert.deepEqual(new Engine({ db }).eventsSince(roomId, 0, 100).events[0].entry, entry);
@@ -31,7 +31,7 @@ test("legacy migrations backfill event payload, asset membership, and assistant 
 test("durable classification interrupted before decision recovers once after authority restart", async (t) => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
-  const ctx = await setup({ classifier: { decide: async () => { await gate; return { addressedProbability: 1, worthCapturingProbability: 0, intent: "answer", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 0 }; } } });
+  const ctx = await setup({ classifier: { decide: async () => { await gate; return { triggerProbability: 1 }; } } });
   t.after(() => ctx.cleanup());
   const user = await registerUser(ctx.base), room = await createRoom(user, ctx.base);
   await api(user, ctx.base, `/rooms/${room.id}/messages`, { method: "POST", body: JSON.stringify({ id: randomUUID(), text: "recover this" }) });

@@ -1,10 +1,11 @@
 /**
- * Test-only scripted conversations, fed line by line into the thread by
- * `ConversationSimulator` so a node-producing agent has something realistic
- * to react to without a live call.
+ * Test-only scripted conversation: a realistic call transcript for the canvas
+ * prompt tests to build context from. The in-app simulator that used to play
+ * it into the thread is gone; the fixture stays because the prompt builder is
+ * still tested against it.
  *
  * The JSON is deliberately data-only (no ids, no seq): those are wire/view
- * concerns assigned at playback time, in `useConversationPlayer`.
+ * concerns, assigned by whoever consumes a line.
  */
 import hackathonConversationRaw from "./fixtures/hackathon-conversation.json";
 

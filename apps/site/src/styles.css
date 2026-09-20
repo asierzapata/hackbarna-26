@@ -1,0 +1,51 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* The same tokens the app uses, restated here rather than imported: the site
+   has no reason to depend on the desktop workspace, and these five colours are
+   the whole system. Keep them in step with apps/desktop/src/styles.css. */
+@theme {
+  --color-paper: #fbfaf8;
+  --color-card: #ffffff;
+  --color-ink: #1a1a1a;
+  --color-ink-muted: #5f5d59;
+  --color-ink-subtle: #6e6b66;
+  --color-line: #e5e3dc;
+  --color-line-subtle: #eceae4;
+  --color-agent: #4b4de8;
+  --color-agent-soft: #eef0fd;
+  --color-human: #b87d27;
+  --color-human-line: #d19a4a;
+  --color-human-soft: #fbf5ed;
+
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, monospace;
+
+  /* Squared, like the app's canvas chrome. */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+}
+
+/* The canvas preview's dot field, matching the density used in the app. */
+.canvas-dots {
+  background-color: var(--color-paper);
+  background-image: radial-gradient(#e2dfd7 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+::selection {
+  background-color: var(--color-agent-soft);
+  color: var(--color-ink);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
 import { makeEvaluationRow, parseEvaluationRows, scenarios } from "./nebius-evaluation";
 import { publishEvaluation } from "./nebius-datalab";
 
 const fixture = () => scenarios.map(scenario => makeEvaluationRow(scenario, {
-  addressedProbability: 0, worthCapturingProbability: scenario.shouldTrigger ? 0.9 : 0,
-  intent: scenario.shouldTrigger ? "capture" : "none", intentProbability: 0.9,
-  relatedShapeId: null, needsExternalDataProbability: 0, captureScore: scenario.shouldTrigger ? 3 : 0,
+  triggerProbability: scenario.shouldTrigger ? 0.9 : 0,
 }, scenario.shouldTrigger, 123, "test-model"));
+
+test("historical live results remain unchanged after the classifier contract migration", () => {
+  const rows = readFileSync(new URL("../../../nebius-classifier-evaluation.jsonl", import.meta.url), "utf8").trim().split(/\r?\n/).map(line => JSON.parse(line));
+  assert.deepEqual(parseEvaluationRows(rows), rows);
+  assert.match(fixture()[0].provenance, /binary-context-v1/);
+});
 
 test("evaluation publishing accepts only the complete synthetic suite and consistent scores", () => {
   const rows = fixture();

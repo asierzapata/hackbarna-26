@@ -121,7 +121,7 @@ test("classifier database failure rolls trigger and decision back while retainin
   const ctx = await setup(); t.after(() => ctx.cleanup());
   const user = await registerUser(ctx.base), room = await createRoom(user, ctx.base);
   ctx.server.engine.db.exec("CREATE TEMP TRIGGER fail_decision BEFORE INSERT ON decisions BEGIN SELECT RAISE(ABORT,'fixture decision failure'); END");
-  ctx.classifier.next = { addressedProbability: 0, worthCapturingProbability: 1, intent: "capture", intentProbability: 1, relatedShapeId: null, needsExternalDataProbability: 0, captureScore: 4 };
+  ctx.classifier.next = { triggerProbability: 1 };
   const id = randomUUID();
   // An inferred cause, not an explicit one: an explicit invocation writes its
   // trigger and decision inside postMessage, so the failure would surface there.
@@ -158,9 +158,8 @@ test("classifier context filters open suggestions before limiting and hashes exp
   assert.equal(ctx.classifier.calls.length, 1);
 });
 
-test("classifier rejects malformed related shape choices and any bad probability", () => {
-  const state = { cause: { id: "id", kind: "message" as const, text: "", authorId: "u" }, recentEntries: [], shapes: [{ id: "shape:a", label: "a" }], openSuggestions: [] };
-  const answers = { addressed: { probability: 0 }, worthCapturing: { probability: 0 }, intent: { choice: "answer", probabilities: { answer: 1 } }, relatedShape: { choice: "shape_0", probabilities: { shape_0: 1 } }, needsExternalData: { probability: 0 }, captureWish: { score: 0 } };
-  for (const choice of ["shape_00", "shape_1", "shape_-1", "shape_0x", "shape_1.5"]) assert.throws(() => mapEvaluationAnswers({ ...answers, relatedShape: { ...answers.relatedShape, choice } }, state));
-  assert.throws(() => mapEvaluationAnswers({ ...answers, intent: { choice: "answer", probabilities: { answer: 1, none: 3 } } }, state));
+test("classifier rejects malformed answers and any bad binary probability", () => {
+  for (const answers of [null, [], true, {}, { shouldTrigger: null }, { shouldTrigger: { probability: "1" } }, { shouldTrigger: { probability: Infinity } }, { shouldTrigger: { probability: -1 } }]) {
+    assert.throws(() => mapEvaluationAnswers(answers));
+  }
 });
