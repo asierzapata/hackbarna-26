@@ -7,6 +7,7 @@ import { ChatPanel, ChatReopenButton } from "../components/ChatPanel";
 import { WorkspacePanels } from "../components/WorkspacePanels";
 import { AgentProvider } from "../components/agent-context";
 import { CanvasProvider } from "../components/canvas-context";
+import { CanvasThumbnailCapture } from "../components/CanvasThumbnailCapture";
 import { getServerRoom } from "@/lib/api-client";
 import { getCanvasEntry, touchCanvas } from "@/lib/canvas-repository";
 import { duplicateOnlineToOffline } from "@/lib/duplicate-canvas";
@@ -106,6 +107,7 @@ function RoomWorkspace({ roomId }: { roomId: string }) {
   return (
     <AgentProvider>
       <CanvasProvider>
+        <CanvasThumbnailCapture canvasId={roomId} />
         <div className="workspace">
           <HeaderBar
             title={roomTitle}

@@ -31,7 +31,7 @@ export function JoinRoomDialog({ open, onClose, onJoined }: JoinRoomDialogProps)
     e.preventDefault();
     const trimmed = code.trim();
     if (!trimmed) {
-      setError("Please enter a room code");
+      setError("Please enter an invite code");
       return;
     }
 
@@ -45,7 +45,7 @@ export function JoinRoomDialog({ open, onClose, onJoined }: JoinRoomDialogProps)
       await markCanvasOnline(room.localCanvasId, room.id, room.code);
       onJoined(room.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to join room");
+      setError(err instanceof Error ? err.message : "Failed to join canvas");
     } finally {
       setIsJoining(false);
     }
@@ -69,13 +69,14 @@ export function JoinRoomDialog({ open, onClose, onJoined }: JoinRoomDialogProps)
         </div>
 
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Enter the room code shared by a collaborator to join and edit together.
+          Enter the invite code a collaborator shared with you to open their canvas
+          and edit together.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-1.5">
             <label htmlFor="join-code-input" className="text-xs font-mono font-medium text-foreground">
-              Room Code
+              Invite code
             </label>
             <Input
               ref={inputRef}

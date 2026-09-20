@@ -10,6 +10,7 @@ import { CanvasProvider, useCanvas } from "../components/canvas-context";
 import { SharingHintBanner } from "../components/SharingHintBanner";
 import { PublishConfirmationDialog } from "../components/PublishConfirmationDialog";
 import { WorkspacePanels } from "../components/WorkspacePanels";
+import { useCanvasThumbnail } from "../components/use-canvas-thumbnail";
 import { Spinner } from "../components/ui/spinner";
 import {
   getCanvasEntry,
@@ -140,6 +141,7 @@ function CanvasPageContent({
   onPublishSuccess: (roomId: string) => void;
 }) {
   const { editor } = useCanvas();
+  useCanvasThumbnail(editor, canvasId);
 
   const handleConfirmPublish = async () => {
     setIsPublishing(true);

@@ -1,21 +1,9 @@
 import * as React from "react";
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
-import {
-  RiAddLine,
-  RiLoginBoxLine,
-  RiHardDriveLine,
-  RiCloudLine,
-  RiFileCopyLine,
-  RiTimeLine,
-  RiWifiOffLine,
-  RiEditLine,
-  RiCheckLine,
-  RiCloseLine,
-} from "@remixicon/react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { RiAddLine, RiLoginBoxLine, RiWifiOffLine } from "@remixicon/react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import {
   Empty,
@@ -25,11 +13,16 @@ import {
   EmptyMedia,
 } from "@/components/ui/empty";
 import { JoinRoomDialog } from "@/components/JoinRoomDialog";
+import { CreateCanvasDialog } from "@/components/CreateCanvasDialog";
+import {
+  CanvasCard,
+  CanvasRenameEditor,
+  type CanvasCardItem,
+} from "@/components/CanvasCard";
 
 import { getInstallationProfile } from "@/lib/installation-profile";
 import {
   listLocalCanvases,
-  createOfflineCanvas,
   renameCanvas,
   type CanvasCatalogEntry,
 } from "@/lib/canvas-repository";
@@ -44,20 +37,10 @@ export const Route = createFileRoute("/")({
   component: CatalogPage,
 });
 
-interface UnifiedCanvasItem {
-  id: string; // canvasId or roomId
-  name: string;
-  mode: "offline" | "online";
-  localCanvasId: string;
-  roomId?: string;
-  roomCode?: string;
-  lastActivity: string;
-  isOwned?: boolean;
-}
+type ModeFilter = "all" | "offline" | "online";
 
-interface RenameTarget {
-  mode: "offline" | "online";
-  id: string;
+interface CatalogItem extends CanvasCardItem {
+  /** The entry the rename and the preview are stored against. */
   localCanvasId: string;
   roomId?: string;
 }
@@ -65,9 +48,7 @@ interface RenameTarget {
 function formatDate(iso: string): string {
   try {
     const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMinutes = Math.floor(diffMs / 60000);
+    const diffMinutes = Math.floor((Date.now() - d.getTime()) / 60000);
     const diffHours = Math.floor(diffMinutes / 60);
     const diffDays = Math.floor(diffHours / 24);
 
@@ -81,22 +62,75 @@ function formatDate(iso: string): string {
   }
 }
 
+/**
+ * The server and the local catalog can both know about the same online canvas.
+ * The server wins on name and code, the local entry contributes the preview,
+ * which only ever exists on the device that rendered it.
+ */
+function mergeCatalog(
+  locals: CanvasCatalogEntry[],
+  rooms: ServerRoomSummary[],
+): CatalogItem[] {
+  const byRoomId = new Map<string, CatalogItem>();
+  const items: CatalogItem[] = [];
+
+  for (const local of locals) {
+    if (local.mode === "online" && local.roomId) {
+      byRoomId.set(local.roomId, {
+        id: local.roomId,
+        name: local.name,
+        mode: "online",
+        lastActivity: local.lastOpenedAt || local.updatedAt,
+        inviteCode: local.roomCode,
+        thumbnail: local.thumbnail,
+        localCanvasId: local.id,
+        roomId: local.roomId,
+      });
+      continue;
+    }
+    items.push({
+      id: local.id,
+      name: local.name,
+      mode: "offline",
+      lastActivity: local.lastOpenedAt || local.updatedAt,
+      thumbnail: local.thumbnail,
+      localCanvasId: local.id,
+    });
+  }
+
+  for (const room of rooms) {
+    const cached = byRoomId.get(room.id);
+    byRoomId.set(room.id, {
+      id: room.id,
+      name: room.name,
+      mode: "online",
+      lastActivity: room.lastOpenedAt || room.updatedAt,
+      inviteCode: room.code,
+      thumbnail: cached?.thumbnail,
+      localCanvasId: cached?.localCanvasId ?? room.localCanvasId,
+      roomId: room.id,
+    });
+  }
+
+  items.push(...byRoomId.values());
+  items.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+  return items;
+}
+
 function CatalogPage() {
   const navigate = useNavigate();
 
   const [loading, setLoading] = React.useState(true);
-  const [userName, setUserName] = React.useState<string>("");
-
-  const [localCanvases, setLocalCanvases] = React.useState<
-    CanvasCatalogEntry[]
-  >([]);
+  const [userName, setUserName] = React.useState("");
+  const [localCanvases, setLocalCanvases] = React.useState<CanvasCatalogEntry[]>([]);
   const [serverRooms, setServerRooms] = React.useState<ServerRoomSummary[]>([]);
   const [isServerReachable, setIsServerReachable] = React.useState(true);
+  const [filter, setFilter] = React.useState<ModeFilter>("all");
 
-  // Dialog states
   const [joinDialogOpen, setJoinDialogOpen] = React.useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
   const [duplicatingId, setDuplicatingId] = React.useState<string | null>(null);
-  const [renameTarget, setRenameTarget] = React.useState<RenameTarget | null>(null);
+  const [renameTargetId, setRenameTargetId] = React.useState<string | null>(null);
   const [renameDraft, setRenameDraft] = React.useState("");
   const [renameError, setRenameError] = React.useState<string | null>(null);
   const [isRenaming, setIsRenaming] = React.useState(false);
@@ -114,7 +148,6 @@ function CatalogPage() {
     }
     setUserName(profile.name);
 
-    // 1. Fetch local catalog immediately
     const locals = await listLocalCanvases();
     setLocalCanvases(locals);
     setLoading(false);
@@ -124,11 +157,9 @@ function CatalogPage() {
     if (!locals.some((canvas) => canvas.mode === "online")) return;
 
     try {
-      const rooms = await listServerRooms();
-      setServerRooms(rooms);
+      setServerRooms(await listServerRooms());
       setIsServerReachable(true);
     } catch {
-      // Disconnected / server not running: retain cached local items
       setIsServerReachable(false);
     }
   }, [navigate]);
@@ -137,15 +168,28 @@ function CatalogPage() {
     void refreshCatalog();
   }, [refreshCatalog]);
 
-  const handleCreateNew = async () => {
-    const newCanvas = await createOfflineCanvas({ name: "Untitled Canvas" });
+  const items = React.useMemo(
+    () => mergeCatalog(localCanvases, serverRooms),
+    [localCanvases, serverRooms],
+  );
+
+  const visibleItems = React.useMemo(
+    () => (filter === "all" ? items : items.filter((item) => item.mode === filter)),
+    [items, filter],
+  );
+
+  const openItem = (item: CatalogItem) => {
+    if (item.mode === "online" && item.roomId) {
+      void navigate({ to: "/room/$roomId", params: { roomId: item.roomId } });
+      return;
+    }
     void navigate({
       to: "/canvas/$canvasId",
-      params: { canvasId: newCanvas.id },
+      params: { canvasId: item.localCanvasId },
     });
   };
 
-  const handleDuplicate = async (item: UnifiedCanvasItem) => {
+  const handleDuplicate = async (item: CatalogItem) => {
     if (!item.roomId) return;
     setDuplicatingId(item.id);
     try {
@@ -153,33 +197,30 @@ function CatalogPage() {
         roomId: item.roomId,
         sourceName: item.name,
       });
-      void navigate({
-        to: "/canvas/$canvasId",
-        params: { canvasId: copy.id },
-      });
+      void navigate({ to: "/canvas/$canvasId", params: { canvasId: copy.id } });
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to duplicate canvas");
       setDuplicatingId(null);
     }
   };
 
-  const beginRename = (target: RenameTarget, name: string) => {
+  const beginRename = (item: CatalogItem) => {
     if (isRenaming) return;
-    setRenameTarget(target);
-    setRenameDraft(name);
+    setRenameTargetId(item.id);
+    setRenameDraft(item.name);
     setRenameError(null);
   };
 
   const cancelRename = () => {
     if (isRenaming) return;
-    setRenameTarget(null);
+    setRenameTargetId(null);
     setRenameDraft("");
     setRenameError(null);
   };
 
   const handleRename = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const target = renameTarget;
+    const target = items.find((item) => item.id === renameTargetId);
     if (!target) return;
 
     const trimmed = renameDraft.trim();
@@ -191,39 +232,31 @@ function CatalogPage() {
     setIsRenaming(true);
     setRenameError(null);
     try {
-      if (target.mode === "offline") {
-        const updated = await renameCanvas(target.localCanvasId, trimmed);
-        setLocalCanvases((canvases) =>
-          canvases.map((canvas) => (canvas.id === updated.id ? updated : canvas)),
-        );
-      } else {
-        const result = await patchServerRoom(target.roomId ?? target.id, {
-          name: trimmed,
-        });
-        const updatedName = result.room.name;
-        const updatedRoomId = target.roomId ?? target.id;
-
+      // Online canvases are named on the server first: that is the copy every
+      // other participant sees. The local entry follows so the card stays
+      // correct while disconnected.
+      let appliedName = trimmed;
+      if (target.mode === "online" && target.roomId) {
+        const result = await patchServerRoom(target.roomId, { name: trimmed });
+        appliedName = result.room.name;
         setServerRooms((rooms) =>
           rooms.map((room) =>
-            room.id === updatedRoomId
-              ? { ...room, name: updatedName, updatedAt: result.room.updatedAt }
+            room.id === target.roomId
+              ? { ...room, name: appliedName, updatedAt: result.room.updatedAt }
               : room,
           ),
         );
-
-        if (localCanvases.some((canvas) => canvas.id === target.localCanvasId)) {
-          const updated = await renameCanvas(target.localCanvasId, updatedName);
-          setLocalCanvases((canvases) =>
-            canvases.map((canvas) =>
-              canvas.id === updated.id ? updated : canvas,
-            ),
-          );
-        }
       }
 
-      setRenameTarget(null);
+      if (localCanvases.some((canvas) => canvas.id === target.localCanvasId)) {
+        const updated = await renameCanvas(target.localCanvasId, appliedName);
+        setLocalCanvases((canvases) =>
+          canvases.map((canvas) => (canvas.id === updated.id ? updated : canvas)),
+        );
+      }
+
+      setRenameTargetId(null);
       setRenameDraft("");
-      setRenameError(null);
     } catch (err) {
       setRenameError(
         err instanceof Error ? err.message : "Failed to rename canvas",
@@ -233,103 +266,6 @@ function CatalogPage() {
     }
   };
 
-  // Split into Offline and Online items
-  const offlineItems: CanvasCatalogEntry[] = React.useMemo(() => {
-    return localCanvases.filter((c) => c.mode === "offline");
-  }, [localCanvases]);
-
-  const onlineItems: UnifiedCanvasItem[] = React.useMemo(() => {
-    const map = new Map<string, UnifiedCanvasItem>();
-
-    // 1. Server rooms
-    for (const r of serverRooms) {
-      map.set(r.id, {
-        id: r.id,
-        name: r.name,
-        mode: "online",
-        localCanvasId: r.localCanvasId,
-        roomId: r.id,
-        roomCode: r.code,
-        lastActivity: r.lastOpenedAt || r.updatedAt,
-      });
-    }
-
-    // 2. Local entries marked online (deduplicate against matching server rooms by localCanvasId or roomId)
-    for (const l of localCanvases) {
-      if (l.mode === "online" && l.roomId) {
-        if (!map.has(l.roomId)) {
-          // If not fetched from server, show cached local representation
-          map.set(l.roomId, {
-            id: l.roomId,
-            name: l.name,
-            mode: "online",
-            localCanvasId: l.id,
-            roomId: l.roomId,
-            roomCode: l.roomCode,
-            lastActivity: l.lastOpenedAt || l.updatedAt,
-          });
-        }
-      }
-    }
-
-    const arr = Array.from(map.values());
-    arr.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
-    return arr;
-  }, [serverRooms, localCanvases]);
-
-  const isEditing = (mode: RenameTarget["mode"], id: string) =>
-    renameTarget?.mode === mode && renameTarget.id === id;
-
-  const renderRenameEditor = () => (
-    <form
-      className="flex min-w-0 flex-1 flex-wrap items-center gap-1"
-      onSubmit={(event) => void handleRename(event)}
-    >
-      <Input
-        value={renameDraft}
-        onChange={(event) => setRenameDraft(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            cancelRename();
-          }
-        }}
-        aria-label="Canvas name"
-        aria-invalid={Boolean(renameError)}
-        autoFocus
-        maxLength={120}
-        disabled={isRenaming}
-        className="h-6 w-0 min-w-0 flex-1 font-heading"
-      />
-      <Button
-        type="submit"
-        size="icon-xs"
-        variant="ghost"
-        aria-label="Save canvas name"
-        title="Save canvas name"
-        disabled={isRenaming}
-      >
-        <RiCheckLine />
-      </Button>
-      <Button
-        type="button"
-        size="icon-xs"
-        variant="ghost"
-        aria-label="Cancel renaming"
-        title="Cancel renaming"
-        onClick={cancelRename}
-        disabled={isRenaming}
-      >
-        <RiCloseLine />
-      </Button>
-      {renameError ? (
-        <p className="basis-full text-[10px] text-destructive" role="alert">
-          {renameError}
-        </p>
-      ) : null}
-    </form>
-  );
-
   if (loading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-background">
@@ -338,14 +274,19 @@ function CatalogPage() {
     );
   }
 
+  const filters: { value: ModeFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "offline", label: "Offline" },
+    { value: "online", label: "Online" },
+  ];
+
   return (
-    <div className="min-h-full w-full bg-background flex flex-col">
-      {/* Top Header */}
+    <div className="flex min-h-full w-full flex-col bg-background">
       <header className="header-bar">
         <div className="header-bar__brand flex items-center gap-2">
           <span>// KAN</span>
           {userName ? (
-            <span className="text-xs font-mono font-normal text-muted-foreground pl-2 border-l border-border">
+            <span className="border-l border-border pl-2 font-mono text-xs font-normal text-muted-foreground">
               {userName}
             </span>
           ) : null}
@@ -358,7 +299,7 @@ function CatalogPage() {
             size="sm"
             variant="outline"
             onClick={() => setJoinDialogOpen(true)}
-            className="text-xs h-7 gap-1.5 font-sans"
+            className="h-7 gap-1.5 font-sans text-xs"
           >
             <RiLoginBoxLine className="size-3.5" />
             Join canvas
@@ -367,8 +308,8 @@ function CatalogPage() {
           <Button
             size="sm"
             variant="default"
-            onClick={handleCreateNew}
-            className="text-xs h-7 gap-1.5 font-sans"
+            onClick={() => setCreateDialogOpen(true)}
+            className="h-7 gap-1.5 font-sans text-xs"
           >
             <RiAddLine className="size-3.5" />
             New canvas
@@ -376,295 +317,148 @@ function CatalogPage() {
         </div>
       </header>
 
-      {/* Catalog Container */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-6 md:p-8 space-y-8">
-        <div className="space-y-1">
-          <h1 className="font-heading text-xl font-bold text-foreground">
-            Canvases
-          </h1>
-          <p className="text-xs text-muted-foreground font-sans">
-            Manage your local offline canvases and collaborative online rooms.
-          </p>
-        </div>
-
-        {/* Offline Section */}
-        <section className="space-y-3" aria-labelledby="offline-heading">
-          <div className="flex items-center justify-between pb-2 border-b border-border">
-            <div className="flex items-center gap-2">
-              <RiHardDriveLine className="size-4 text-muted-foreground" />
-              <h2
-                id="offline-heading"
-                className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground"
-              >
-                Offline Canvases
-              </h2>
-            </div>
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {offlineItems.length}{" "}
-              {offlineItems.length === 1 ? "canvas" : "canvases"}
-            </span>
+      <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 p-6 md:p-8">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="font-heading text-xl font-bold text-foreground">
+              Canvases
+            </h1>
+            <p className="font-sans text-xs text-muted-foreground">
+              Kept on this device, or shared online for others to edit with you.
+            </p>
           </div>
 
-          {offlineItems.length === 0 ? (
-            <Empty className="py-8 border border-border">
-              <EmptyHeader>
-                <EmptyTitle>No offline canvases</EmptyTitle>
-                <EmptyDescription>
-                  Create your first offline canvas to start sketching.
-                </EmptyDescription>
-              </EmptyHeader>
+          <div className="flex items-center gap-2">
+            {!isServerReachable ? (
+              <Badge
+                variant="destructive"
+                className="h-5 gap-1 px-1.5 font-mono text-[10px]"
+              >
+                <RiWifiOffLine className="size-2.5" /> Disconnected
+              </Badge>
+            ) : null}
+            <div
+              role="radiogroup"
+              aria-label="Filter canvases"
+              className="flex items-center border border-border"
+            >
+              {filters.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={filter === option.value}
+                  onClick={() => setFilter(option.value)}
+                  className={
+                    filter === option.value
+                      ? "bg-primary px-2.5 py-1 font-mono text-[11px] uppercase text-primary-foreground"
+                      : "px-2.5 py-1 font-mono text-[11px] uppercase text-muted-foreground hover:bg-muted/60"
+                  }
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {visibleItems.length === 0 ? (
+          <Empty className="border border-border py-12">
+            <EmptyMedia variant="icon">
+              <RiAddLine />
+            </EmptyMedia>
+            <EmptyHeader>
+              <EmptyTitle>
+                {items.length === 0
+                  ? "No canvases yet"
+                  : `No ${filter} canvases`}
+              </EmptyTitle>
+              <EmptyDescription>
+                {items.length === 0
+                  ? "Create one to start sketching, or join a canvas with an invite code."
+                  : "Nothing here yet. Switch the filter, or create one."}
+              </EmptyDescription>
+            </EmptyHeader>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => setCreateDialogOpen(true)}
+                className="gap-1.5 text-xs"
+              >
+                <RiAddLine className="size-3.5" />
+                New canvas
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleCreateNew}
-                className="text-xs gap-1.5"
+                onClick={() => setJoinDialogOpen(true)}
+                className="gap-1.5 text-xs"
               >
-                <RiAddLine className="size-3.5" />
-                Create canvas
+                <RiLoginBoxLine className="size-3.5" />
+                Join canvas
               </Button>
-            </Empty>
-          ) : (
-            <div className="border border-border divide-y divide-border bg-card">
-              {offlineItems.map((canvas) => (
-                <div
-                  key={canvas.id}
-                  className="flex items-center justify-between p-3 sm:px-4 hover:bg-muted/40 transition-colors gap-3"
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    {isEditing("offline", canvas.id) ? (
-                      renderRenameEditor()
-                    ) : (
-                      <Link
-                        to="/canvas/$canvasId"
-                        params={{ canvasId: canvas.id }}
-                        className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
-                      >
-                        {canvas.name}
-                      </Link>
-                    )}
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
-                      <span className="flex items-center gap-1">
-                        <RiTimeLine className="size-3" />
-                        {formatDate(canvas.lastOpenedAt)}
-                      </span>
-                      <span>·</span>
-                      <Badge
-                        variant="secondary"
-                        className="text-[10px] h-4 px-1 font-mono uppercase"
-                      >
-                        Offline
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() =>
-                        beginRename(
-                          {
-                            mode: "offline",
-                            id: canvas.id,
-                            localCanvasId: canvas.id,
-                          },
-                          canvas.name,
-                        )
-                      }
-                      className="text-xs gap-1"
-                      disabled={isRenaming}
-                    >
-                      <RiEditLine className="size-3" />
-                      Rename
-                    </Button>
-
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      onClick={() =>
-                        void navigate({
-                          to: "/canvas/$canvasId",
-                          params: { canvasId: canvas.id },
-                        })
-                      }
-                      className="text-xs gap-1"
-                    >
-                      <RiCloudLine className="size-3" />
-                      Make online
-                    </Button>
-
-                    <Link
-                      to="/canvas/$canvasId"
-                      params={{ canvasId: canvas.id }}
-                      className="inline-flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/80 h-6 px-2 text-xs font-medium"
-                    >
-                      Open
-                    </Link>
-                  </div>
-                </div>
-              ))}
             </div>
-          )}
-        </section>
-
-        {/* Online Section */}
-        <section className="space-y-3" aria-labelledby="online-heading">
-          <div className="flex items-center justify-between pb-2 border-b border-border">
-            <div className="flex items-center gap-2">
-              <RiCloudLine className="size-4 text-primary" />
-              <h2
-                id="online-heading"
-                className="font-heading text-xs font-semibold uppercase tracking-wider text-foreground"
-              >
-                Online Rooms
-              </h2>
-              {!isServerReachable ? (
-                <Badge
-                  variant="destructive"
-                  className="text-[10px] h-4 gap-1 px-1.5 font-mono"
-                >
-                  <RiWifiOffLine className="size-2.5" /> Disconnected
-                </Badge>
-              ) : null}
-            </div>
-            <span className="text-[11px] font-mono text-muted-foreground">
-              {onlineItems.length} {onlineItems.length === 1 ? "room" : "rooms"}
-            </span>
+          </Empty>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleItems.map((item) => (
+              <CanvasCard
+                key={item.id}
+                item={item}
+                formatDate={formatDate}
+                onOpen={() => openItem(item)}
+                onRename={() => beginRename(item)}
+                onDuplicate={
+                  item.mode === "online" ? () => void handleDuplicate(item) : undefined
+                }
+                isDuplicating={duplicatingId === item.id}
+                isRenaming={isRenaming}
+                renameEditor={
+                  renameTargetId === item.id ? (
+                    <CanvasRenameEditor
+                      value={renameDraft}
+                      onChange={setRenameDraft}
+                      onSubmit={(event) => void handleRename(event)}
+                      onCancel={cancelRename}
+                      busy={isRenaming}
+                      error={renameError}
+                    />
+                  ) : undefined
+                }
+              />
+            ))}
           </div>
-
-          {onlineItems.length === 0 ? (
-            <Empty className="py-8 border border-border">
-              <EmptyMedia variant="icon">
-                <RiCloudLine />
-              </EmptyMedia>
-              <EmptyHeader>
-                <EmptyTitle>No online canvases yet</EmptyTitle>
-                <EmptyDescription>
-                  Make any offline canvas online to collaborate live, or join an
-                  existing room with a code.
-                </EmptyDescription>
-              </EmptyHeader>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setJoinDialogOpen(true)}
-                  className="text-xs gap-1.5"
-                >
-                  <RiLoginBoxLine className="size-3.5" />
-                  Join canvas
-                </Button>
-              </div>
-            </Empty>
-          ) : (
-            <div className="border border-border divide-y divide-border bg-card">
-              {onlineItems.map((room) => (
-                <div
-                  key={room.id}
-                  className="flex items-center justify-between p-3 sm:px-4 hover:bg-muted/40 transition-colors gap-3"
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    {isEditing("online", room.id) ? (
-                      renderRenameEditor()
-                    ) : (
-                      <Link
-                        to="/room/$roomId"
-                        params={{ roomId: room.id }}
-                        className="font-heading text-xs font-medium text-foreground hover:underline truncate block"
-                      >
-                        {room.name}
-                      </Link>
-                    )}
-                    <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-mono">
-                      <span className="flex items-center gap-1">
-                        <RiTimeLine className="size-3" />
-                        {formatDate(room.lastActivity)}
-                      </span>
-                      {room.roomCode ? (
-                        <>
-                          <span>·</span>
-                          <span className="uppercase text-primary/90 font-mono">
-                            Code: {room.roomCode}
-                          </span>
-                        </>
-                      ) : null}
-                      <span>·</span>
-                      <Badge
-                        variant="default"
-                        className="text-[10px] h-4 px-1 font-mono uppercase"
-                      >
-                        Online
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() =>
-                        beginRename(
-                          {
-                            mode: "online",
-                            id: room.id,
-                            localCanvasId: room.localCanvasId,
-                            roomId: room.roomId,
-                          },
-                          room.name,
-                        )
-                      }
-                      className="text-xs gap-1"
-                      disabled={isRenaming}
-                    >
-                      <RiEditLine className="size-3" />
-                      Rename
-                    </Button>
-
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => handleDuplicate(room)}
-                      disabled={duplicatingId === room.id}
-                      className="text-xs gap-1"
-                      title="Create independent offline copy"
-                    >
-                      {duplicatingId === room.id ? (
-                        <Spinner className="size-3" />
-                      ) : (
-                        <RiFileCopyLine className="size-3" />
-                      )}
-                      Duplicate offline
-                    </Button>
-
-                    <Link
-                      to="/room/$roomId"
-                      params={{ roomId: room.id }}
-                      className="inline-flex items-center justify-center bg-primary text-primary-foreground hover:bg-primary/80 h-6 px-2 text-xs font-medium"
-                    >
-                      Open
-                    </Link>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        )}
       </main>
 
-      {/* Join Room Dialog */}
+      <CreateCanvasDialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onCreated={(canvas) => {
+          setCreateDialogOpen(false);
+          if (canvas.mode === "online" && canvas.roomId) {
+            void navigate({
+              to: "/room/$roomId",
+              params: { roomId: canvas.roomId },
+            });
+            return;
+          }
+          void navigate({
+            to: "/canvas/$canvasId",
+            params: { canvasId: canvas.localCanvasId },
+          });
+        }}
+      />
+
       <JoinRoomDialog
         open={joinDialogOpen}
         onClose={() => setJoinDialogOpen(false)}
         onJoined={(roomId) => {
           setJoinDialogOpen(false);
-          void navigate({
-            to: "/room/$roomId",
-            params: { roomId },
-          });
+          void navigate({ to: "/room/$roomId", params: { roomId } });
         }}
       />
-
-      {/* Publish Confirmation Dialog */}
     </div>
   );
 }
