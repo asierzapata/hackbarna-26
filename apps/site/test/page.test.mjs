@@ -35,6 +35,16 @@ test("copy leads with the outcome and preserves waitlist and capability disclosu
   assert.doesNotMatch(html, /Not a mockup|Not just a concept|something worth opening|What’s under the hood|What works in the prototype today/);
 });
 
+test("hero award links to the verified HackBarna winner announcement", () => {
+  const badge = html.match(/<a\b[^>]*class="award-badge"[\s\S]*?<\/a>/)?.[0];
+  assert.ok(badge, "Missing hero award badge");
+  assert.match(badge, /href="https:\/\/lnkd\.in\/p\/e8HsQ896"/);
+  assert.match(badge, /1st place/);
+  assert.match(badge, /HackBarna AI Summit 2026/);
+  assert.match(badge, /rel="noopener noreferrer"/);
+  assert.ok(html.indexOf(badge) < html.indexOf('<h1 id="hero-title">'));
+});
+
 test("all page anchors resolve and both waitlist forms remain", () => {
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   for (const [, target] of html.matchAll(/href="#([^"]+)"/g)) assert.ok(ids.has(target), `Missing #${target}`);

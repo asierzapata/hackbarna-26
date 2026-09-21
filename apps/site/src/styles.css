@@ -445,6 +445,27 @@ html {
 
   .prototype-label span { width: 7px; height: 7px; margin-right: 4px; }
 
+  .hero-eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; }
+  .award-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid color-mix(in srgb, var(--color-human-line) 45%, var(--color-paper));
+    border-radius: 12px;
+    background: var(--color-human-soft);
+    color: var(--color-human);
+    font-size: 12px;
+    line-height: 1.5;
+    transition: background-color 180ms ease, border-color 180ms ease;
+  }
+  .award-badge svg { width: 22px; height: 22px; flex-shrink: 0; }
+  .award-badge strong { font-weight: 700; white-space: nowrap; }
+  .award-badge > span:last-child { flex-shrink: 0; font-size: 16px; }
+  .award-badge:hover { color: var(--color-human); border-color: var(--color-human-line); background: color-mix(in srgb, var(--color-human-line) 12%, var(--color-human-soft)); }
+
   .hero h1 {
     margin-top: 26px;
     font-family: var(--font-display);
