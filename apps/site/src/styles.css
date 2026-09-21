@@ -425,6 +425,16 @@ html {
   .button:hover { transform: translateY(-2px); box-shadow: 0 6px 18px color-mix(in srgb, var(--color-agent) 18%, transparent); }
   .button-small { min-height: 44px; padding-inline: 20px; font-size: 14px; }
   .button span { font-size: 20px; line-height: 1; }
+  .arrow-icon {
+    display: inline-block;
+    flex-shrink: 0;
+    vertical-align: middle;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
 
   .hero {
     display: grid;
@@ -461,7 +471,7 @@ html {
     line-height: 1.5;
     transition: background-color 180ms ease, border-color 180ms ease;
   }
-  .award-badge svg { width: 22px; height: 22px; flex-shrink: 0; }
+  .award-badge > svg { width: 22px; height: 22px; flex-shrink: 0; }
   .award-badge strong { font-weight: 700; white-space: nowrap; }
   .award-badge > span:last-child { flex-shrink: 0; font-size: 16px; }
   .award-badge:hover { color: var(--color-human); border-color: var(--color-human-line); background: color-mix(in srgb, var(--color-human-line) 12%, var(--color-human-soft)); }

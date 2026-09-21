@@ -45,6 +45,17 @@ test("hero award links to the verified HackBarna winner announcement", () => {
   assert.ok(html.indexOf(badge) < html.indexOf('<h1 id="hero-title">'));
 });
 
+test("decorative arrows use SVG paths instead of emoji-capable text glyphs", () => {
+  assert.equal(/[\u2190-\u21ff\u2794-\u27bf]/u.test(html), false, "Text arrows can render as emoji on iOS");
+  const arrows = [...html.matchAll(/<svg\b[^>]*class="arrow-icon"[^>]*>[\s\S]*?<\/svg>/g)];
+  assert.equal(arrows.length, 13);
+  for (const [arrow] of arrows) {
+    assert.match(arrow, /aria-hidden="true"/);
+    assert.match(arrow, /focusable="false"/);
+    assert.match(arrow, /<path\b/);
+  }
+});
+
 test("all page anchors resolve and both waitlist forms remain", () => {
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   for (const [, target] of html.matchAll(/href="#([^"]+)"/g)) assert.ok(ids.has(target), `Missing #${target}`);

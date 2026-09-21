@@ -811,3 +811,7 @@ build or substitute a previous DMG when a fresh build fails.
 - Fontsource 5.2 variable packages use `wght.css`, not `latin.css`; unicode ranges
   ensure the browser only downloads the subsets it needs. `robots.txt` is included
   in the deployment allowlist so Vite's HTML fallback is not served to crawlers.
+- Decorative landing-page arrows use inline SVG paths with `currentColor`, not
+  Unicode arrow characters: iOS Safari can render the diagonal arrow as a colored
+  emoji. Keep the icons hidden from assistive technology and outside the tab order.
+  The page regression test guards against reintroducing font-dependent arrows.
