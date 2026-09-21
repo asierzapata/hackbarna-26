@@ -19,6 +19,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@kan/site#test": {
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/api/waitlist.js"],
+      "outputs": []
+    },
     "dev": {
       "cache": false,
       "persistent": true

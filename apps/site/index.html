@@ -3,24 +3,33 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kan — Talk it through. Build it together.</title>
+    <title>Kan — Turn team conversations into plans you can work on</title>
+    <!-- Editorial working canvas: Space Grotesk display + DM Sans body, warm
+         paper and cobalt, asymmetric layouts, real product evidence, restrained
+         entrance and scroll motion with a fully visible reduced-motion fallback. -->
     <meta
       name="description"
-      content="A shared canvas for your team and AI. Keep the conversation, the context, and the next steps side by side. Download the Kan alpha for macOS, Apple Silicon."
+      content="Keep your team’s call, conversation, and AI canvas together. Ask AI to put ideas on the board, then work through the plan. Join the Kan waitlist for early-access news."
     />
     <meta
       property="og:title"
-      content="Kan — Talk it through. Build it together."
+      content="Kan — Turn team conversations into plans you can work on"
     />
     <meta
       property="og:description"
-      content="A shared canvas for your team and AI. One canvas to think together—with AI helping along the way. Available for macOS, Apple Silicon."
+      content="Keep your team’s call, conversation, and AI canvas together. Ask AI to put ideas on the board, then work through the plan. Join the Kan waitlist for early-access news."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://www.getkan.dev/screenshot-kan.png" />
+    <meta property="og:image:alt" content="A real Kan planning session with a video call, AI conversation, and shared canvas." />
+    <meta property="og:url" content="https://www.getkan.dev/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#f7f6f2" />
+    <link rel="canonical" href="https://www.getkan.dev/" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/app-icon.png" />
-    <meta property="og:image" content="/app-icon.png" />
     <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.js"></script>
   </head>
   <body
     class="flex min-h-screen flex-col bg-paper font-sans text-ink antialiased"
@@ -28,14 +37,14 @@
     <a href="#main" class="skip-link">Skip to content</a>
     <header class="site-header sticky top-0 z-50 border-b border-line">
       <div
-        class="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5 sm:px-8"
+        class="header-inner mx-auto flex items-center justify-between gap-4"
       >
         <a
           href="#main"
           aria-label="Kan home"
-          class="flex shrink-0 items-center gap-2 text-lg font-semibold tracking-tight"
+          class="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
         >
-          <svg viewBox="0 0 48 48" class="size-7" aria-hidden="true">
+          <svg viewBox="0 0 48 48" class="size-8" aria-hidden="true">
             <path
               fill="currentColor"
               d="M8 3h7v9l-7 7V3ZM34 3h8L22 23v-2h-4L34 3ZM15 22h7v7h-7v-7ZM23 28l20 17h-9L19 30h4v-2ZM8 37l5-6 2 2v12H8v-8Z"
@@ -44,21 +53,17 @@
             <circle cx="42" cy="24" r="3" class="fill-human-line" />
           </svg>
           Kan
-          <span
-            class="ml-1 rounded-sm bg-paper px-2 py-1 text-[10px] font-medium tracking-wide text-ink-subtle"
-            >ALPHA</span
-          >
         </a>
         <nav
           aria-label="Main navigation"
           class="hidden items-center gap-7 text-sm text-ink-muted md:flex"
         >
-          <a href="#canvas">The canvas</a>
-          <a href="#rooms">Work together</a>
+          <a href="#canvas">Inside Kan</a>
+          <a href="#rooms">How it works</a>
           <a href="#faq">FAQ</a>
         </nav>
-        <a href="#download" class="button button-small"
-          >Get Kan <span class="hidden sm:inline">for Mac</span></a
+        <a href="#waitlist" class="button button-small"
+          >Join the waitlist <span aria-hidden="true">↗</span></a
         >
       </div>
     </header>
@@ -67,50 +72,93 @@
       <!-- HERO -->
       <section
         aria-labelledby="hero-title"
-        class="mx-auto max-w-6xl px-5 pt-12 pb-6 text-center sm:px-8 sm:pt-16 sm:pb-8"
+        class="hero site-width"
       >
-        <p class="eyebrow mb-4 flex items-center justify-center gap-2.5">
-          <span class="size-1.5 rounded-full bg-agent" aria-hidden="true"></span
-          >A shared canvas for your team and AI
-        </p>
-        <h1
-          id="hero-title"
-          class="mx-auto max-w-4xl text-[2.5rem] leading-[1.08] font-semibold tracking-[-0.045em] sm:text-6xl lg:text-7xl"
-        >
-          Talk it through.<br />Build it together.
-        </h1>
-        <p
-          class="mx-auto mt-5 max-w-xl text-base leading-relaxed text-ink-muted sm:text-lg"
-        >
-          Keep the conversation, the context, and the next steps side by side.
-          One canvas to think together, with AI helping along the way.
-        </p>
-        <div
-          class="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-3"
-        >
-          <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
-          <a href="#download" class="button"
-            >Get Kan for macOS <span aria-hidden="true">↗</span></a
-          >
-          <a
-            href="#canvas"
-            class="text-link inline-flex min-h-11 items-center gap-2 text-sm"
-            >See the canvas <span aria-hidden="true">↓</span></a
-          >
+        <div class="hero-heading">
+          <p class="prototype-label">
+            <span aria-hidden="true"></span> VIDEO, CHAT, AND AN AI CANVAS
+          </p>
+          <h1 id="hero-title">
+            Turn team<br />conversations into<br /><span class="hero-accent">plans you can work on.</span>
+          </h1>
+          <div class="hero-caption">
+            <span class="canvas-cross" aria-hidden="true">+</span>
+            <p>Don’t rebuild the conversation<br />from scattered notes.</p>
+            <a href="#canvas" class="explore-link">Explore the product <span aria-hidden="true">↓</span></a>
+          </div>
         </div>
-        <p class="mt-4 text-xs leading-relaxed text-ink-subtle">
-          Apple Silicon · Alpha · Connect your own Devin or OpenAI Codex account
-        </p>
+        <div class="hero-conversion">
+          <p class="hero-description">
+            Keep your team’s call, conversation, and canvas together. Ask AI to
+            put ideas on the board, then work through the plan without switching tools.
+          </p>
+          <p class="signup-heading">Get updates on Kan early access.</p>
+        <form
+          class="waitlist-form hero-form"
+          data-waitlist-form
+          aria-label="Join the Kan waitlist"
+          action="/api/waitlist"
+          method="post"
+        >
+          <label for="hero-email" class="sr-only">Email address</label>
+          <div class="signup-controls">
+            <input
+              id="hero-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="Your email address"
+              required
+              maxlength="254"
+              aria-describedby="hero-consent hero-status"
+            />
+            <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
+            <button type="submit" class="button">
+              Join the waitlist <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+          <div class="form-trap" aria-hidden="true">
+            <label
+              >Website<input name="website" tabindex="-1" autocomplete="off"
+            /></label>
+          </div>
+          <p id="hero-consent" class="signup-note">
+            By joining, you agree to receive Kan early-access news. No
+            spam.
+            <a href="#privacy" class="text-link">Email privacy</a>
+          </p>
+          <p
+            id="hero-status"
+            class="form-status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          ></p>
+          <noscript
+            ><p class="signup-note">
+              Please enable JavaScript to join the waitlist.
+            </p></noscript
+          >
+        </form>
+          <p class="availability"><span aria-hidden="true"></span>In development for Apple Silicon Macs.</p>
+        </div>
       </section>
 
       <!-- CANVAS PREVIEW -->
       <section
         id="canvas"
         aria-labelledby="canvas-title"
-        class="mx-auto max-w-6xl px-5 sm:px-8"
+        class="canvas-showcase site-width"
       >
-        <h2 id="canvas-title" class="sr-only">See Kan in action</h2>
-        <figure>
+        <h2 id="canvas-title" class="sr-only">
+          Your call, conversation, and shared canvas in one place
+        </h2>
+        <figure class="product-stage canvas-dots">
+          <div class="stage-heading">
+            <span class="flex items-center gap-2"
+              ><span class="status-dot" aria-hidden="true"></span>PROTOTYPE SESSION</span
+            >
+          </div>
           <!-- What the human put down -->
           <!-- What the agent is doing about it -->
           <!-- What it wants a human to decide -->
@@ -118,139 +166,220 @@
             href="/screenshot-kan.png"
             target="_blank"
             rel="noopener"
-            class="block rounded-xl"
-            aria-label="View the Kan screenshot at full size (opens in a new tab)"
+            class="hero-product-link"
+            aria-label="View the Kan planning session with video and chat at full size (opens in a new tab)"
           >
             <img
               src="/screenshot-kan.png"
-              alt="Kan planning a hackathon with a shared canvas, proposed dates in a calendar, a table of Barcelona venues, video, and an AI conversation alongside the work."
+              alt="Kan’s working prototype: people visible in the video call, an open conversation asking AI for venues, and a calendar and venue shortlist on the shared canvas."
               width="3104"
               height="2024"
               fetchpriority="high"
-              class="block h-auto w-full"
             />
           </a>
-          <figcaption
-            class="mt-4 text-center text-sm leading-relaxed text-ink-muted"
+          <figcaption class="stage-caption">
+            <span>A hackathon planning session in Kan: the call, proposed dates, and a venue shortlist in one workspace.</span
+            ><a
+              href="/screenshot-kan.png"
+              target="_blank"
+              rel="noopener"
+              class="text-link"
+              >Open the full-size screenshot
+              <span aria-hidden="true">↗</span></a
+            >
+          </figcaption>
+        </figure>
+        <nav aria-label="Explore the product" class="product-principles">
+          <a href="#rooms"><span>01</span>Talk in the same workspace</a
+          ><a href="#agents"><span>02</span>Ask AI to add to the plan</a
+          ><a href="#canvas-tools"
+            ><span>03</span>Work with what’s on the board</a
           >
-            A real planning session in Kan.
-            <span class="font-medium text-ink"
-              >The conversation and the work, side by side.</span
-            >
-            <span class="mt-1 block text-xs text-ink-subtle"
-              >Select the screenshot to see it full size.</span
-            >
+        </nav>
+      </section>
+
+      <section id="prototype-proof" class="proof-strip site-width" aria-labelledby="proof-title">
+        <div>
+          <p class="eyebrow">LESS PIECING IT BACK TOGETHER</p>
+          <h2 id="proof-title">The conversation moves forward.<br />The plan should too.</h2>
+        </div>
+        <p>The call ends. The notes live in chat. Someone still has to pull the plan together. Kan brings the conversation and the canvas into the same workspace.</p>
+        <a href="#rooms" class="proof-link">See how it works <span aria-hidden="true">↗</span></a>
+      </section>
+
+      <!-- HOW IT WORKS -->
+      <!-- ROOMS -->
+      <section id="rooms" aria-labelledby="rooms-title" class="product-section">
+        <div class="product-copy">
+          <p class="product-step"><span>01</span> THE TEAM WORKSPACE</p>
+          <h2 id="rooms-title" class="section-title">
+            Keep the call<br />on the canvas.
+          </h2>
+          <p class="product-description">
+            Talk through the plan with your team while keeping the people,
+            conversation, and board in view.
+          </p>
+          <ul class="product-details">
+            <li>
+              <strong>Keep everyone looking at the same thing.</strong> Discuss
+              ideas beside the canvas.
+            </li>
+            <li>
+              <strong>Keep the context.</strong> Return to chat and saved call
+              transcripts alongside the plan.
+            </li>
+          </ul>
+        </div>
+        <figure class="product-evidence">
+          <a
+            href="/screenshot-kan.png"
+            target="_blank"
+            rel="noopener"
+            class="room-scene"
+            aria-label="Open the complete planning-session screenshot (opens in a new tab)"
+          >
+            <img
+              src="/screenshot-kan.png"
+              alt="A closer view of Kan’s canvas with people in the video tile above a calendar and a venue comparison table."
+              width="3104"
+              height="2024"
+              loading="lazy"
+            />
+          </a>
+          <figcaption>
+            Discuss the dates and venue options without leaving the call.
           </figcaption>
         </figure>
       </section>
 
-      <!-- HOW IT WORKS -->
       <section
         id="agents"
-        aria-labelledby="workflows-title"
-        class="mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20"
+        aria-labelledby="agents-title"
+        class="product-section product-section-reverse"
       >
-        <div class="mx-auto max-w-2xl text-center">
-          <p class="eyebrow mb-3">From talking to making</p>
-          <h2 id="workflows-title" class="section-title">
-            Good conversations deserve<br class="hidden sm:block" />
-            somewhere to go.
+        <div class="product-copy">
+          <p class="product-step"><span>02</span> AI THAT WORKS ON THE BOARD</p>
+          <h2 id="agents-title" class="section-title">
+            Ask in the thread.<br />Get it on the board.
           </h2>
-          <p class="mx-auto mt-4 max-w-xl text-base leading-relaxed text-ink-muted">
-            A question becomes a sketch. A discussion becomes a direction.
-            Keep the thinking and the work in the same place.
+          <p class="product-description">
+            Ask for a shortlist, a diagram, or a first draft. Your connected AI
+            adds content to the canvas, where you can review and refine it.
           </p>
+          <ul class="product-details">
+            <li>
+              <strong>Keep requests beside results.</strong> See what you
+              asked for and what was added.
+            </li>
+            <li>
+              <strong>Connect your AI provider.</strong> Use Devin or OpenAI
+              Codex with a supported account.
+            </li>
+          </ul>
         </div>
-        <ol class="mt-12 grid gap-8 md:grid-cols-3 md:gap-10">
-          <li class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent" aria-hidden="true">01</span>
-            <h3 class="mt-4 text-xl font-semibold tracking-tight">Bring the context.</h3>
-            <p class="mt-3 text-sm leading-relaxed text-ink-muted">
-              Start with a few notes, a rough brief, or a question worth
-              exploring. Put it on the canvas so there’s something to build on.
-            </p>
-          </li>
-          <li class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent" aria-hidden="true">02</span>
-            <h3 class="mt-4 text-xl font-semibold tracking-tight">Think together.</h3>
-            <p class="mt-3 text-sm leading-relaxed text-ink-muted">
-              Talk through the possibilities on a shared board. Point to the
-              same details, compare perspectives, and ask Kan for a hand.
-            </p>
-          </li>
-          <li class="border-t border-line pt-5">
-            <span class="font-mono text-xs text-agent" aria-hidden="true">03</span>
-            <h3 class="mt-4 text-xl font-semibold tracking-tight">Shape the next step.</h3>
-            <p class="mt-3 text-sm leading-relaxed text-ink-muted">
-              Give the useful ideas a shape: a diagram, a table, a plan.
-              Move things around and keep refining, even after the conversation ends.
-            </p>
-          </li>
-        </ol>
+        <figure class="product-evidence">
+          <a
+            href="/screenshot-kan.png"
+            target="_blank"
+            rel="noopener"
+            class="conversation-image"
+            aria-label="Open the complete screenshot of the AI conversation (opens in a new tab)"
+          >
+            <img
+              src="/screenshot-kan.png"
+              alt="A participant asks Kan for coworking venues near Barcelona beach. The Devin agent replies that it added a shortlist to the canvas, with details still to verify."
+              width="3104"
+              height="2024"
+              loading="lazy"
+            />
+          </a>
+          <figcaption>
+            A request in the conversation becomes a table on the canvas.
+          </figcaption>
+        </figure>
       </section>
 
-      <!-- ROOMS -->
       <section
-        id="rooms"
-        aria-labelledby="rooms-title"
-        class="border-y border-line bg-card"
+        id="canvas-tools"
+        aria-labelledby="tools-title"
+        class="product-section"
       >
-        <div
-          class="mx-auto grid max-w-6xl items-center gap-10 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-2 lg:gap-20"
-        >
-          <div>
-            <p class="eyebrow mb-3">A place to think together</p>
-            <h2 id="rooms-title" class="section-title">
-              Same room.<br />Same picture.
-            </h2>
-            <p class="mt-4 max-w-lg text-base leading-relaxed text-ink-muted">
-              Less explaining where to look. More figuring things out.
-              Bring your team onto one canvas, with the conversation right beside it.
-            </p>
-            <div class="mt-8 flex flex-col gap-6">
-              <div>
-                <h3 class="text-base font-semibold">See what they mean.</h3>
-                <p class="mt-2 text-sm leading-relaxed text-ink-muted">
-                  See changes as they happen. Follow a teammate’s view as they
-                  walk you through an idea, then explore it together.
-                </p>
-              </div>
-              <div>
-                <h3 class="text-base font-semibold">Keep the thread.</h3>
-                <p class="mt-2 text-sm leading-relaxed text-ink-muted">
-                  Talk over video without leaving the board. Live transcription
-                  keeps the words in view, and final transcripts stay in the room’s conversation.
-                </p>
-              </div>
-              <div>
-                <h3 class="text-base font-semibold">Pick it up again.</h3>
-                <p class="mt-2 text-sm leading-relaxed text-ink-muted">
-                  The call ends. The canvas doesn’t. Come back to the ideas,
-                  questions, and work you left together.
-                </p>
-              </div>
-            </div>
-            <a
-              href="#room-details"
-              class="text-link mt-6 inline-flex min-h-11 items-center text-sm"
-              >Room setup and alpha limitations
-              <span class="ml-2" aria-hidden="true">↓</span></a
-            >
-          </div>
-          <figure class="mx-auto w-full max-w-md lg:max-w-none">
-            <div class="room-detail rounded-xl border border-line bg-paper shadow-window">
-              <img
-                src="/screenshot-kan.png"
-                alt="Detail of a Kan conversation: a teammate asks for hackathon venues, and the AI adds a shortlist to the shared canvas."
-                width="3104"
-                height="2024"
-                loading="lazy"
-              />
-            </div>
-            <figcaption class="mt-4 text-center text-xs leading-relaxed text-ink-subtle">
-              From the planning session above. A conversation that moves the work forward.
-            </figcaption>
-          </figure>
+        <div class="product-copy">
+          <p class="product-step"><span>03</span> CONTENT YOU CAN WORK WITH</p>
+          <h2 id="tools-title" class="section-title">
+            Compare the options.<br />Find the next step.
+          </h2>
+          <p class="product-description">
+            Sort a shortlist. Explore a budget. Put the options beside your
+            notes and dates so you can work through the trade-offs.
+          </p>
+          <ul class="product-details">
+            <li>
+              <strong>Compare side by side.</strong> Sort table columns and show
+              or hide chart series.
+            </li>
+            <li>
+              <strong>Look closer, or step back.</strong> Open a timeline event,
+              move around the board, and keep the whole plan in view.
+            </li>
+          </ul>
+          <a
+            href="/canvas-detail.webp"
+            target="_blank"
+            rel="noopener"
+            class="text-link inline-flex min-h-11 items-center text-sm"
+            >See the full-size screenshot
+            <span class="ml-2" aria-hidden="true">↗</span></a
+          >
+          <p class="product-note">
+            Shown on a solo canvas with sample data. The full rich-content
+            toolset isn’t in shared rooms yet.
+          </p>
+        </div>
+        <figure class="product-evidence">
+          <a
+            href="/canvas-detail.webp"
+            target="_blank"
+            rel="noopener"
+            class="canvas-detail-image"
+            aria-label="View the table and chart screenshot at full size (opens in a new tab)"
+          >
+            <img
+              src="/canvas-detail.webp"
+              alt="Kan’s interactive venue comparison table above a budget chart, showing sample spaces, capacities, prices, and estimated costs."
+              width="1100"
+              height="1050"
+              loading="lazy"
+            />
+          </a>
+          <figcaption>
+            Actual canvas controls. Sample venues and budget—not live pricing.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section id="use-cases" class="use-cases site-width" aria-labelledby="use-cases-title">
+        <div class="use-cases-heading">
+          <p class="eyebrow">ONE CANVAS. MANY STARTING POINTS.</p>
+          <h2 id="use-cases-title" class="section-title">Start with something<br />you need to figure out.</h2>
+          <p class="product-description">An event to plan, a project to shape, or a decision to make.</p>
+        </div>
+        <div class="use-case-list">
+          <a href="#rooms" class="use-case">
+            <span class="use-case-number">01 / PLAN TOGETHER</span>
+            <div><h3>Plan an event</h3><p>Put venue options, proposed dates, and a budget on the same canvas.</p></div>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a href="#agents" class="use-case">
+            <span class="use-case-number">02 / EXPLORE A QUESTION</span>
+            <div><h3>Shape a project</h3><p>Talk through the brief. Ask AI for a first draft or diagram, then refine it on the board.</p></div>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a href="#canvas-tools" class="use-case">
+            <span class="use-case-number">03 / MAKE A DECISION</span>
+            <div><h3>Compare your options</h3><p>Keep the shortlist beside the criteria, notes, and trade-offs behind your decision.</p></div>
+            <span aria-hidden="true">↗</span>
+          </a>
         </div>
       </section>
 
@@ -258,215 +387,162 @@
       <section
         id="faq"
         aria-labelledby="faq-title"
-        class="mx-auto grid max-w-6xl gap-8 px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.65fr_1.35fr] lg:gap-16"
+        class="mx-auto grid max-w-6xl gap-8 border-t border-line px-5 py-16 sm:px-8 sm:py-20 lg:grid-cols-[0.65fr_1.35fr] lg:gap-16"
       >
         <div>
-          <p class="eyebrow mb-3">The practical part</p>
-          <h2 id="faq-title" class="section-title">A few things before you start.</h2>
+          <p class="eyebrow mb-3">EARLY, AND OPEN ABOUT IT</p>
+          <h2 id="faq-title" class="section-title">
+            A few things<br />worth knowing.
+          </h2>
           <p class="mt-4 max-w-sm text-sm leading-relaxed text-ink-muted">
-            What you’ll need, how rooms work, and what to expect from an early version of Kan.
+            Access, supported Macs, AI accounts, and privacy.
           </p>
         </div>
         <div class="min-w-0 self-start border-t border-line">
           <details class="faq-item">
-            <summary>Will Kan work on my Mac?</summary>
+            <summary>Can I try Kan yet?</summary>
             <div class="faq-answer">
               <p>
-                The current download is for Macs with Apple Silicon (M1 or
-                later). There isn’t an Intel Mac, Windows, Linux, or mobile
-                download here. If you’re reading on your phone, open this page
-                on your Mac to install Kan.
+                Not yet through the public waitlist. Join for early-access news
+                and product updates. We haven’t announced an access date.
               </p>
             </div>
           </details>
           <details class="faq-item">
-            <summary>What do I need to connect my AI?</summary>
+            <summary>Which platforms are you building for?</summary>
             <div class="faq-answer">
               <p>
-                Kan supports Devin and OpenAI Codex, one connected provider at a
-                time. Sign in with a supported subscription or use an API key.
-                Your provider’s plan, limits, and usage charges apply; API usage
-                is billed separately from a ChatGPT subscription.
-              </p>
-              <p>
-                You’ll need the Devin CLI installed for Devin, or Node.js with
-                npm/npx for the Codex adapter. An account alone isn’t enough to
-                run the integration.
-              </p>
-            </div>
-          </details>
-          <details id="room-details" class="faq-item">
-            <summary>What does my team need to use rooms?</summary>
-            <div class="faq-answer">
-              <p>
-                Rooms need an internet connection and a configured room server.
-                Video and transcription also need the server’s Vonage integration.
-              </p>
-              <p>
-                Shared rooms are an alpha feature. The richest AI canvas tools
-                currently work on solo boards; not every solo feature or rich
-                content type is available in rooms yet. Start with a solo canvas
-                to explore the broader toolset.
+                The current desktop prototype runs on macOS with Apple Silicon.
+                We’re starting there. Windows, Linux, and mobile availability
+                haven’t been announced.
               </p>
             </div>
           </details>
           <details class="faq-item">
-            <summary>What works offline? What leaves my Mac?</summary>
+            <summary>Do I bring my own AI account?</summary>
             <div class="faq-answer">
               <p>
-                Solo canvases are stored locally and remain available offline.
-                AI features require internet access and send prompts and
-                relevant canvas context to your chosen provider.
-              </p>
-              <p>
-                Shared rooms use a server. Video and transcription use Vonage.
-                Network-backed content, such as map tiles and remote images,
-                also needs a connection. Local storage does not mean that AI
-                processing happens on your Mac.
+                Yes. The prototype connects to Devin or OpenAI Codex, one
+                provider at a time, using a supported subscription or API key.
+                The provider’s limits and usage charges apply. The current setup
+                also needs the Devin CLI, or Node.js with npm/npx for Codex.
               </p>
             </div>
           </details>
           <details class="faq-item">
-            <summary>How are my API keys handled?</summary>
+            <summary>Does everything stay on my Mac?</summary>
             <div class="faq-answer">
               <p>
-                If you connect with an API key, Kan saves it in macOS Keychain
-                so it can reconnect. The Codex adapter also caches its
-                authentication in its own configuration. Signing out removes
-                Kan’s saved key and the adapter’s API-key cache.
-              </p>
-              <p>
-                Subscription sign-in uses the provider’s login flow. Signing out
-                of Kan disconnects the agent; it does not sign you out of the
-                provider in your terminal.
+                Solo canvases are stored locally. AI requests send your prompt
+                and relevant context to your chosen provider. Shared rooms use a
+                server; video and transcription use Vonage. Local canvas storage
+                doesn’t mean local AI processing.
               </p>
             </div>
           </details>
-          <details class="faq-item">
-            <summary>What should I expect from the alpha?</summary>
+          <details id="privacy" class="faq-item">
+            <summary>What happens to my waitlist email?</summary>
             <div class="faq-answer">
               <p>
-                An early version for exploring a different way to work with AI.
-                Expect bugs and changes, and keep a separate copy of anything
-                important. Check AI-generated content before relying on it.
+                We store your email, signup time, and consent in a private
+                Google Sheet. We use the list for Kan early-access news and
+                product updates, not unrelated marketing. We don’t sell your
+                email address.
               </p>
               <p>
-                Found a problem or have an idea?
-                <a
-                  class="text-link"
-                  href="https://github.com/asierzapata/kan/issues"
-                  >Share feedback on GitHub</a
-                >. Issues are public, so leave out private canvas content,
-                credentials, and diagnostic reports containing personal
-                information.
+                This form doesn’t send automated emails or create an account.
+                If you receive an update and no longer want to hear from us,
+                reply and ask to be removed. No canvas content or AI account
+                is needed to join.
               </p>
             </div>
           </details>
-          <details id="built" class="faq-item">
-            <summary>What’s under the hood?</summary>
-            <div class="faq-answer">
-              <p>
-                Kan uses Tauri for the desktop app, tldraw for the canvas, and
-                the Agent Client Protocol to connect to AI agents. Canvas
-                changes go through a scoped set of tools rather than giving the
-                agent control of your desktop.
-              </p>
-              <p>
-                <a class="text-link" href="https://github.com/asierzapata/kan"
-                  >Explore the source on GitHub</a
-                >.
-              </p>
+        </div>
+      </section>
+
+      <section
+        id="waitlist"
+        aria-labelledby="waitlist-title"
+        class="final-cta"
+      >
+        <div class="final-cta-inner site-width">
+          <div class="final-copy">
+            <p class="eyebrow">FOR YOUR NEXT PLANNING SESSION</p>
+            <h2 id="waitlist-title">Give the conversation<br /><span>somewhere to go.</span></h2>
+            <p>Bring your team, your ideas, and a little AI help into one workspace. Join the waitlist for early-access news.</p>
+            <a href="#canvas" class="final-back-link">Take another look <span aria-hidden="true">↑</span></a>
+          </div>
+          <div class="final-signup">
+          <p class="signup-heading">Get updates on Kan early access.</p>
+          <form
+            class="waitlist-form"
+            data-waitlist-form
+            aria-label="Get Kan early-access updates"
+            action="/api/waitlist"
+            method="post"
+          >
+            <label for="waitlist-email" class="sr-only">Email address</label>
+            <div class="signup-controls">
+              <input
+                id="waitlist-email"
+                name="email"
+                type="email"
+                autocomplete="email"
+                placeholder="Your email address"
+                required
+                maxlength="254"
+                aria-describedby="waitlist-consent waitlist-status"
+              /><button type="submit" class="button">
+                Join the waitlist <span aria-hidden="true">↗</span>
+              </button>
             </div>
-          </details>
+            <div class="form-trap" aria-hidden="true">
+              <label
+                >Website<input name="website" tabindex="-1" autocomplete="off"
+              /></label>
+            </div>
+            <p id="waitlist-consent" class="signup-note">
+              By joining, you agree to receive Kan early-access news. No
+              spam.
+              <a href="#privacy" class="text-link">Email privacy</a>
+            </p>
+            <p
+              id="waitlist-status"
+              class="form-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            ></p>
+            <noscript
+              ><p class="signup-note">
+                Please enable JavaScript to join the waitlist.
+              </p></noscript
+            >
+          </form>
+          <p class="availability">No account needed to join.</p>
+          </div>
         </div>
       </section>
 
       <!-- DOWNLOAD -->
-      <section
-        id="download"
-        aria-labelledby="download-title"
-        class="border-t border-line bg-agent-soft"
-      >
-        <div
-          class="mx-auto max-w-6xl px-5 py-16 sm:px-8 sm:py-20"
+      <template id="alpha-download">
+        <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
+        <a href="/kan-alpha.dmg" download="kan-alpha.dmg"
+          >Download Kan for macOS</a
         >
-          <div class="mx-auto max-w-2xl text-center">
-            <img
-              src="/app-icon.png"
-              alt=""
-              width="64"
-              height="64"
-              loading="lazy"
-              class="mx-auto mb-5 size-16"
-            />
-            <h2 id="download-title" class="section-title">
-              Make room for your next idea.
-            </h2>
-            <p class="mx-auto mt-4 max-w-lg text-base leading-relaxed text-ink-muted">
-              Start with something you want to figure out.
-              Give it a canvas, bring your perspective, and see where it takes you.
-            </p>
-            <p class="mt-5 text-sm leading-relaxed text-ink-muted">
-              The alpha is not Apple-notarized. Read the installation steps
-              before opening it.
-            </p>
-            <div class="mt-6">
-              <!-- Drop the signed .dmg into apps/site/public/, or point this at a release URL. -->
-              <a href="/kan-alpha.dmg" download="kan-alpha.dmg" class="button"
-                >Download Kan for macOS <span aria-hidden="true">↓</span></a
-              >
-            </div>
-            <!-- TODO: state the minimum macOS version once you cut a build. -->
-            <p class="mt-3 text-xs leading-relaxed text-ink-subtle">
-              Apple Silicon (M1 or later) · DMG · Alpha
-            </p>
-          </div>
-          <div class="mt-12 border-t border-agent/15 pt-8">
-            <h3 class="text-center text-base font-semibold">
-              Your first canvas, in three steps.
-            </h3>
-            <ol
-              class="mt-7 grid list-decimal gap-7 pl-5 text-sm marker:text-agent md:grid-cols-3 md:gap-10"
-            >
-              <li class="pl-1">
-                <span class="font-medium">Install Kan on your Mac.</span>
-                <p class="mt-1 leading-relaxed text-ink-muted">
-                  Open the DMG and drag Kan Alpha into Applications.
-                </p>
-              </li>
-              <li class="pl-1">
-                <span class="font-medium"
-                  >Review the macOS security prompt.</span
-                >
-                <p class="mt-1 leading-relaxed text-ink-muted">
-                  This alpha is not signed with an Apple Developer ID or
-                  notarized. After trying to open it, go to System Settings →
-                  Privacy &amp; Security. Only if you trust this download,
-                  choose Open Anyway and confirm.
-                </p>
-                <a
-                  class="text-link mt-2 inline-block leading-relaxed"
-                  href="https://support.apple.com/en-us/102445"
-                  >Read Apple’s guidance on opening downloaded apps</a
-                >
-              </li>
-              <li class="pl-1">
-                <span class="font-medium"
-                  >Connect your AI and start a solo canvas.</span
-                >
-                <p class="mt-1 leading-relaxed text-ink-muted">
-                  Install the Devin CLI or Node.js with npm/npx for Codex, then
-                  sign in through Kan. Add your context and ask for a first
-                  draft.
-                </p>
-              </li>
-            </ol>
-          </div>
-        </div>
-      </section>
+        <!-- TODO: state the minimum macOS version once you cut a build. -->
+        <p>
+          Apple Silicon (M1 or later). This alpha is ad-hoc signed, not
+          Apple-notarized.
+        </p>
+      </template>
     </main>
 
-    <footer class="border-t border-line px-5 py-8 sm:px-8">
+    <footer class="site-footer border-t border-line px-5 py-8 sm:px-8">
+      <div class="footer-masthead">
+        <a href="#main" aria-label="Kan, back to top" class="footer-wordmark">Kan<span aria-hidden="true">↗</span></a>
+        <p>Your team’s call, conversation,<br />and canvas. Together.</p>
+      </div>
       <div
         class="mx-auto flex max-w-[1088px] flex-col justify-between gap-5 text-sm sm:flex-row sm:items-center"
       >
@@ -479,13 +555,13 @@
           aria-label="Footer navigation"
           class="flex flex-wrap gap-x-6 gap-y-2 text-ink-muted"
         >
-          <a href="#faq" class="inline-flex min-h-11 items-center">FAQ</a>
-          <a
+          <a href="#privacy" class="inline-flex min-h-11 items-center"
+            >Email privacy</a
+          ><a
             href="https://github.com/asierzapata/kan"
             class="inline-flex min-h-11 items-center"
             >GitHub</a
-          >
-          <a
+          ><a
             href="https://github.com/asierzapata/kan/issues"
             class="inline-flex min-h-11 items-center"
             >Feedback</a
@@ -493,20 +569,5 @@
         </nav>
       </div>
     </footer>
-    <script type="module">
-      function revealLinkedDetails() {
-        const target = document.getElementById(location.hash.slice(1));
-        if (!(target instanceof HTMLDetailsElement)) return;
-        target.open = true;
-        target.querySelector("summary")?.focus({ preventScroll: true });
-        target.scrollIntoView({ block: "start" });
-      }
-      window.addEventListener("hashchange", revealLinkedDetails);
-      document.addEventListener("click", (event) => {
-        const link = event.target instanceof Element ? event.target.closest('a[href^="#"]') : null;
-        if (link?.getAttribute("href") === location.hash) revealLinkedDetails();
-      });
-      revealLinkedDetails();
-    </script>
   </body>
 </html>

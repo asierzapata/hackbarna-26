@@ -659,7 +659,8 @@ credentials, lease tokens or ticket URLs. The runner is not an OS sandbox.
 
 The landing site serves the current macOS Apple Silicon alpha from
 **`apps/site/public/kan-alpha.dmg`**, at the stable URL **`/kan-alpha.dmg`**.
-Replace that file for each release; both site download buttons use this path.
+Replace that file for each release. The site is currently waitlist-first: public
+download links are hidden, but this direct URL remains available.
 
 From the repo root, on an Apple Silicon Mac:
 
@@ -716,4 +717,97 @@ build or substitute a previous DMG when a fresh build fails.
   tokens in `apps/site/src/styles.css` mirror the app's system fonts, neutral
   surfaces, blue accents and radii. Keep them aligned without importing desktop
   CSS. Verify the production preview at desktop and mobile widths, including
-  keyboard FAQ toggles, anchor navigation and the unchanged DMG download.
+  keyboard FAQ toggles, anchor navigation and the unchanged direct DMG download.
+
+## Landing-site waitlist and media
+
+- The public page is waitlist-first; the alpha link is retained in an inert HTML
+  template, not rendered or focusable. Keep `/kan-alpha.dmg` available unless
+  explicitly asked to disable direct downloads.
+- Root `api/waitlist.js` is a Vercel Web-standard function. Set server-only
+  `GOOGLE_SHEETS_WEBHOOK_URL` and `WAITLIST_WEBHOOK_SECRET`; never use `VITE_`.
+  It POSTs to the Apps Script `/exec` URL and follows Google's content redirect
+  with a GET only to `script.googleusercontent.com`, without forwarding the secret.
+  Only JSON `{ "ok": true }` confirms persistence: Google login/error HTML with
+  HTTP 200 must fail. Missing configuration returns 503. Honeypot and same-origin
+  checks are basic filtering, not distributed bot/rate protection.
+  Turbo may warn that these variables are absent from the static build; keep
+  them out of that build. Vercel injects them separately into the API runtime.
+- Google setup: create a private Sheet, open **Extensions → Apps Script**, paste
+  `apps/site/google-apps-script.gs` into `Code.gs`, save, and run `setupWaitlist`.
+  Authorize it as the owner. It creates a dedicated `Waitlist` tab with Email,
+  Signed up at (UTC), and Consent columns, and stores the spreadsheet ID and a
+  generated secret in **Project Settings → Script properties**. Setup is
+  idempotent; existing rows and a previously generated secret are retained.
+  Deploy as **Web app**, executing as **Me**, accessible to **Anyone** including
+  unauthenticated callers. The Sheet itself stays **Restricted**, not public.
+  Copy the deployment `/exec` URL into `GOOGLE_SHEETS_WEBHOOK_URL` in Vercel and
+  the `WAITLIST_WEBHOOK_SECRET` script property into the matching server-only
+  Vercel variable. Never paste the secret into chat or commit it. If Workspace
+  policy prevents anonymous web apps, ask the owner rather than changing policy.
+  After script edits, update the existing deployment to a new version.
+- The Apps Script authenticates before accessing storage, validates consent,
+  locks the dedupe/append operation, and escapes formula-like email cells. A
+  retry keeps the original row and signup timestamp. It sends no email; removals
+  and future outreach are manual. Do not promise automated unsubscribe links.
+  A real deployed signup and duplicate retry still need verification before launch.
+- Run `npm run test -w @kan/site` for handler checks and `npm run build -w @kan/site`
+  for the static build. The site test task's Turbo inputs include the root API.
+- For browser verification, run `node apps/site/test/server.mjs fixture` on :1434
+  and the site dev/preview server. Vite proxies `/api` with the original Host.
+  The fixture calls the real handler and executes the actual Apps Script in a
+  Node VM with in-memory Google services. It never calls Google or sends mail.
+  `unavailable@example.com`, `limited@example.com`, and `login@example.com`
+  simulate storage failure, lock contention, and an HTML login response.
+  Fixture-only `GET /api/__test/waitlist` exposes a row count, not email addresses.
+  Without `fixture`, the helper verifies unconfigured failures. Live Google
+  authorization and persistence still need separate verification before launch.
+- `scripts/capture-site-media.mjs` captures the actual canvas renderer through a
+  dedicated Chromium debugging endpoint on :9333. Start Chrome with a fresh
+  temporary profile and an about:blank tab. `KAN_MEDIA_ORIGIN` defaults to
+  `http://localhost:1432`; `FFMPEG_BIN` can point at a standalone encoder. Output
+  refuses replacement unless `--replace` is supplied. Never target a user profile.
+  These are sample-data browser captures, not native IPC or live AI coverage.
+  The native capture attempt reported a hidden WKWebView and frozen chart bars;
+  do not use that incomplete capture as evidence or product media.
+- New public assets and root functions must be explicitly included in
+  `.vercelignore`. V1 is screenshot-only: the demo player and video links are
+  removed, with the integrated video deferred. Existing media files remain local;
+  the unused video and poster are excluded from CLI deployment uploads. Verify
+  mobile layout, signup failure/retry behavior, FAQ keyboard controls, and image
+  requests in a production preview.
+- For an integrated live demo, `node scripts/record-product-demo.mjs --brief`
+  prints the scenario; `--check` reads readiness without screenshots or app
+  mutations. `--record --consent --seconds 90 --output /tmp/kan-live-demo.mp4`
+  captures a visible native room with two playing camera feeds, live captions,
+  open chat, and a connected local AI. It never joins calls or sends prompts.
+  Obtain participant/public-use consent and approval for live-service usage first.
+  Output is private, refuses existing files, and must be reviewed before copying
+  into public assets. Capture is picture-only by default; `--microphone N`
+  explicitly records AVFoundation audio device N. Verify the current device list
+  before using an index. `--solo` permits one playing camera for a solo narrated
+  walkthrough, not a multi-person demonstration. The recorder waits for readiness
+  before a three-second countdown. It preserves elapsed time by holding frames
+  between screenshots rather than silently accelerating slow captures.
+  Caption/call/visibility loss stops recording with partial footage.
+  `TAURI_WEBDRIVER_URL` and `FFMPEG_BIN` select the driver and encoder. Run
+  `node --test scripts/record-product-demo.test.mjs` for recorder unit checks;
+  these do not establish that a real session has been recorded. The combined
+  live microphone/image-pipe path stalled during the solo take, leaving an invalid
+  48-byte MP4, and the interrupt handler did not unblock the encoder. Do not use
+  it for another full take until a short end-to-end audio/video test passes;
+  native macOS window recording is the proposed alternative, not yet verified.
+
+## Editorial landing design
+
+- The landing remains static HTML/Tailwind by design, with the existing waitlist
+  handler and screenshot-only media. Its marketing typography now intentionally
+  differs from the desktop: self-hosted Space Grotesk and DM Sans, warm paper,
+  cobalt actions, and a muted green canvas stage. Do not change desktop tokens.
+- Keep prototype evidence and limitations explicit; do not invent testimonials,
+  customer counts, or availability. Both signup forms and the inert alpha template
+  stay intact. Reduced motion disables entrance/scroll animation; content remains
+  visible when JavaScript or IntersectionObserver is unavailable.
+- Fontsource 5.2 variable packages use `wght.css`, not `latin.css`; unicode ranges
+  ensure the browser only downloads the subsets it needs. `robots.txt` is included
+  in the deployment allowlist so Vite's HTML fallback is not served to crawlers.
